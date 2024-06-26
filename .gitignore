@@ -77,7 +77,6 @@ target/checksum.txt
 xcshareddata
 xcuserdata
 dev/src/dev/nocommit/
-dev/serialization_deltas/
 *~
 **/cypress_sample_database.json
 **/cypress_sample_instance_data.json
@@ -114,5 +113,5 @@ modules/drivers/*/.lsp/*
 # airgap
 /resources/airgap/
 
-# swc
-.swc/
+# postgres database stuff
+/db/
