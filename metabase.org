@@ -1,0 +1,2 @@
+* metabase
+ https://docs.github.com/get-started/getting-started-with-git/about-remote-repositories#cloning-with-https-urls for information on
