@@ -50,3 +50,9 @@ If you want to build Metabase without installing Clojure, Java, and Node.js on y
 DOCKER_BUILDKIT=1 docker build --output container-output/ .
 ```
 Make sure that your Docker Daemon is running before executing the command. After running the command, you'll find the Metabase JAR file at `./container-output/app/metabase.jar`.
+* setup postgres
+#+begin_src bash
+  mkdir db
+  cd db
+  initdb -D .
+#+end_src
