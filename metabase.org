@@ -55,5 +55,10 @@ Make sure that your Docker Daemon is running before executing the command. After
   mkdir db
   cd db
   initdb -D .
-  postgres -D .
+
+  # needed to solve postgres user expectations
+  pg_ctl -D . -l logfile -o "--unix_socket_directories='$PWD'" start
 #+end_src
+
+* nix-specific resources
+https://mgdm.net/weblog/postgresql-in-a-nix-shell/
