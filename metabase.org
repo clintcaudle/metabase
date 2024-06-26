@@ -1,2 +1,52 @@
 * metabase
  https://docs.github.com/get-started/getting-started-with-git/about-remote-repositories#cloning-with-https-urls for information on
+
+* build local
+** docker
+#+begin_src bash
+  docker build -f ~/metabase/Dockerfile ~/metabase/. --tag metabase-0 --build-arg VERSION="0.48.8"
+#+end_src
+** dev build
+*** frontend
+#+begin_src bash
+  yarn install
+
+  # build with hot reload
+  # yarn build
+  yarn build-hot
+#+end_src
+
+*** backend
+#+begin_src bash
+  ./bin/build-drivers.sh
+  clojure -M:run
+#+end_src
+
+localhost:3000
+
+*** notes
+I have a local metabase build up and running with hot-reloading. Let me know if you run into any trouble.
+
+See docs/developers-guild/build.md if you haven't.
+
+You'll need specifically JDK 11, not the latest JDK. https://adoptium.net/installation/linux/
+Clojure install tripped me up because the debian package was not compatible out of the box. Us this link like they suggest: https://clojure.org/guides/install_clojure
+
+** production build
+See docs/developers-guild/build.md if you haven't.
+
+*** Building the Metabase Uberjar
+
+The entire Metabase application is compiled and assembled into a single .jar file which can run on any modern JVM. There is a script which will execute all steps in the process and output the final artifact for you. You can pass the environment variable MB_EDITION before running the build script to choose the version that you want to build. If you don't provide a value, the default is `oss` which will build the Community Edition.
+
+    ./bin/build.sh
+
+After running the build script simply look in `target/uberjar` for the output .jar file and you are ready to go.
+
+*** Build  a Metabase Uberjar in a containerized environment
+
+If you want to build Metabase without installing Clojure, Java, and Node.js on your host machine, you can build the Uberjar inside a container by running:
+```
+DOCKER_BUILDKIT=1 docker build --output container-output/ .
+```
+Make sure that your Docker Daemon is running before executing the command. After running the command, you'll find the Metabase JAR file at `./container-output/app/metabase.jar`.
