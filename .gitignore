@@ -112,3 +112,6 @@ modules/drivers/*/.lsp/*
 
 # airgap
 /resources/airgap/
+
+# postgres database stuff
+/db/
