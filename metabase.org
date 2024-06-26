@@ -55,4 +55,5 @@ Make sure that your Docker Daemon is running before executing the command. After
   mkdir db
   cd db
   initdb -D .
+  postgres -D .
 #+end_src
