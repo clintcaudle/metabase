@@ -65,6 +65,8 @@ Make sure that your Docker Daemon is running before executing the command. After
 #+end_src
 
 #+begin_src bash
+  mkdir .dev_postgres
+  mkdir .dev_postgres/data
   pg_setup
 #+end_src
 
