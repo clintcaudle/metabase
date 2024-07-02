@@ -115,3 +115,5 @@ modules/drivers/*/.lsp/*
 
 # postgres database stuff
 /db/
+/.dev_postgres/
+!/.dev_postgres/data/tmp
