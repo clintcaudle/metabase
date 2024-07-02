@@ -64,5 +64,9 @@ Make sure that your Docker Daemon is running before executing the command. After
   pg_ctl -D ./metabasedb stop
 #+end_src
 
+#+begin_src bash
+  pg_setup
+#+end_src
+
 * nix-specific resources
 https://mgdm.net/weblog/postgresql-in-a-nix-shell/

@@ -10,11 +10,23 @@
     ];
 
     shellHook = ''
-              export MB_DB_TYPE=postgres
-              export MB_DB_DBNAME=metabase
-              export MB_DB_PORT=5432
-              export MB_DB_USER=postgres
-              export MB_DB_PASS=test
-              export MB_DB_HOST=localhost
-    '';
-}
+              export PG=$PWD/.dev_postgres/
+              export PGDATA=$PG/data
+              export PGPORT=5432
+              export PGHOST=localhost
+              export PGUSER=$USER
+              export PGPASSWORD=postgres
+              export PGDATABASE=metabase
+              export DB_URL=postgres://$PGUSER:$PGPASSWORD@$PGHOST:$PGPORT/$PGDATABASE
+              alias pg_start="pg_ctl -D $PGDATA -l $PG/postgres.log start"
+              alias pg_stop="pg_ctl -D $PGDATA stop"
+              pg_setup() {
+                pg_stop;
+                rm -rf $PG;
+                initdb -D $PGDATA &&
+                echo "unix_socket_directories = '$PGDATA'" >> $PGDATA/postgresql.conf &&
+                pg_start &&
+                createdb
+              }
+              '';
+  }
