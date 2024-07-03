@@ -79,5 +79,7 @@ Make sure that your Docker Daemon is running before executing the command. After
 * nix-specific resources
 https://mgdm.net/weblog/postgresql-in-a-nix-shell/
 
-* mssql
+* mssql tls
 metabase/modules/drivers/sqlserver
+** error
+SSL Protocol TLSv1.0 label is not valid. Only TLS, TLSv1, TLSv1.1, and TLSv1.2 are supported.
