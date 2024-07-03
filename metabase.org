@@ -77,3 +77,6 @@ Make sure that your Docker Daemon is running before executing the command. After
 
 * nix-specific resources
 https://mgdm.net/weblog/postgresql-in-a-nix-shell/
+
+* mssql
+metabase/modules/drivers/sqlserver
