@@ -23,6 +23,7 @@
 *** backend
 #+begin_src bash
   ./bin/build-drivers.sh
+  ./bin/build-driver.sh sqlserver
   clojure -M:run
 #+end_src
 
