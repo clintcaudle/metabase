@@ -127,7 +127,9 @@
        :user               (str (when domain (str domain "\\"))
                                 user)
        :instanceName       instance
-       :encrypt            (boolean ssl)
+       :encrypt            false
+       :trustServerCertificate  true
+       ;; :sslProtocol  "TLSv1.0"
        ;; only crazy people would want this. See https://docs.microsoft.com/en-us/sql/connect/jdbc/configuring-how-java-sql-time-values-are-sent-to-the-server?view=sql-server-ver15
        :sendTimeAsDatetime false}
       ;; only include `port` if it is specified; leave out for dynamic port: see
