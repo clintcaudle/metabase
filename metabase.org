@@ -9,6 +9,7 @@
 ** docker
 #+begin_src bash
   docker build -f ~/metabase/Dockerfile ~/metabase/. --tag metabase-0 --build-arg VERSION="0.48.8"
+  docker run -d -p 3000:3000 --name metabase-0 metabase-0
 #+end_src
 ** dev build
 *** frontend
@@ -83,3 +84,8 @@ https://mgdm.net/weblog/postgresql-in-a-nix-shell/
 metabase/modules/drivers/sqlserver
 ** error
 SSL Protocol TLSv1.0 label is not valid. Only TLS, TLSv1, TLSv1.1, and TLSv1.2 are supported.
+
+encrypt=false;trustServerCertificate=true;sslProtocol=TLSv1
+
+"encrypt" property is set to "false" and "trustServerCertificate" property is set to "true" but the driver could not establish a secure connection to SQL Server by using Secure Sockets Layer (SSL) encryption: Error: The server selected protocol version TLS10 is not accepted by client preferences [TLS13, TLS12].
+ClientConnectionId:1a1f9e7b-5b6a-4123-9360-6951e9ee378a
