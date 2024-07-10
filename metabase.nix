@@ -9,6 +9,15 @@
       postgresql
     ];
 
+    installPhase = ''
+    # Find path to java.security in jdk11
+    JAVA_SECURITY_PATH=$(dirname $(dirname $(readlink -f $(which java))))/conf/security/java.security
+    echo $JAVA_SECURITY_PATH
+
+    # Modify java.security file (example: enabling unlimited cryptography policy)
+    sed -i 's/^jdk.tls.disabledAlgorithms=SSLv3, TLSv1, TLSv1.1,/jdk.tls.disabledAlgorithms=/' "$JAVA_SECURITY_PATH"
+    '';
+
     shellHook = ''
               export PG=$PWD/.dev_postgres/
               export PGDATA=$PG/data
@@ -28,10 +37,5 @@
                 pg_start &&
                 createdb
               }
-    # Find path to java.security in jdk11
-    JAVA_SECURITY_PATH=$(dirname $(dirname $(readlink -f $(which java))))/conf/security/java.security
-
-    # Modify java.security file (example: enabling unlimited cryptography policy)
-    sed -i 's/^jdk.tls.disabledAlgorithms=SSLv3, TLSv1, TLSv1.1,/jdk.tls.disabledAlgorithms=/' "$JAVA_SECURITY_PATH"
               '';
   }
