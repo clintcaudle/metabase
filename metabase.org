@@ -2,10 +2,6 @@
  https://docs.github.com/get-started/getting-started-with-git/about-remote-repositories#cloning-with-https-urls for information on
 
 * build local
-** dev
-#+begin_src bash
-  yarn dev
-#+end_src
 ** docker
 #+begin_src bash
   docker build -f ~/metabase/Dockerfile ~/metabase/. --tag metabase-0 --build-arg VERSION="0.48.8"
@@ -19,6 +15,7 @@
   # build with hot reload
   # yarn build
   yarn build-hot
+  yarn dev
 #+end_src
 
 *** backend
