@@ -99,7 +99,6 @@ ClientConnectionId:1a1f9e7b-5b6a-4123-9360-6951e9ee378a
 ** where is postgres on btes?
 ** script
 #+begin_src bash :tangle deploy_metabase-btes.sh
-  nix-shell metabase.nix
   ./bin/build-drivers.sh
   ./bin/build.sh
   yarn install
