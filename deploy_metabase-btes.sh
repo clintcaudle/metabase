@@ -1,4 +1,3 @@
-nix-shell metabase.nix
 ./bin/build-drivers.sh
 ./bin/build.sh
 yarn install
