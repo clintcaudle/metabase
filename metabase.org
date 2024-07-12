@@ -40,7 +40,10 @@ See docs/developers-guild/build.md if you haven't.
 
 *** Building the Metabase Uberjar
 
-The entire Metabase application is compiled and assembled into a single .jar file which can run on any modern JVM. There is a script which will execute all steps in the process and output the final artifact for you. You can pass the environment variable MB_EDITION before running the build script to choose the version that you want to build. If you don't provide a value, the default is `oss` which will build the Community Edition.
+The entire Metabase application is compiled and assembled into a single .jar file which can run on any modern JVM.
+There is a script which will execute all steps in the process and output the final artifact for you.
+You can pass the environment variable MB_EDITION before running the build script to choose the version that you want to build.
+If you don't provide a value, the default is `oss` which will build the Community Edition.
 
     ./bin/build.sh
 
@@ -90,3 +93,13 @@ ClientConnectionId:1a1f9e7b-5b6a-4123-9360-6951e9ee378a
 * helpful webpages
  - https://discourse.nixos.org/t/altering-package-oraclejdk11-installation-fails/46164/2
  - https://discourse.nixos.org/t/custom-ssl-certificates-for-jdk/18297/20
+
+* how to deploy updates to metabase docker env without wiping
+** notes
+** where is postgres on btes?
+** script
+#+begin_src bash
+  nix-shell metabase.nix
+  ./bin/build.sh
+  scp ~/metabase/target/uberjar
+#+end_src
