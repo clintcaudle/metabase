@@ -98,8 +98,32 @@ ClientConnectionId:1a1f9e7b-5b6a-4123-9360-6951e9ee378a
 ** notes
 ** where is postgres on btes?
 ** script
-#+begin_src bash
+#+begin_src bash :tangle deploy_metabase-btes.sh
   nix-shell metabase.nix
+  ./bin/build-drivers.sh
   ./bin/build.sh
-  scp ~/metabase/target/uberjar
+  yarn install
+  yarn build
+  docker build -f ~/metabase/Dockerfile ~/metabase/. --tag metabase --build-arg VERSION="0.48.8"
+  docker image save metabase > metabase.tar
+  scp ~/metabase/metabase.tar carina@10.150.0.7:~/metabase/
+  ssh -t carina@10.150.0.7 "sh ~/metabase/redeploy-metabase-btes.sh"
+  rm metabase.tar
+#+end_src
+
+#+begin_src bash :tangle redeploy_metabase-btes.sh
+  docker stop metabase
+  docker rm metabase
+  docker docker image load < ~/metabase/metabase.tar
+  docker run \
+         -d \
+         -p 3000:3000 \
+         -e "MB_DB_TYPE=postgres" \
+         -e "MB_DB_DBNAME=postgres" \
+         -e "MB_DB_PORT=5432" \
+         -e "MB_DB_USER=postgres" \
+         -e "MB_DB_PASS=metameta" \
+         -e "MB_DB_HOST=10.150.0.7" \
+         --restart unless-stopped \
+         --name metabase metabase
 #+end_src
