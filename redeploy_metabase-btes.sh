@@ -1,6 +1,6 @@
 docker stop metabase
 docker rm metabase
-docker docker image load < ~/metabase/metabase.tar
+docker image load < ~/metabase/metabase.tar
 docker run \
        -d \
        -p 3000:3000 \
