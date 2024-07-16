@@ -36,10 +36,6 @@ export default class LeafletMarkerPinMap extends LeafletMap {
                 col => col.name === "icon_type",
             )
 
-
-            // var lats = [];
-            // var lngs = [];
-
             for (let i = 0; i < max; i++) {
                 if (i >= points.length) {
                     pinMarkerLayer.removeLayer(markers[i]);
