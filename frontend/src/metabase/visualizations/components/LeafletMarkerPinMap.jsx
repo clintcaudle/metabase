@@ -63,7 +63,7 @@ export default class LeafletMarkerPinMap extends LeafletMap {
             }
 
             let polyArray = [];
-            polyArray = this._getPolygon(points);
+            polyArray = this._getEncompassingPolygon(points);
             if (polyArray.length>2) {
                 let polyLayer = L.layerGroup()
                 const polygon = L.polygon([polyArray], { fillOpacity: 0.05, fillColor: 'blue' });
@@ -142,7 +142,7 @@ export default class LeafletMarkerPinMap extends LeafletMap {
     };
 
     // get convex hull of a set of n points to create a polygon.
-    _getPolygon(points) {
+    _getEncompassingPolygon(points) {
 
         const n= points.length;
         // There must be at least 3 points
