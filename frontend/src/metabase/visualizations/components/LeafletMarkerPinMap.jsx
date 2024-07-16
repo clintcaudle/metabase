@@ -31,7 +31,12 @@ export default class LeafletMarkerPinMap extends LeafletMap {
 
             const markers = pinMarkerLayer.getLayers();
             const max = Math.max(points.length, markers.length);
-            var pinIndex= _.findIndex(
+            const loraPinIndex = _.findIndex(
+                this.props.data.cols,
+                col => col.name === "lora_depth",
+            )
+
+            const pinIndex= _.findIndex(
                 this.props.data.cols,
                 col => col.name === "icon_type",
             )
