@@ -58,7 +58,7 @@ export default class LeafletMarkerPinMap extends LeafletMap {
                         const pinVal = this.props.data.rows[i][pinIndex];
                         const pin = markerIcons[pinVal];
 
-                        if (pin !== null) {
+                        if (pin !== undefined) {
                             markers[i].setIcon(pin);
                         }
                         markers[i].setLatLng(points[i]);
