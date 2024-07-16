@@ -68,11 +68,13 @@ export default class LeafletMarkerPinMap extends LeafletMap {
         if (loraPinIndex !== undefined || drawAllLoraForTest) {
           const { lat, lng } = markers[i].getLatLng();
           const polyLayer = L.layerGroup();
-          const circle = L.circle(
-            [lat, lng],
-            { radius: 800 },
-            { weight: 1, fillOpacity: 0.05, fillColor: "red" },
-          );
+          const circle = L.circle([lat, lng], {
+            radius: 800,
+            color: "black",
+            weight: 1,
+            fillOpacity: 0.01,
+            fillColor: "red",
+          });
           polyLayer.addLayer(circle).addTo(this.map);
         }
       }
