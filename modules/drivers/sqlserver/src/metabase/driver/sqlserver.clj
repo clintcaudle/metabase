@@ -130,7 +130,7 @@
        :encrypt            false
        :trustServerCertificate  true
        ;; can only do one of "TLS, TLSv1, TLSv1.1, TLSv1.2"
-       :sslProtocol  "TLS"
+       ;; :sslProtocol  "TLS"
        ;; only crazy people would want this. See https://docs.microsoft.com/en-us/sql/connect/jdbc/configuring-how-java-sql-time-values-are-sent-to-the-server?view=sql-server-ver15
        :sendTimeAsDatetime false}
       ;; only include `port` if it is specified; leave out for dynamic port: see
