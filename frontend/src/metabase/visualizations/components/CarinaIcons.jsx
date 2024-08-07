@@ -1,6 +1,76 @@
 import L from "leaflet";
 
 export const markerIcons = {
+  0: L.icon({
+    //"EMD"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  1: L.icon({
+    //"ODL"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  2: L.icon({
+    //"UMD"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  3: L.icon({
+    //"Prepay"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  4: L.icon({
+    //"WH"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  5: L.icon({
+    //"CIU"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  6: L.icon({
+    //"CAP"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  7: L.icon({
+    //"CPG"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  8: L.icon({
+    //"Vaughn"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  9: L.icon({
+    //"WISE3"
+    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
   10: L.icon({
     //"CAP"
     iconUrl: "app/assets/img/carina/capacitor.png",
