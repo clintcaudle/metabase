@@ -37,7 +37,7 @@ export default class LeafletMarkerPinMap extends LeafletMap {
 
       const pinIndex = _.findIndex(
         this.props.data.cols,
-        col => col.name === "icon_type",
+        col => col.name === "unittype",
       );
 
       for (let i = 0; i < max; i++) {
