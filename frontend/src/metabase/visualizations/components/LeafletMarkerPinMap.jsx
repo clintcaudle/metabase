@@ -25,19 +25,25 @@ export default class LeafletMarkerPinMap extends LeafletMap {
     super.componentDidUpdate(prevProps, prevState);
 
     try {
+      const plotRangeForDepth = 0;
       const { pinMarkerLayer } = this;
       const { points } = this.props;
 
       const markers = pinMarkerLayer.getLayers();
       const max = Math.max(points.length, markers.length);
-      const loraPinIndex = _.findIndex(
+      const depthColumnIndex = _.findIndex(
         this.props.data.cols,
-        col => col.name === "lora_depth",
+        col => col.name === "depth",
       );
 
-      const pinIndex = _.findIndex(
+      const rangeColumnIndex = _.findIndex(
         this.props.data.cols,
-        col => col.name === "unittype",
+        col => col.name === "range",
+      );
+
+      const iconColumnIndex = _.findIndex(
+        this.props.data.cols,
+        col => col.name === "icon",
       );
 
       for (let i = 0; i < max; i++) {
@@ -51,15 +57,12 @@ export default class LeafletMarkerPinMap extends LeafletMap {
           markers.push(marker);
         }
 
+        const range = this.props.data.rows[i][rangeColumnIndex];
+        const depth = this.props.data.rows[i][depthColumnIndex];
         if (i < points.length) {
           const { lat, lng } = markers[i].getLatLng();
           if (lng !== points[i][0] || lat !== points[i][1]) {
-            // const pinVal = this.props.data.rows[i][pinIndex];
-            // randomize while this is not setup to see the icons
-            const pinVal =
-              pinIndex === undefined
-                ? Math.floor(Math.random() * 9)
-                : this.props.data.rows[i][pinIndex];
+            const pinVal = this.props.data.rows[i][iconColumnIndex];
             const pin = markerIcons[pinVal];
 
             if (pin !== undefined) {
@@ -68,13 +71,11 @@ export default class LeafletMarkerPinMap extends LeafletMap {
             markers[i].setLatLng(points[i]);
           }
         }
-        // do lora specific drawing
-        const drawAllLoraForTest = true;
-        if (loraPinIndex !== undefined || drawAllLoraForTest) {
+        if (depth <= plotRangeForDepth) {
           const { lat, lng } = markers[i].getLatLng();
           const polyLayer = L.layerGroup();
           const circle = L.circle([lat, lng], {
-            radius: 800,
+            radius: range,
             color: "black",
             weight: 1,
             fillOpacity: 0.01,
