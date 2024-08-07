@@ -17,7 +17,7 @@ export const markerIcons = {
   }),
   2: L.icon({
     //"UMD"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/cpg.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
@@ -31,7 +31,7 @@ export const markerIcons = {
   }),
   4: L.icon({
     //"WH"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/wise.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
@@ -59,7 +59,7 @@ export const markerIcons = {
   }),
   8: L.icon({
     //"Vaughn"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/vaughn.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
