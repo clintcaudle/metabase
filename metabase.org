@@ -16,6 +16,9 @@
   # yarn build
   yarn build-hot
   yarn dev
+
+  #lint
+  yarn prettier
 #+end_src
 
 *** backend
