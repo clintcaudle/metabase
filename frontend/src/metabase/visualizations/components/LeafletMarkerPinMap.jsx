@@ -84,17 +84,17 @@ export default class LeafletMarkerPinMap extends LeafletMap {
         }
       }
 
-      let polyArray = [];
-      polyArray = this._getEncompassingPolygon(points);
-      if (polyArray.length > 2) {
-        const polyLayer = L.layerGroup();
-        const polygon = L.polygon([polyArray], {
-          fillOpacity: 0.05,
-          fillColor: "blue",
-        });
-        // const markerPolygonLayer = new L.FeatureGroup();
-        polyLayer.addLayer(polygon).addTo(this.map);
-      }
+      // let polyArray = [];
+      // polyArray = this._getEncompassingPolygon(points);
+      // if (polyArray.length > 2) {
+      //   const polyLayer = L.layerGroup();
+      //   const polygon = L.polygon([polyArray], {
+      //     fillOpacity: 0.05,
+      //     fillColor: "blue",
+      //   });
+      //   // const markerPolygonLayer = new L.FeatureGroup();
+      //   polyLayer.addLayer(polygon).addTo(this.map);
+      // }
     } catch (err) {
       console.error(err);
       this.props.onRenderError(err.message || err);
