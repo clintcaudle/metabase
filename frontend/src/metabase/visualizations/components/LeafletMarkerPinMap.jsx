@@ -57,31 +57,37 @@ export default class LeafletMarkerPinMap extends LeafletMap {
           markers.push(marker);
         }
 
-        const range = this.props.data.rows[i][rangeColumnIndex];
-        const depth = this.props.data.rows[i][depthColumnIndex];
-        if (i < points.length) {
-          const { lat, lng } = markers[i].getLatLng();
-          if (lng !== points[i][0] || lat !== points[i][1]) {
-            const pinVal = this.props.data.rows[i][iconColumnIndex];
-            const pin = markerIcons[pinVal];
+        if (
+          depthColumnIndex !== undefined &&
+          rangeColumnIndex !== undefined &&
+          iconColumnIndex !== undefined
+        ) {
+          const range = this.props.data.rows[i][rangeColumnIndex];
+          const depth = this.props.data.rows[i][depthColumnIndex];
+          if (i < points.length) {
+            const { lat, lng } = markers[i].getLatLng();
+            if (lng !== points[i][0] || lat !== points[i][1]) {
+              const pinVal = this.props.data.rows[i][iconColumnIndex];
+              const pin = markerIcons[pinVal];
 
-            if (pin !== undefined) {
-              markers[i].setIcon(pin);
+              if (pin !== undefined) {
+                markers[i].setIcon(pin);
+              }
+              markers[i].setLatLng(points[i]);
             }
-            markers[i].setLatLng(points[i]);
           }
-        }
-        if (depth <= plotRangeForDepth) {
-          const { lat, lng } = markers[i].getLatLng();
-          const polyLayer = L.layerGroup();
-          const circle = L.circle([lat, lng], {
-            radius: range,
-            color: "black",
-            weight: 1,
-            fillOpacity: 0.01,
-            fillColor: "red",
-          });
-          polyLayer.addLayer(circle).addTo(this.map);
+          if (depth <= plotRangeForDepth) {
+            const { lat, lng } = markers[i].getLatLng();
+            const polyLayer = L.layerGroup();
+            const circle = L.circle([lat, lng], {
+              radius: range,
+              color: "black",
+              weight: 1,
+              fillOpacity: 0.01,
+              fillColor: "red",
+            });
+            polyLayer.addLayer(circle).addTo(this.map);
+          }
         }
       }
 
