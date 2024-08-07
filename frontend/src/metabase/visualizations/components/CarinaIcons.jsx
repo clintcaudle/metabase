@@ -2,8 +2,8 @@ import L from "leaflet";
 
 export const markerIcons = {
   0: L.icon({
-    //"EMD"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    //"lora"
+    iconUrl: "app/assets/img/carina/lora.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
