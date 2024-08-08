@@ -130,3 +130,9 @@ ClientConnectionId:1a1f9e7b-5b6a-4123-9360-6951e9ee378a
          --restart unless-stopped \
          --name metabase metabase
 #+end_src
+
+* merging upstream changes
+#+begin_src bash
+  git fetch upstream
+  git merge -X theirs upstream/master
+#+end_src
