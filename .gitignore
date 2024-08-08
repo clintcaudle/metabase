@@ -113,5 +113,8 @@ modules/drivers/*/.lsp/*
 # airgap
 /resources/airgap/
 
+# postgres
+.dev_postgres/data/
+
 # swc
 .swc/
