@@ -33,17 +33,17 @@ export default class LeafletMarkerPinMap extends LeafletMap {
       const max = Math.max(points.length, markers.length);
       const depthColumnIndex = _.findIndex(
         this.props.data.cols,
-        col => col.name === "depth",
+        col => col.name === "Map Plotting__depth",
       );
 
       const rangeColumnIndex = _.findIndex(
         this.props.data.cols,
-        col => col.name === "range",
+        col => col.name === "Map Plotting__range",
       );
 
       const iconColumnIndex = _.findIndex(
         this.props.data.cols,
-        col => col.name === "icon",
+        col => col.name === "Map Plotting__icon",
       );
 
       for (let i = 0; i < max; i++) {
