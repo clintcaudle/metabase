@@ -1,18 +1,11 @@
-/*global ace*/
+import React, { Component } from "react";
 import PropTypes from "prop-types";
-import { Component, createRef } from "react";
+import ReactDOM from "react-dom";
 
-import "ace/ace";
-import "ace/mode-plain_text";
-import "ace/mode-javascript";
-import "ace/mode-json";
-import { TextEditorRoot } from "./TextEditor.styled";
+import * as ace from "ace-builds/src-noconflict/ace";
 
 const SCROLL_MARGIN = 8;
 const LINE_HEIGHT = 16;
-const HIGHLIGHTED_CODE_ROW_CLASSNAME = "highlighted-code-marker";
-const HIGHLIGHTED_CODE_ROW_NUMBER_CLASSNAME =
-  "highlighted-code-marker-row-number";
 
 export default class TextEditor extends Component {
   static propTypes = {
@@ -20,20 +13,18 @@ export default class TextEditor extends Component {
     theme: PropTypes.string,
     value: PropTypes.string,
     defaultValue: PropTypes.string,
-    readOnly: PropTypes.bool,
-    highlightedTexts: PropTypes.arrayOf(PropTypes.string),
     onChange: PropTypes.func,
-    className: PropTypes.string,
+    onBlur: PropTypes.func,
+    aceAutocomplete: PropTypes.bool,
+    gutter: PropTypes.bool,
   };
 
   static defaultProps = {
     mode: "ace/mode/plain_text",
     theme: null,
+    aceAutocomplete: true,
+    gutter: true,
   };
-
-  editorRef = createRef();
-
-  highlightedTextMarkerIds = [];
 
   UNSAFE_componentWillReceiveProps(nextProps) {
     if (
@@ -47,7 +38,7 @@ export default class TextEditor extends Component {
   }
 
   _update() {
-    const element = this.editorRef.current;
+    const element = ReactDOM.findDOMNode(this);
 
     if (this._editor == null) {
       return; // _editor is undefined when ace isn't loaded in tests
@@ -58,14 +49,9 @@ export default class TextEditor extends Component {
     this._editor.getSession().setMode(this.props.mode);
     this._editor.setTheme(this.props.theme);
 
+    // read only
     this._editor.setReadOnly(this.props.readOnly);
     element.classList[this.props.readOnly ? "add" : "remove"]("read-only");
-
-    this._removeTextHighlight();
-    const { highlightedTexts } = this.props;
-    if (highlightedTexts != null) {
-      highlightedTexts.forEach(this._addTextHighlight);
-    }
 
     this._updateSize();
   }
@@ -78,46 +64,10 @@ export default class TextEditor extends Component {
 
   _updateSize() {
     const doc = this._editor.getSession().getDocument();
-    const element = this.editorRef.current;
+    const element = ReactDOM.findDOMNode(this);
     element.style.height =
       2 * SCROLL_MARGIN + LINE_HEIGHT * doc.getLength() + "px";
     this._editor.resize();
-  }
-
-  _addTextHighlight = textToHighlight => {
-    const textRange = this._editor.find(textToHighlight);
-    this._editor.selection.clearSelection();
-
-    if (textRange) {
-      const highlightedTextMarkerId = this._editor.session.addMarker(
-        textRange,
-        HIGHLIGHTED_CODE_ROW_CLASSNAME,
-        "fullLine",
-        true,
-      );
-      this.highlightedTextMarkerIds.push(highlightedTextMarkerId);
-
-      for (let i = textRange.start.row; i <= textRange.end.row; i++) {
-        this._editor.session.addGutterDecoration(
-          i,
-          HIGHLIGHTED_CODE_ROW_NUMBER_CLASSNAME,
-        );
-      }
-    }
-  };
-
-  _removeTextHighlight() {
-    this.highlightedTextMarkerIds.forEach(highlightedTextMarkerId => {
-      this._editor.session.removeMarker(highlightedTextMarkerId);
-    });
-    this.highlightedTextMarkerIds = [];
-
-    for (let i = 0; i <= this._editor.session.getLength(); i++) {
-      this._editor.session.removeGutterDecoration(
-        i,
-        HIGHLIGHTED_CODE_ROW_NUMBER_CLASSNAME,
-      );
-    }
   }
 
   onChange = e => {
@@ -132,24 +82,26 @@ export default class TextEditor extends Component {
       // fail gracefully-ish if ace isn't available, e.x. in integration tests
       return;
     }
-
-    const element = this.editorRef.current;
+    const element = ReactDOM.findDOMNode(this);
     this._editor = ace.edit(element);
 
     window.editor = this._editor;
 
-    // listen to onChange events
     this._editor.getSession().on("change", this.onChange);
 
     // misc options, copied from NativeQueryEditor
     this._editor.setOptions({
+      enableBasicAutocompletion: this.props.aceAutocomplete,
+      enableSnippets: true,
+      enableLiveAutocompletion: this.props.aceAutocomplete,
       showPrintMargin: false,
       highlightActiveLine: false,
       highlightGutterLine: false,
       showLineNumbers: true,
-      showFoldWidgets: false,
+      // wrap: true
     });
     this._editor.renderer.setScrollMargin(SCROLL_MARGIN, SCROLL_MARGIN);
+    this._editor.renderer.setShowGutter(this.props.gutter);
 
     // initialize the content
     this._editor.setValue(
@@ -171,8 +123,7 @@ export default class TextEditor extends Component {
   }
 
   render() {
-    const { className } = this.props;
-
-    return <TextEditorRoot ref={this.editorRef} className={className} />;
+    const { className, style } = this.props;
+    return <div className={className} style={style} />;
   }
 }
