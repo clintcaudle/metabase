@@ -18,6 +18,7 @@
    [metabase.models.params.custom-values :as custom-values]
    [metabase.models.persisted-info :as persisted-info]
    [metabase.models.table :refer [Table]]
+   [metabase.models.visualization-settings :as mb.viz]
    [metabase.query-processor :as qp]
    [metabase.query-processor.compile :as qp.compile]
    [metabase.query-processor.middleware.constraints :as qp.constraints]
@@ -25,7 +26,6 @@
    [metabase.query-processor.pivot :as qp.pivot]
    [metabase.query-processor.streaming :as qp.streaming]
    [metabase.query-processor.util :as qp.util]
-   [metabase.shared.models.visualization-settings :as mb.viz]
    [metabase.util :as u]
    [metabase.util.i18n :refer [tru]]
    [metabase.util.log :as log]
@@ -92,7 +92,6 @@
        (update-in [:middleware :js-int-to-string?] (fnil identity true))
        qp/userland-query-with-default-constraints)))
 
-
 ;;; ----------------------------------- Downloading Query Results in Other Formats -----------------------------------
 
 (def export-formats
@@ -123,19 +122,20 @@
 (defn- viz-setting-key-fn
   "Key function for parsing JSON visualization settings into the DB form. Converts most keys to
   keywords, but leaves column references as strings."
-   [json-key]
-   (if (re-matches column-ref-regex json-key)
-     json-key
-     (keyword json-key)))
+  [json-key]
+  (if (re-matches column-ref-regex json-key)
+    json-key
+    (keyword json-key)))
 
 (api/defendpoint POST ["/:export-format", :export-format export-format-regex]
   "Execute a query and download the result data as a file in the specified format."
-  [export-format :as {{:keys [query visualization_settings format_rows]
+  [export-format :as {{:keys [query visualization_settings pivot_results format_rows]
                        :or   {visualization_settings "{}"}} :params}]
   {query                  ms/JSONString
    visualization_settings ms/JSONString
-   format_rows            [:maybe :boolean]
-   export-format          (into [:enum] export-formats)}
+   format_rows            [:maybe ms/BooleanValue]
+   pivot_results          [:maybe ms/BooleanValue]
+   export-format          ExportFormat}
   (let [{:keys [was-pivot] :as query} (json/parse-string query keyword)
         query                         (dissoc query :was-pivot)
         viz-settings                  (-> (json/parse-string visualization_settings viz-setting-key-fn)
@@ -146,9 +146,10 @@
                                           (dissoc :constraints)
                                           (update :middleware #(-> %
                                                                    (dissoc :add-default-userland-constraints? :js-int-to-string?)
-                                                                   (assoc :process-viz-settings? true
-                                                                          :skip-results-metadata? true
-                                                                          :format-rows? format_rows))))]
+                                                                   (assoc :format-rows?          (or format_rows false)
+                                                                          :pivot?                (or pivot_results false)
+                                                                          :process-viz-settings? true
+                                                                          :skip-results-metadata? true))))]
     (run-streaming-query
      (qp/userland-query query)
      :export-format export-format
@@ -213,8 +214,8 @@
   consulted if `:values_source_type` is nil. Query is an optional string return matching field values not all."
   [parameter field-ids query]
   (custom-values/parameter->values
-    parameter query
-    (fn [] (parameter-field-values field-ids query))))
+   parameter query
+   (fn [] (parameter-field-values field-ids query))))
 
 (api/defendpoint POST "/parameter/values"
   "Return parameter values for cards or dashboards that are being edited."

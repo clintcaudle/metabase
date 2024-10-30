@@ -8,6 +8,7 @@ import {
   verifyDownloadTasks,
 } from "./commands/downloads/downloadUtils";
 import * as dbTasks from "./db_tasks";
+import { signJwt } from "./helpers/e2e-jwt-tasks";
 
 const createBundler = require("@bahmutov/cypress-esbuild-preprocessor"); // This function is called when a project is opened or re-opened (e.g. due to the project's config changing)
 const {
@@ -15,6 +16,7 @@ const {
 } = require("@esbuild-plugins/node-modules-polyfill");
 
 const isEnterprise = process.env["MB_EDITION"] === "ee";
+const isCI = process.env["CYPRESS_CI"] === "true";
 
 const hasSnowplowMicro = process.env["MB_SNOWPLOW_AVAILABLE"];
 const snowplowMicroUrl = process.env["MB_SNOWPLOW_URL"];
@@ -25,6 +27,8 @@ const sourceVersion = process.env["CROSS_VERSION_SOURCE"];
 const targetVersion = process.env["CROSS_VERSION_TARGET"];
 
 const feHealthcheckEnabled = process.env["CYPRESS_FE_HEALTHCHECK"] === "true";
+
+const isEmbeddingSdk = process.env.CYPRESS_IS_EMBEDDING_SDK === "true";
 
 // docs say that tsconfig paths should handle aliases, but they don't
 const assetsResolverPlugin = {
@@ -50,7 +54,11 @@ const defaultConfig = {
     // `config` is the resolved Cypress config
 
     // cypress-terminal-report
-    installLogsPrinter(on);
+    if (isCI) {
+      installLogsPrinter(on, {
+        printLogsToConsole: "never",
+      });
+    }
 
     /********************************************************************
      **                        PREPROCESSOR                            **
@@ -99,6 +107,7 @@ const defaultConfig = {
       ...dbTasks,
       ...verifyDownloadTasks,
       removeDirectory,
+      signJwt,
     });
 
     // this is an official workaround to keep recordings of the failed specs only
@@ -164,6 +173,14 @@ const defaultConfig = {
 
 const mainConfig = {
   ...defaultConfig,
+  ...(isEmbeddingSdk
+    ? {
+        chromeWebSecurity: true,
+        hosts: {
+          "my-site.local": "127.0.0.1",
+        },
+      }
+    : {}),
   projectId: "ywjy9z",
   numTestsKeptInMemory: process.env["CI"] ? 1 : 50,
   reporter: "cypress-multi-reporters",

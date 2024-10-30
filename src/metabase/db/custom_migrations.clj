@@ -1102,7 +1102,7 @@
 
     :mysql
     (do
-     (t2/query ["UPDATE revision
+      (t2/query ["UPDATE revision
                  SET object = JSON_SET(
                      object,
                      '$.dataset',
@@ -1111,7 +1111,7 @@
                          THEN true ELSE false
                      END)
                  WHERE model = 'Card' AND JSON_UNQUOTE(JSON_EXTRACT(object, '$.type')) IS NOT NULL;"])
-     (t2/query ["UPDATE revision
+      (t2/query ["UPDATE revision
                  SET object = JSON_REMOVE(object, '$.type')
                  WHERE model = 'Card' AND JSON_UNQUOTE(JSON_EXTRACT(object, '$.type')) IS NOT NULL;"]))
 
@@ -1260,8 +1260,11 @@
                   (t2/query {:insert-into table-name :values values})))
               (let [group-id (:id (t2/query-one {:select :id :from :permissions_group :where [:= :name "All Users"]}))]
                 (t2/query {:insert-into :permissions
-                           :values      [{:object   (format "/collection/%s/" example-collection-id)
-                                          :group_id group-id}]}))
+                           :values      [{:object        (format "/collection/%s/" example-collection-id)
+                                          :group_id      group-id
+                                          :perm_type     "perms/collection-access"
+                                          :perm_value    "read-and-write"
+                                          :collection_id example-collection-id}]}))
               (t2/query {:insert-into :setting
                          :values      [{:key   "example-dashboard-id"
                                         :value (str example-dashboard-id)}]})))))))
@@ -1314,7 +1317,6 @@
   ;; - if you have created content manually, find-replace :creator_id <your user-id> with :creator_id 13371338 (the internal user ID)
   ;; - replace metabase_version "<version>" with metabase_version nil
 
-
 ;; This was renamed to TruncateAuditTables, so we need to delete the old job & trigger
 (define-migration DeleteTruncateAuditLogTask
   (classloader/the-classloader)
@@ -1341,12 +1343,12 @@
 (define-reversible-migration DeleteSendPulseTaskOnDowngrade
   (log/info "No forward migration for DeleteSendPulseTaskOnDowngrade")
   (do
-   (classloader/the-classloader)
-   (set-jdbc-backend-properties!)
-   (let [scheduler (qs/initialize)]
-     (qs/start scheduler)
-     (qs/delete-job scheduler (jobs/key "metabase.task.send-pulses.send-pulse.job"))
-     (qs/shutdown scheduler))))
+    (classloader/the-classloader)
+    (set-jdbc-backend-properties!)
+    (let [scheduler (qs/initialize)]
+      (qs/start scheduler)
+      (qs/delete-job scheduler (jobs/key "metabase.task.send-pulses.send-pulse.job"))
+      (qs/shutdown scheduler))))
 
 ;; The InitSendPulseTriggers is a migration in disguise, it runs once per instance
 ;; To make sure when someone migrate up -> migrate down -> migrate up again, this job is re-run
@@ -1354,13 +1356,13 @@
 (define-reversible-migration DeleteInitSendPulseTriggersOnDowngrade
   (log/info "No forward migration for DeleteInitSendPulseTriggersOnDowngrade")
   (do
-   (classloader/the-classloader)
-   (set-jdbc-backend-properties!)
-   (let [scheduler (qs/initialize)]
-     (qs/start scheduler)
+    (classloader/the-classloader)
+    (set-jdbc-backend-properties!)
+    (let [scheduler (qs/initialize)]
+      (qs/start scheduler)
      ;; delete the job will also delete all of its triggers
-     (qs/delete-job scheduler (jobs/key "metabase.task.send-pulses.init-send-pulse-triggers.job"))
-     (qs/shutdown scheduler))))
+      (qs/delete-job scheduler (jobs/key "metabase.task.send-pulses.init-send-pulse-triggers.job"))
+      (qs/shutdown scheduler))))
 
 ;; when card display is area or bar,
 ;; 1. set the display key to :stackable.stack_display value OR leave it the same
@@ -1517,7 +1519,7 @@
   [key column]
   [:or [:like column (str "%\\\\\"" key "\\\\\"%")]
        ;; MySQL with NO_BACKSLASH_ESCAPES disabled:
-       [:like column (str "%\\\\\\\"" key "\\\\\\\"%")]])
+   [:like column (str "%\\\\\\\"" key "\\\\\\\"%")]])
 
 (defn- update-legacy-column-keys-in-card-viz-settings
   "Updates `:visualization_settings` of each card that contains `:column_settings` by calling `update-viz-settings`
@@ -1529,14 +1531,14 @@
                             result-metadata      (json/parse-string result-metadata)
                             updated-viz-settings (update-viz-settings-fn viz-settings result-metadata)]
                         (when (not= viz-settings updated-viz-settings)
-                              (t2/query-one {:update :report_card
-                                             :set    {:visualization_settings (json/generate-string updated-viz-settings)}
-                                             :where  [:= :id id]}))))]
+                          (t2/query-one {:update :report_card
+                                         :set    {:visualization_settings (json/generate-string updated-viz-settings)}
+                                         :where  [:= :id id]}))))]
     (run! update-one! (t2/reducible-query {:select [:id :visualization_settings :result_metadata]
                                            :from   [:report_card]
                                            :where  [:and [:not= :result_metadata nil]
-                                                         [:like :visualization_settings "%column_settings%"]
-                                                         (json-column-key-like-clause column-key-tag :visualization_settings)]}))))
+                                                    [:like :visualization_settings "%column_settings%"]
+                                                    (json-column-key-like-clause column-key-tag :visualization_settings)]}))))
 
 (define-reversible-migration MigrateLegacyColumnKeysInCardVizSettings
   (update-legacy-column-keys-in-card-viz-settings "ref" migrate-legacy-column-keys-in-viz-settings)
@@ -1553,16 +1555,108 @@
                             result-metadata      (json/parse-string result-metadata)
                             updated-viz-settings (update-viz-settings-fn viz-settings result-metadata)]
                         (when (not= viz-settings updated-viz-settings)
-                              (t2/query-one {:update :report_dashboardcard
-                                             :set    {:visualization_settings (json/generate-string updated-viz-settings)}
-                                             :where  [:= :id id]}))))]
+                          (t2/query-one {:update :report_dashboardcard
+                                         :set    {:visualization_settings (json/generate-string updated-viz-settings)}
+                                         :where  [:= :id id]}))))]
     (run! update-one! (t2/reducible-query {:select [:dc.id :dc.visualization_settings :c.result_metadata]
                                            :from   [[:report_card :c]]
                                            :join   [[:report_dashboardcard :dc] [:= :dc.card_id :c.id]]
                                            :where  [:and [:not= :c.result_metadata nil]
-                                                         [:like :dc.visualization_settings "%column_settings%"]
-                                                         (json-column-key-like-clause column-key-tag :dc.visualization_settings)]}))))
+                                                    [:like :dc.visualization_settings "%column_settings%"]
+                                                    (json-column-key-like-clause column-key-tag :dc.visualization_settings)]}))))
 
 (define-reversible-migration MigrateLegacyColumnKeysInDashboardCardVizSettings
   (update-legacy-column-keys-in-dashboard-card-viz-settings "ref" migrate-legacy-column-keys-in-viz-settings)
   (update-legacy-column-keys-in-dashboard-card-viz-settings "name" rollback-legacy-column-keys-in-viz-settings))
+
+(defn- create-notification!
+  [notification subscriptions handlers+recipients]
+  (let [noti-id (t2/insert-returning-pk! :notification
+                                         (merge {:active            true
+                                                 :created_at        :%now
+                                                 :updated_at        :%now}
+                                                notification))]
+    (when (seq subscriptions)
+      (t2/insert! :notification_subscription (map #(merge {:notification_id noti-id
+                                                           :created_at      :%now} %) subscriptions)))
+    (doseq [handler handlers+recipients]
+      (let [recipients (:recipients handler)
+            handler    (-> handler
+                           (dissoc :recipients)
+                           (assoc :notification_id noti-id))
+            handler-id (t2/insert-returning-pk! :notification_handler (merge
+                                                                       {:active      true
+                                                                        :created_at  :%now
+                                                                        :updated_at  :%now}
+                                                                       handler))]
+        (t2/insert! :notification_recipient (map #(merge {:notification_handler_id handler-id
+                                                          :created_at              :%now
+                                                          :updated_at              :%now}
+                                                         %)
+                                                 recipients))))))
+
+(define-migration CreateSystemNotificationUserJoined
+  (let [template-id (t2/insert-returning-pk!
+                     :channel_template
+                     {:name         "User joined Email template"
+                      :channel_type "channel/email"
+                      :details      (json/generate-string {:type           "email/mustache-resource"
+                                                           :subject        "{{payload.custom.user_invited_email_subject}}"
+                                                           :path           "metabase/email/new_user_invite.mustache"
+                                                           :recipient-type :cc})
+                      :created_at   :%now
+                      :updated_at   :%now})]
+    (create-notification!
+     {:payload_type "notification/system-event"}
+     [{:type            "notification-subscription/system-event"
+       :event_name      "event/user-invited"}]
+     [{:channel_type    "channel/email"
+       :channel_id      nil
+       :template_id     template-id
+       :recipients      [{:type    "notification-recipient/template"
+                          :details (json/generate-string {:pattern "{{payload.event_info.object.email}}"})}]}])))
+
+(define-migration CreateSystemNotificationAlertCreated
+  (let [template-id (t2/insert-returning-pk!
+                     :channel_template
+                     {:name         "Alert Created Email template"
+                      :channel_type "channel/email"
+                      :details      (json/generate-string {:type           "email/mustache-resource"
+                                                           :subject        "You set up an alert"
+                                                           :path           "metabase/email/alert_new_confirmation.mustache"
+                                                           :recipient-type :cc})
+                      :created_at   :%now
+                      :updated_at   :%now})]
+    (create-notification!
+     {:payload_type "notification/system-event"}
+     [{:type            "notification-subscription/system-event"
+       :event_name      "event/alert-create"}]
+     [{:channel_type    "channel/email"
+       :channel_id      nil
+       :template_id     template-id
+       :recipients      [{:type    "notification-recipient/template"
+                          :details (json/generate-string {:pattern "{{payload.event_info.user.email}}"})}]}])))
+
+(define-migration CreateSystemNotificationSlackTokenError
+  (let [template-id (t2/insert-returning-pk!
+                     :channel_template
+                     {:name         "Slack Token Error Email template"
+                      :channel_type "channel/email"
+                      :details      (json/generate-string {:type           "email/mustache-resource"
+                                                           :subject        "Your Slack connection stopped working"
+                                                           :path           "metabase/email/slack_token_error.mustache"
+                                                           :recipient-type :cc})
+                      :created_at   :%now
+                      :updated_at   :%now})]
+    (create-notification!
+     {:payload_type "notification/system-event"}
+     [{:type            "notification-subscription/system-event"
+       :event_name      "event/slack-token-invalid"}]
+     [{:channel_type    "channel/email"
+       :channel_id      nil
+       :template_id     template-id
+       :recipients      [{:type    "notification-recipient/template"
+                          :details (json/generate-string {:pattern     "{{context.admin_email}}"
+                                                          :is_optional true})}
+                         {:type                 "notification-recipient/group"
+                          :permissions_group_id (t2/select-one-pk :permissions_group :name "Administrators")}]}])))

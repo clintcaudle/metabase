@@ -1,4 +1,4 @@
-(ns metabase-enterprise.advanced-permissions.common-test
+(ns ^:mb/driver-tests metabase-enterprise.advanced-permissions.common-test
   (:require
    [clojure.test :refer :all]
    [metabase-enterprise.advanced-permissions.api.util-test
@@ -118,7 +118,6 @@
                                                                        :card_id              card-id
                                                                        :attribute_remappings {"foo" 1}}]
             (is (= :blocked (advanced-permissions.common/new-group-view-data-permission-level db-id)))))))))
-
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                        Data model permission enforcement                                       |

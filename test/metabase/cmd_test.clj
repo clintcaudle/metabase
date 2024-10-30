@@ -30,7 +30,13 @@
    (fn []
      (testing "with no options"
        (is (= '(metabase-enterprise.serialization.cmd/v2-load! "/path/" {})
-              (cmd/import "/path/")))))))
+              (cmd/import "/path/"))))
+     (testing "with options"
+       (is (= '(metabase-enterprise.serialization.cmd/v2-load! "/path/" {:continue-on-error true})
+              (cmd/import "/path/" "--continue-on-error"))))
+     (testing "with options"
+       (is (= '(metabase-enterprise.serialization.cmd/v2-load! "/path/" {:full-stacktrace true})
+              (cmd/import "/path/" "--full-stacktrace")))))))
 
 (deftest dump-command-test
   (do-with-captured-call-enterprise-calls!
@@ -69,4 +75,13 @@
        {:no-settings true}
 
        ["--no-data-model"]
-       {:no-data-model true}))))
+       {:no-data-model true}
+
+       ["--continue-on-error"]
+       {:continue-on-error true}
+
+       ["-e"]
+       {:continue-on-error true}
+
+       ["--full-stacktrace"]
+       {:full-stacktrace true}))))

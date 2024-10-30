@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { t } from "ttag";
 
 import TippyPopover from "metabase/components/Popover/TippyPopover";
@@ -11,11 +11,11 @@ import type Question from "metabase-lib/v1/Question";
 import type { Card, ParameterTarget } from "metabase-types/api";
 
 import {
+  ChevrondownIcon,
+  CloseIconButton,
+  KeyIcon,
   TargetButton,
   TargetButtonText,
-  CloseIconButton,
-  ChevrondownIcon,
-  KeyIcon,
 } from "./DashCardCardParameterMapper.styled";
 
 interface DashCardCardParameterMapperButtonProps {
@@ -71,6 +71,22 @@ export const DashCardCardParameterMapperButton = ({
         };
       }
 
+      if (target != null && !selectedMappingOption) {
+        return {
+          buttonVariant: "invalid",
+          buttonText: t`Unknown Field`,
+          buttonIcon: (
+            <CloseIconButton
+              aria-label={t`Disconnect`}
+              onClick={e => {
+                handleChangeTarget(null);
+                e.stopPropagation();
+              }}
+            />
+          ),
+        };
+      }
+
       if (isDisabled && !isVirtual) {
         return {
           buttonVariant: "disabled",
@@ -88,22 +104,6 @@ export const DashCardCardParameterMapperButton = ({
           buttonIcon: (
             <CloseIconButton
               role="button"
-              aria-label={t`Disconnect`}
-              onClick={e => {
-                handleChangeTarget(null);
-                e.stopPropagation();
-              }}
-            />
-          ),
-        };
-      }
-
-      if (target != null) {
-        return {
-          buttonVariant: "invalid",
-          buttonText: t`Unknown Field`,
-          buttonIcon: (
-            <CloseIconButton
               aria-label={t`Disconnect`}
               onClick={e => {
                 handleChangeTarget(null);

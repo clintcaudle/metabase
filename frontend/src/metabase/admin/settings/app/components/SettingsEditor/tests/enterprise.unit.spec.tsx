@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
 
 import { setupGroupsEndpoint } from "__support__/server-mocks";
-import { screen } from "__support__/ui";
+import { screen, within } from "__support__/ui";
 import {
   createMockGroup,
   createMockSettingDefinition,
@@ -12,7 +12,7 @@ import {
 } from "metabase-types/api/mocks";
 
 import type { SetupOpts } from "./setup";
-import { setup, EMAIL_URL } from "./setup";
+import { EMAIL_URL, setup } from "./setup";
 
 const setupEnterprise = async (opts?: SetupOpts) => {
   await setup({ ...opts, hasEnterprisePlugins: true });
@@ -48,7 +48,14 @@ describe("SettingsEditor", () => {
     });
 
     await userEvent.click(screen.getByText("Embedding"));
-    await userEvent.click(screen.getByText("Interactive embedding"));
+    expect(
+      within(
+        screen.getByRole("article", {
+          name: "Interactive embedding",
+        }),
+      ).getByRole("link", { name: "Learn More" }),
+    ).toBeInTheDocument();
+
     expect(screen.queryByText("Authorized origins")).not.toBeInTheDocument();
     expect(
       screen.queryByText("SameSite cookie setting"),

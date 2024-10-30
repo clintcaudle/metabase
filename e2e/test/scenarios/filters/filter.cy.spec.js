@@ -1,30 +1,31 @@
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
+  cartesianChartCircleWithColors,
+  checkExpressionEditorHelperPopoverPosition,
   enterCustomColumnDetails,
-  restore,
-  openOrdersTable,
-  openProductsTable,
-  openReviewsTable,
-  openPeopleTable,
-  openNotebook,
-  popover,
-  visitQuestionAdhoc,
-  visualize,
-  summarize,
+  expressionEditorWidget,
   filter,
   filterField,
   filterFieldPopover,
+  getNotebookStep,
   join,
   joinTable,
-  setupBooleanQuery,
-  checkExpressionEditorHelperPopoverPosition,
-  getNotebookStep,
+  openNotebook,
+  openOrdersTable,
+  openPeopleTable,
+  openProductsTable,
+  openReviewsTable,
+  popover,
   queryBuilderMain,
+  restore,
   selectFilterOperator,
-  expressionEditorWidget,
-  cartesianChartCircleWithColors,
+  setupBooleanQuery,
+  summarize,
   tableHeaderClick,
+  verifyNotebookQuery,
+  visitQuestionAdhoc,
+  visualize,
 } from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID, PRODUCTS, PRODUCTS_ID, REVIEWS, REVIEWS_ID } =
@@ -44,11 +45,11 @@ describe("scenarios > question > filter", () => {
 
     filter({ mode: "notebook" });
     popover().within(() => {
-      cy.findByText("Product").click();
+      cy.findByText("Products").click();
       cy.findByText("Category").click();
-      cy.findByDisplayValue("Is").click();
+      cy.findByText("Is").click();
     });
-    cy.findByRole("listbox").findByText("Is not").click();
+    cy.findByRole("menu").findByText("Is not").click();
     popover().within(() => {
       cy.findByText("Gizmo").click();
       cy.button("Add filter").click();
@@ -760,20 +761,16 @@ describe("scenarios > question > filter", () => {
     cy.findByTestId("apply-filters").click();
     openNotebook();
 
-    // filter
-    getNotebookStep("filter").should("contain", "Category is Gizmo");
-
-    // summarize 1
-    getNotebookStep("summarize", { stage: 0, index: 0 }).should(
-      "contain",
-      "Created At: Month",
-    );
-
-    // summarize 2
-    getNotebookStep("summarize", { stage: 1, index: 0 }).should(
-      "contain",
-      "Average of Count",
-    );
+    verifyNotebookQuery("Products", [
+      {
+        filters: ["Category is Gizmo"],
+        aggregations: ["Count"],
+        breakouts: ["Created At: Month"],
+      },
+      {
+        aggregations: ["Average of Count"],
+      },
+    ]);
   });
 
   it("user shouldn't need to scroll to add filter (metabase#14307)", () => {

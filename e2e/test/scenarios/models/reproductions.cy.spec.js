@@ -1,58 +1,58 @@
 import { SAMPLE_DB_ID, SAMPLE_DB_SCHEMA_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
-  ORDERS_QUESTION_ID,
   ORDERS_DASHBOARD_ID,
+  ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
 import {
+  addOrUpdateDashboardCard,
+  appBar,
+  assertQueryBuilderRowCount,
+  cartesianChartCircle,
+  closeCommandPalette,
+  commandPalette,
+  commandPaletteSearch,
+  createAction,
+  createNativeQuestion,
+  createQuestion,
+  editDashboard,
+  enterCustomColumnDetails,
   entityPickerModal,
   entityPickerModalLevel,
-  navigationSidebar,
-  openNavigationSidebar,
-  popover,
-  restore,
-  modal,
-  openNativeEditor,
-  saveQuestion,
-  openQuestionActions,
-  sidebar,
-  summarize,
-  filter,
-  addOrUpdateDashboardCard,
-  editDashboard,
-  visitDashboard,
-  setModelMetadata,
-  getDashboardCard,
-  setFilter,
-  visitQuestion,
-  createNativeQuestion,
-  startNewQuestion,
-  createQuestion,
   entityPickerModalTab,
-  enterCustomColumnDetails,
+  filter,
   filterField,
   filterFieldPopover,
-  commandPaletteSearch,
-  commandPalette,
-  closeCommandPalette,
-  createAction,
-  setActionsEnabledForDB,
-  cartesianChartCircle,
-  assertQueryBuilderRowCount,
-  saveMetadataChanges,
-  getNotebookStep,
-  appBar,
-  main,
   filterWidget,
-  rightSidebar,
-  leftSidebar,
-  openNotebook,
-  visualize,
   focusNativeEditor,
-  tableHeaderClick,
+  getDashboardCard,
+  getNotebookStep,
+  leftSidebar,
+  main,
+  modal,
+  navigationSidebar,
   onlyOnOSS,
-  visitModel,
+  openNativeEditor,
+  openNavigationSidebar,
+  openNotebook,
+  openQuestionActions,
+  popover,
+  restore,
+  rightSidebar,
+  saveMetadataChanges,
+  saveQuestion,
+  setActionsEnabledForDB,
+  setFilter,
+  setModelMetadata,
+  sidebar,
   startNewNativeModel,
+  startNewQuestion,
+  summarize,
+  tableHeaderClick,
+  visitDashboard,
+  visitModel,
+  visitQuestion,
+  visualize,
 } from "e2e/support/helpers";
 import {
   createMockActionParameter,
@@ -81,6 +81,7 @@ describe("issue 19180", () => {
   const QUESTION = {
     native: { query: "select * from products" },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -202,6 +203,7 @@ describe("issue 19776", { tags: "@OSS" }, () => {
   function openEllipsisMenuFor(item) {
     cy.findByText(item).closest("tr").find(".Icon-ellipsis").click();
   }
+
   beforeEach(() => {
     onlyOnOSS();
     restore();
@@ -305,6 +307,7 @@ describe("issue 20517", () => {
     },
     type: "model",
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -347,6 +350,7 @@ describe.skip("issue 20624", () => {
       column_settings: { '["name","TITLE"]': { column_title: renamedColumn } },
     },
   };
+
   beforeEach(() => {
     cy.intercept("PUT", "/api/card/*").as("updateCard");
 
@@ -420,6 +424,7 @@ describe("issue 22517", () => {
   function renameColumn(column, newName) {
     cy.findByDisplayValue(column).clear().type(newName).blur();
   }
+
   beforeEach(() => {
     cy.intercept("POST", "/api/card/*/query").as("cardQuery");
     cy.intercept("PUT", "/api/card/*").as("updateMetadata");
@@ -524,6 +529,7 @@ describe.skip("issue 22519", () => {
       "source-table": REVIEWS_ID,
     },
   };
+
   beforeEach(() => {
     cy.intercept("PUT", "/api/field/*").as("updateField");
     cy.intercept("POST", "/api/dataset").as("dataset");
@@ -748,6 +754,7 @@ describe("issue 23421", () => {
     },
     type: "model",
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -835,6 +842,7 @@ describe("issue 25537", () => {
       cy.request("PUT", `/api/user/${user_id}`, { locale });
     });
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -1028,6 +1036,7 @@ describe("issue 28971", () => {
     cy.findByText("Showing 4 rows").should("exist");
   });
 });
+
 describe("issue 29378", () => {
   const ACTION_DETAILS = {
     name: "Update orders quantity",
@@ -1109,6 +1118,7 @@ describe("issue 29517 - nested question based on native model with remapped valu
   function selectModelColumn(column) {
     cy.findAllByTestId("header-cell").contains(column).click();
   }
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -1277,6 +1287,7 @@ describe("issue 31309", () => {
       ],
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -1415,6 +1426,7 @@ describe("issue 32483", () => {
     type: "string/=",
     sectionId: "string",
   });
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -1559,6 +1571,7 @@ describe("issue 32963", () => {
       );
     });
   }
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -1574,6 +1587,7 @@ describe("issue 32963", () => {
 
   it("should pick sensible display for model based questions (metabase#32963)", () => {
     cy.findByTestId("qb-header").button("Summarize").click();
+    cy.intercept("POST", "/api/dataset").as("dataset");
 
     rightSidebar().within(() => {
       cy.findAllByText("Created At").eq(0).click();
@@ -1734,6 +1748,7 @@ describe("issue 40252", () => {
     native: { query: "select 1 as b1, 2 as b2" },
     type: "model",
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();

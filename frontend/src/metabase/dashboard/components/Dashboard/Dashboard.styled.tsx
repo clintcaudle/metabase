@@ -6,7 +6,7 @@ import type { ComponentPropsWithoutRef } from "react";
 import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
 import ColorS from "metabase/css/core/colors.module.css";
 import DashboardS from "metabase/css/dashboard.module.css";
-import { color } from "metabase/lib/colors";
+import { isEmbeddingSdk } from "metabase/env";
 import ParametersS from "metabase/parameters/components/ParameterValueWidget.module.css";
 import { FullWidthContainer } from "metabase/styled-components/layout/FullWidthContainer";
 import { breakpointMaxSmall, space } from "metabase/styled-components/theme";
@@ -44,6 +44,7 @@ export const DashboardLoadingAndErrorWrapper = styled(
 
 export const DashboardStyled = styled.div`
   display: flex;
+  flex: 1 0 auto;
   flex-direction: column;
   min-height: 100%;
   width: 100%;
@@ -69,7 +70,7 @@ export const DashboardHeaderContainer = styled.header<{
 }>`
   position: relative;
   z-index: 2;
-  background-color: var(--mb-color-bg-white);
+  background-color: var(--mb-color-background);
   border-bottom: 1px solid var(--mb-color-border);
 
   ${({ isFullscreen }) =>
@@ -90,8 +91,12 @@ export const CardsContainer = styled(FullWidthContainer)`
   margin-top: 8px;
 `;
 
-function getParametersWidgetBgColor(isNightMode: boolean) {
-  return isNightMode ? color("bg-black") : color("bg-light");
+export function getDashboardBodyBgColor(isNightMode: boolean) {
+  if (isEmbeddingSdk) {
+    return "var(--mb-color-bg-dashboard)";
+  }
+
+  return isNightMode ? "var(--mb-color-bg-black)" : "var(--mb-color-bg-light)";
 }
 
 export const ParametersWidgetContainer = styled(FullWidthContainer)<{
@@ -100,9 +105,9 @@ export const ParametersWidgetContainer = styled(FullWidthContainer)<{
   isNightMode: boolean;
   isFullscreen: boolean;
 }>`
-  background-color: ${props => getParametersWidgetBgColor(props.isNightMode)};
+  background-color: ${props => getDashboardBodyBgColor(props.isNightMode)};
   border-bottom: 1px solid
-    ${props => getParametersWidgetBgColor(props.isNightMode)};
+    ${props => getDashboardBodyBgColor(props.isNightMode)};
   padding-top: ${space(1)};
   padding-bottom: ${space(1)};
   /* z-index should be higher than in dashcards */
@@ -113,7 +118,9 @@ export const ParametersWidgetContainer = styled(FullWidthContainer)<{
   ${({ isFullscreen }) =>
     isFullscreen &&
     css`
-      transition: background-color 1s linear, border-color 1s linear,
+      transition:
+        background-color 1s linear,
+        border-color 1s linear,
         color 1s linear;
     `}
 
@@ -125,7 +132,7 @@ export const ParametersWidgetContainer = styled(FullWidthContainer)<{
       border-bottom: 1px solid
         ${hasScroll
           ? "var(--mb-color-border)"
-          : getParametersWidgetBgColor(isNightMode)};
+          : getDashboardBodyBgColor(isNightMode)};
     `}
 `;
 

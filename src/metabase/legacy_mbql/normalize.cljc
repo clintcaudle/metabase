@@ -36,8 +36,8 @@
    [metabase.legacy-mbql.util :as mbql.u]
    [metabase.lib.normalize :as lib.normalize]
    [metabase.lib.util.match :as lib.util.match]
-   [metabase.shared.util.i18n :as i18n]
    [metabase.util :as u]
+   [metabase.util.i18n :as i18n]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]))
 
@@ -72,7 +72,6 @@
      (if (coll? k-or-ks)
        ((set k-or-ks) clause-name)
        (= k-or-ks clause-name)))))
-
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                NORMALIZE TOKENS                                                |
@@ -858,7 +857,6 @@
                       {:query query}
                       e)))))
 
-
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                          WHOLE-QUERY TRANSFORMATIONS                                           |
 ;;; +----------------------------------------------------------------------------------------------------------------+
@@ -984,7 +982,6 @@
        (throw (ex-info "Error removing empty clauses from form."
                        {:form x, :path path}
                        e))))))
-
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                            PUTTING IT ALL TOGETHER                                             |

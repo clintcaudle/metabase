@@ -4,7 +4,7 @@ import { t } from "ttag";
 import _ from "underscore";
 
 import { AuthTabs } from "metabase/admin/settings/components/AuthTabs";
-import SettingToggle from "metabase/admin/settings/components/widgets/SettingToggle";
+import { SettingToggle } from "metabase/admin/settings/components/widgets/SettingToggle";
 import type { SettingElement } from "metabase/admin/settings/types";
 import { useSetting } from "metabase/common/hooks";
 import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
@@ -24,7 +24,7 @@ import {
 } from "metabase-enterprise/api";
 import { hasAnySsoPremiumFeature } from "metabase-enterprise/settings";
 import type { EnterpriseSettings } from "metabase-enterprise/settings/types";
-import type { Settings, SettingValue } from "metabase-types/api";
+import type { SettingValue, Settings } from "metabase-types/api";
 
 import { CopyScimInput, getTextInputStyles } from "./ScimInputs";
 import { ScimTextWarning } from "./ScimTextWarning";

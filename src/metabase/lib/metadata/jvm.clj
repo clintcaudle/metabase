@@ -3,7 +3,7 @@
   (:require
    [clojure.core.cache.wrapped :as cache.wrapped]
    [clojure.string :as str]
-   #_{:clj-kondo/ignore [:discouraged-namespace]}
+   ^{:clj-kondo/ignore [:discouraged-namespace]}
    [metabase.driver :as driver]
    [metabase.lib.metadata.cached-provider :as lib.metadata.cached-provider]
    [metabase.lib.metadata.invocation-tracker :as lib.metadata.invocation-tracker]
@@ -19,7 +19,7 @@
    [methodical.core :as methodical]
    [potemkin :as p]
    [pretty.core :as pretty]
-   #_{:clj-kondo/ignore [:discouraged-namespace]}
+   ^{:clj-kondo/ignore [:discouraged-namespace]}
    [toucan2.core :as t2]
    [toucan2.model :as t2.model]
    [toucan2.pipeline :as t2.pipeline]
@@ -139,7 +139,8 @@
   [query-type model parsed-args honeysql]
   (merge
    (next-method query-type model parsed-args honeysql)
-   {:select    [:field/base_type
+   {:select    [:field/active
+                :field/base_type
                 :field/coercion_strategy
                 :field/database_type
                 :field/description
@@ -379,12 +380,12 @@
 
   pretty/PrettyPrintable
   (pretty [_this]
-          (list `->UncachedApplicationDatabaseMetadataProvider database-id))
+    (list `->UncachedApplicationDatabaseMetadataProvider database-id))
 
   Object
   (equals [_this another]
-          (and (instance? UncachedApplicationDatabaseMetadataProvider another)
-               (= database-id (.database-id ^UncachedApplicationDatabaseMetadataProvider another)))))
+    (and (instance? UncachedApplicationDatabaseMetadataProvider another)
+         (= database-id (.database-id ^UncachedApplicationDatabaseMetadataProvider another)))))
 
 (defn- application-database-metadata-provider-factory
   "Inner function that constructs a new `MetadataProvider`.
@@ -415,5 +416,5 @@
   if you need to."
   [database-id :- ::lib.schema.id/database]
   (if-let [cache-atom *metadata-provider-cache*]
-     (cache.wrapped/lookup-or-miss cache-atom database-id application-database-metadata-provider-factory)
-     (application-database-metadata-provider-factory database-id)))
+    (cache.wrapped/lookup-or-miss cache-atom database-id application-database-metadata-provider-factory)
+    (application-database-metadata-provider-factory database-id)))

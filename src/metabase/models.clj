@@ -5,6 +5,7 @@
    [metabase.models.bookmark :as bookmark]
    [metabase.models.cache-config :as cache-config]
    [metabase.models.card :as card]
+   [metabase.models.channel :as models.channel]
    [metabase.models.collection :as collection]
    [metabase.models.collection-permission-graph-revision
     :as c-perm-revision]
@@ -30,7 +31,7 @@
     :as perms-group-membership]
    [metabase.models.permissions-revision :as perms-revision]
    [metabase.models.persisted-info :as persisted-info]
-   [metabase.models.pulse :as pulse]
+   [metabase.models.pulse :as models.pulse]
    [metabase.models.pulse-card :as pulse-card]
    [metabase.models.pulse-channel :as pulse-channel]
    [metabase.models.pulse-channel-recipient :as pulse-channel-recipient]
@@ -79,6 +80,7 @@
          legacy-metric-important-field/keep-me
          login-history/keep-me
          moderation-review/keep-me
+         models.channel/keep-me
          native-query-snippet/keep-me
          parameter-card/keep-me
          perms-group-membership/keep-me
@@ -89,7 +91,7 @@
          pulse-card/keep-me
          pulse-channel-recipient/keep-me
          pulse-channel/keep-me
-         pulse/keep-me
+         models.pulse/keep-me
          query-cache/keep-me
          query-execution/keep-me
          query-analysis/keep-me
@@ -137,7 +139,7 @@
  [perms-revision PermissionsRevision]
  [a-perm-revision ApplicationPermissionsRevision]
  [persisted-info PersistedInfo]
- [pulse Pulse]
+ [models.pulse Pulse]
  [pulse-card PulseCard]
  [pulse-channel PulseChannel]
  [pulse-channel-recipient PulseChannelRecipient]
@@ -154,6 +156,9 @@
  [timeline-event TimelineEvent]
  [user User]
  [view-log ViewLog])
+
+;;; TODO -- we should move this stuff into [[metabase.models.interface]] so we can be more certain it's always loaded
+;;; during REPL usage and tests
 
 (defenterprise resolve-enterprise-model
   "OSS version; no-op."
@@ -182,8 +187,8 @@
   "Handle models deriving from :metabase/model."
   [symb]
   (or
-    (when (simple-symbol? symb)
-      (let [metabase-models-keyword (keyword "model" (name symb))]
-        (when (isa? metabase-models-keyword :metabase/model)
-          metabase-models-keyword)))
-    (next-method symb)))
+   (when (simple-symbol? symb)
+     (let [metabase-models-keyword (keyword "model" (name symb))]
+       (when (isa? metabase-models-keyword :metabase/model)
+         metabase-models-keyword)))
+   (next-method symb)))

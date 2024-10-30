@@ -1,23 +1,23 @@
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
-  restore,
-  popover,
+  assertQueryBuilderRowCount,
+  chartPathWithFillColor,
+  createNativeQuestion,
+  entityPickerModal,
+  entityPickerModalTab,
+  filter,
+  filterField,
+  getDimensionByName,
   openNotebook,
+  popover,
   remapDisplayValueToFK,
+  restore,
+  summarize,
+  tableHeaderClick,
   visitQuestion,
   visitQuestionAdhoc,
   visualize,
-  getDimensionByName,
-  summarize,
-  filter,
-  filterField,
-  chartPathWithFillColor,
-  assertQueryBuilderRowCount,
-  entityPickerModal,
-  entityPickerModalTab,
-  tableHeaderClick,
-  createNativeQuestion,
 } from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID, PRODUCTS, PRODUCTS_ID, PEOPLE } = SAMPLE_DATABASE;
@@ -409,7 +409,7 @@ describe("scenarios > question > nested", () => {
         cy.findByText("15725").click();
       });
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Pick the metric you want to see").click();
+      cy.findByText("Pick a function or metric").click();
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Count of rows").click();
     });

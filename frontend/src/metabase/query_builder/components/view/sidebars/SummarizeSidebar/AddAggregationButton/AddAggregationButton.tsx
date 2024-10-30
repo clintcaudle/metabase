@@ -12,13 +12,13 @@ import { AddAggregationButtonRoot } from "./AddAggregationButton.styled";
 interface AddAggregationButtonProps {
   query: Lib.Query;
   stageIndex: number;
-  onAddAggregations: (aggregation: Lib.Aggregable[]) => void;
+  onQueryChange: (query: Lib.Query) => void;
 }
 
 export function AddAggregationButton({
   query,
   stageIndex,
-  onAddAggregations,
+  onQueryChange,
 }: AddAggregationButtonProps) {
   const [isOpened, setIsOpened] = useState(false);
   const hasAggregations = Lib.aggregations(query, stageIndex).length > 0;
@@ -26,7 +26,7 @@ export function AddAggregationButton({
 
   const renderTooltip = (children: ReactNode) =>
     hasAggregations ? (
-      <Tooltip label={t`Add metric`}>{children}</Tooltip>
+      <Tooltip label={t`Add a function or metric`}>{children}</Tooltip>
     ) : (
       children
     );
@@ -43,7 +43,7 @@ export function AddAggregationButton({
             aria-label={t`Add aggregation`}
             data-testid="add-aggregation-button"
           >
-            {hasAggregations ? null : t`Add a metric`}
+            {hasAggregations ? null : t`Add a function or metric`}
           </AddAggregationButtonRoot>,
         )}
       </Popover.Target>
@@ -52,13 +52,9 @@ export function AddAggregationButton({
           query={query}
           stageIndex={stageIndex}
           operators={operators}
-          hasExpressionInput={false}
-          onAdd={aggregations => {
-            onAddAggregations(aggregations);
-            setIsOpened(false);
-          }}
-          onSelect={aggregation => {
-            onAddAggregations([aggregation]);
+          allowTemporalComparisons
+          onQueryChange={query => {
+            onQueryChange(query);
             setIsOpened(false);
           }}
         />

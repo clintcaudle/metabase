@@ -5,11 +5,11 @@ import {
   createMockCard,
   createMockDashboard,
   createMockDashboardCard,
+  createMockDataset,
   createMockDatasetData,
-  createMockTextDashboardCard,
   createMockHeadingDashboardCard,
   createMockLinkDashboardCard,
-  createMockDataset,
+  createMockTextDashboardCard,
 } from "metabase-types/api/mocks";
 import { createMockDashboardState } from "metabase-types/store/mocks";
 
@@ -84,7 +84,7 @@ function setup({
       onRemove={jest.fn()}
       markNewCardSeen={jest.fn()}
       navigateToNewCardFromDashboard={jest.fn()}
-      onReplaceAllVisualizationSettings={jest.fn()}
+      onReplaceAllDashCardVisualizationSettings={jest.fn()}
       onUpdateVisualizationSettings={jest.fn()}
       showClickBehaviorSidebar={jest.fn()}
       onChangeLocation={jest.fn()}

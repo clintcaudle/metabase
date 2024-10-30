@@ -1,6 +1,6 @@
 import type { Ace } from "ace-builds";
 import * as ace from "ace-builds/src-noconflict/ace";
-import { createRef, Component } from "react";
+import { Component, createRef } from "react";
 import { connect } from "react-redux";
 import type { ResizableBox, ResizableBoxProps } from "react-resizable";
 import slugg from "slugg";
@@ -50,8 +50,8 @@ import { ResponsiveParametersList } from "../ResponsiveParametersList";
 
 import DataSourceSelectors from "./DataSourceSelectors";
 import {
-  DragHandleContainer,
   DragHandle,
+  DragHandleContainer,
   EditorRoot,
   NativeQueryEditorRoot,
   StyledResizableBox,
@@ -61,7 +61,7 @@ import type { Features as SidebarFeatures } from "./NativeQueryEditorSidebar";
 import { NativeQueryEditorSidebar } from "./NativeQueryEditorSidebar";
 import { RightClickPopover } from "./RightClickPopover";
 import { VisibilityToggler } from "./VisibilityToggler";
-import { ACE_ELEMENT_ID, SCROLL_MARGIN, MIN_HEIGHT_LINES } from "./constants";
+import { ACE_ELEMENT_ID, MIN_HEIGHT_LINES, SCROLL_MARGIN } from "./constants";
 import {
   calcInitialEditorHeight,
   formatQuery,
@@ -107,7 +107,6 @@ type OwnProps = typeof NativeQueryEditor.defaultProps & {
   readOnly?: boolean;
   enableRun?: boolean;
   canChangeDatabase?: boolean;
-  cancelQueryOnLeave?: boolean;
   hasTopBar?: boolean;
   hasParametersList?: boolean;
   hasEditingSidebar?: boolean;
@@ -208,7 +207,6 @@ export class NativeQueryEditor extends Component<
   static defaultProps = {
     isOpen: false,
     enableRun: true,
-    cancelQueryOnLeave: true,
     canChangeDatabase: true,
     resizable: true,
     sidebarFeatures: {
@@ -318,9 +316,6 @@ export class NativeQueryEditor extends Component<
   }
 
   componentWillUnmount() {
-    if (this.props.cancelQueryOnLeave) {
-      this.props.cancelQuery?.();
-    }
     window.cancelAnimationFrame(this._focusFrame);
     this._editor?.destroy?.();
     document.removeEventListener("keydown", this.handleKeyDown);
@@ -426,6 +421,7 @@ export class NativeQueryEditor extends Component<
     // listen to onChange events
     editor.getSession().on("change", this.onChange);
     editor.getSelection().on("changeCursor", this.handleCursorChange);
+    editor.getSelection().on("changeSelection", this.handleCursorChange);
 
     const minLineNumberWidth = 20;
     editor.getSession().gutterRenderer = {

@@ -13,9 +13,9 @@ import type {
 } from "metabase/visualizations/lib/graph/columns";
 import type { ComputedVisualizationSettings } from "metabase/visualizations/types";
 import {
-  numericScale,
   type RowValue,
   type SingleSeries,
+  numericScale,
 } from "metabase-types/api";
 import {
   createMockCard,
@@ -25,13 +25,13 @@ import {
 } from "metabase-types/api/mocks";
 
 import {
+  NO_X_AXIS_VALUES_ERROR_MESSAGE,
+  applyVisualizationSettingsDataTransformations,
+  getDatasetExtents,
   getDatasetKey,
   getJoinedCardsDataset,
   replaceValues,
-  getDatasetExtents,
-  applyVisualizationSettingsDataTransformations,
   sortDataset,
-  NO_X_AXIS_VALUES_ERROR_MESSAGE,
 } from "./dataset";
 import type {
   ChartDataset,
@@ -303,6 +303,7 @@ describe("dataset transform functions", () => {
         [],
         xAxisModel,
         seriesModels,
+        [],
         yAxisScaleTransforms,
         createMockComputedVisualizationSettings({
           "stackable.stack_type": "stacked",
@@ -341,6 +342,7 @@ describe("dataset transform functions", () => {
         ],
         xAxisModel,
         seriesModels,
+        [],
         yAxisScaleTransforms,
         createMockComputedVisualizationSettings({
           "stackable.stack_type": "normalized",
@@ -380,6 +382,7 @@ describe("dataset transform functions", () => {
         [],
         xAxisModel,
         seriesModels,
+        [],
         yAxisScaleTransforms,
         createMockComputedVisualizationSettings({
           series: (key: LegacySeriesSettingsObjectKey) => ({
@@ -434,6 +437,7 @@ describe("dataset transform functions", () => {
           [],
           xAxisModel,
           [createMockSeriesModel({ dataKey: "series1" })],
+          [],
           yAxisScaleTransforms,
           createMockComputedVisualizationSettings({
             series: () => ({
@@ -465,6 +469,7 @@ describe("dataset transform functions", () => {
           [],
           { ...xAxisModel, intervalsCount: 10001 },
           [createMockSeriesModel({ dataKey: "series1" })],
+          [],
           yAxisScaleTransforms,
           createMockComputedVisualizationSettings({
             series: () => ({
@@ -511,6 +516,7 @@ describe("dataset transform functions", () => {
           [],
           xAxisModel,
           seriesModels,
+          [],
           yAxisScaleTransforms,
           createMockComputedVisualizationSettings(),
         );
@@ -530,6 +536,7 @@ describe("dataset transform functions", () => {
             [],
             xAxisModel,
             seriesModels,
+            [],
             yAxisScaleTransforms,
             createMockComputedVisualizationSettings(),
           ),
@@ -543,6 +550,7 @@ describe("dataset transform functions", () => {
         [],
         xAxisModel,
         seriesModels,
+        [],
         yAxisScaleTransforms,
         createMockVisualizationSettings({
           series: (key: LegacySeriesSettingsObjectKey) => ({

@@ -2,47 +2,48 @@ import { SAMPLE_DB_ID, WRITABLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
   addCustomColumn,
-  enterCustomColumnDetails,
-  getNotebookStep,
-  entityPickerModal,
-  popover,
-  visualize,
-  restore,
-  startNewQuestion,
-  queryBuilderMain,
-  selectFilterOperator,
-  entityPickerModalTab,
-  withDatabase,
-  summarize,
+  addOrUpdateDashboardCard,
   cartesianChartCircle,
+  createNativeQuestion,
+  createSegment,
+  editDashboard,
+  enterCustomColumnDetails,
+  entityPickerModal,
+  entityPickerModalTab,
+  filter,
+  filterWidget,
+  getDashboardCard,
+  getNotebookStep,
+  main,
+  modal,
+  multiAutocompleteInput,
+  openNotebook,
   openOrdersTable,
   openProductsTable,
-  openNotebook,
-  filter,
-  visitDashboard,
-  editDashboard,
-  setFilter,
-  filterWidget,
-  visitQuestionAdhoc,
-  addOrUpdateDashboardCard,
-  modal,
+  popover,
+  queryBuilderMain,
+  resetTestTable,
+  restore,
   saveDashboard,
   selectDashboardFilter,
-  getDashboardCard,
-  visitQuestion,
+  selectFilterOperator,
+  setFilter,
+  startNewQuestion,
+  summarize,
   tableHeaderClick,
-  resetTestTable,
-  main,
-  multiAutocompleteInput,
-  createNativeQuestion,
+  visitDashboard,
+  visitQuestion,
+  visitQuestionAdhoc,
+  visualize,
+  withDatabase,
 } from "e2e/support/helpers";
-import { createSegment } from "e2e/support/helpers/e2e-table-metadata-helpers";
 
 const { PRODUCTS, PRODUCTS_ID, ORDERS, ORDERS_ID, REVIEWS, REVIEWS_ID } =
   SAMPLE_DATABASE;
 
 describe.skip("issue 12445", { tags: "@external" }, () => {
   const CC_NAME = "Abbr";
+
   beforeEach(() => {
     restore("mysql-8");
     cy.signInAsAdmin();
@@ -79,6 +80,7 @@ describe.skip("issue 12445", { tags: "@external" }, () => {
 
 describe("issue 13289", () => {
   const CC_NAME = "Math";
+
   beforeEach(() => {
     cy.intercept("POST", "/api/dataset").as("dataset");
 
@@ -134,6 +136,7 @@ describe("issue 13289", () => {
 describe("issue 13751", { tags: "@external" }, () => {
   const CC_NAME = "C-States";
   const PG_DB_NAME = "QA Postgres12";
+
   beforeEach(() => {
     restore("postgres-12");
     cy.signInAsAdmin();
@@ -179,6 +182,7 @@ describe.skip(
     // Ironically, both Prettier and Cypress remove escape characters from our code as well
     // We're testing for the literal sting `(?<=\/\/)[^\/]*`, but we need to escape the escape characters to make it work
     const ESCAPED_REGEX = "(?<=\\/\\/)[^\\/]*";
+
     beforeEach(() => {
       restore("postgres-12");
       cy.signInAsAdmin();
@@ -191,7 +195,7 @@ describe.skip(
 
     it("should not remove regex escape characters (metabase#14517)", () => {
       cy.log("Create custom column using `regexextract()`");
-      cy.icon("add_data").click();
+      cy.findByLabelText("Custom Column").click();
       popover().within(() => {
         cy.get("[contenteditable='true']")
           .type(`regexextract([State], "${ESCAPED_REGEX}")`)
@@ -216,6 +220,7 @@ describe("issue 14843", () => {
       expressions: { [CC_NAME]: ["length", ["field", PEOPLE.CITY, null]] },
     },
   };
+
   beforeEach(() => {
     cy.intercept("POST", "/api/dataset").as("dataset");
 
@@ -258,6 +263,7 @@ describe("issue 18069", () => {
       },
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -318,8 +324,7 @@ describe("issue 18747", () => {
   function addValueToParameterFilter() {
     filterWidget().click();
     popover().within(() => {
-      cy.findByRole("textbox").type("14");
-      cy.findByText("14").click();
+      cy.findByRole("searchbox").type("14");
       cy.button("Add filter").click();
     });
   }
@@ -386,6 +391,7 @@ describe("issue 18814", () => {
       },
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -476,7 +482,7 @@ describe.skip("issue 19744", () => {
   it("custom column after aggregation shouldn't limit or change the behavior of dashboard filters (metabase#19744)", () => {
     editDashboard();
 
-    setFilter("Time", "All Options");
+    setFilter("Date picker", "All Options");
 
     cy.findByTestId("dashcard-container").contains("Select…").click();
     popover().contains("Created At");
@@ -718,6 +724,7 @@ describe("issue 23862", () => {
       breakout: [["expression", "CC"]],
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -765,6 +772,7 @@ describe("issue 24922", () => {
     name: "CustomColumn",
     formula: 'case([OrdersSegment], "Segment", "Other")',
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -806,6 +814,7 @@ describe.skip("issue 25189", () => {
       },
     },
   };
+
   beforeEach(() => {
     cy.intercept("POST", "/api/dataset").as("dataset");
 
@@ -866,18 +875,23 @@ describe.skip("issue 25189", () => {
 
       resetTestTable({ type: dialect, table: tableName });
       cy.request("POST", `/api/database/${WRITABLE_DB_ID}/sync_schema`);
+      cy.intercept("GET", "/api/search*").as("search");
     });
 
     it("should display all summarize options if the only numeric field is a custom column (metabase#27745)", () => {
       startNewQuestion();
 
       entityPickerModal().within(() => {
-        cy.findByPlaceholderText("Search…").type("colors");
+        cy.findByPlaceholderText("Search this collection or everywhere…").type(
+          "colors",
+        );
+        cy.findByText("Everywhere").click();
+        cy.wait("@search");
         cy.findByTestId("result-item")
           .contains(/colors/i)
           .click();
       });
-      cy.icon("add_data").click();
+      cy.findByLabelText("Custom column").click();
       enterCustomColumnDetails({
         formula: "case([ID] > 1, 25, 5)",
         name: "Numeric",
@@ -916,6 +930,7 @@ describe("issue 32032", () => {
       ["expression", "Custom Reviewer", { "base-type": "type/Text" }],
     ],
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();

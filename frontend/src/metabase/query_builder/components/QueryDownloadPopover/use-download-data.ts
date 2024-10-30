@@ -5,14 +5,14 @@ import { useDispatch } from "metabase/lib/redux";
 import { downloadQueryResults } from "metabase/redux/downloads";
 import type Question from "metabase-lib/v1/Question";
 import type {
-  DashboardId,
   DashCardId,
+  DashboardId,
   Dataset,
   ParameterValuesMap,
   VisualizationSettings,
 } from "metabase-types/api";
 
-type UseDownloadDataParams = {
+export type UseDownloadDataParams = {
   question: Question;
   result: Dataset;
   dashboardId?: DashboardId;
@@ -26,6 +26,7 @@ type UseDownloadDataParams = {
 type HandleDataDownloadParams = {
   type: string;
   enableFormatting: boolean;
+  enablePivot: boolean;
 };
 
 export const useDownloadData = ({
@@ -43,11 +44,16 @@ export const useDownloadData = ({
   const dispatch = useDispatch();
 
   return useAsyncFn(
-    async ({ type, enableFormatting }: HandleDataDownloadParams) => {
+    async ({
+      type,
+      enableFormatting,
+      enablePivot,
+    }: HandleDataDownloadParams) => {
       await dispatch(
         downloadQueryResults({
           type,
           enableFormatting,
+          enablePivot,
           question,
           result,
           dashboardId,

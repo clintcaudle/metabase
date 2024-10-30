@@ -1,53 +1,55 @@
-import { WRITABLE_DB_ID, SAMPLE_DB_ID } from "e2e/support/cypress_data";
+import { SAMPLE_DB_ID, WRITABLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { NO_COLLECTION_PERSONAL_COLLECTION_ID } from "e2e/support/cypress_sample_instance_data";
 import {
-  restore,
-  visualize,
-  openTable,
-  openOrdersTable,
-  popover,
-  modal,
-  summarize,
-  startNewQuestion,
+  addCustomColumn,
+  appBar,
+  assertEChartsTooltip,
+  assertQueryBuilderRowCount,
+  cartesianChartCircle,
+  createNativeQuestion,
+  createQuestion,
+  echartsContainer,
+  enterCustomColumnDetails,
   entityPickerModal,
   entityPickerModalTab,
-  questionInfoButton,
-  rightSidebar,
-  getNotebookStep,
-  visitQuestionAdhoc,
-  openNotebook,
-  queryBuilderHeader,
-  cartesianChartCircle,
   filter,
-  moveColumnDown,
-  getDraggableElements,
-  resetTestTable,
-  getTable,
-  resyncDatabase,
-  createQuestion,
-  saveQuestion,
-  echartsContainer,
-  newButton,
-  appBar,
-  openProductsTable,
-  queryBuilderFooter,
-  enterCustomColumnDetails,
-  addCustomColumn,
-  tableInteractive,
-  createNativeQuestion,
-  queryBuilderMain,
-  leftSidebar,
-  assertQueryBuilderRowCount,
-  visitDashboard,
   getDashboardCard,
-  testTooltipPairs,
+  getDraggableElements,
+  getNotebookStep,
+  getTable,
   join,
-  visitQuestion,
-  tableHeaderClick,
-  withDatabase,
-  visitModel,
+  leftSidebar,
+  main,
+  modal,
+  moveColumnDown,
+  newButton,
+  openNotebook,
+  openOrdersTable,
+  openProductsTable,
+  openTable,
+  popover,
+  queryBuilderFooter,
+  queryBuilderHeader,
+  queryBuilderMain,
+  questionInfoButton,
+  resetTestTable,
+  restore,
+  resyncDatabase,
+  rightSidebar,
+  saveQuestion,
   setModelMetadata,
+  sidesheet,
+  startNewQuestion,
+  summarize,
+  tableHeaderClick,
+  tableInteractive,
+  visitDashboard,
+  visitModel,
+  visitQuestion,
+  visitQuestionAdhoc,
+  visualize,
+  withDatabase,
 } from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID, PRODUCTS, PRODUCTS_ID, PEOPLE, PEOPLE_ID } =
@@ -77,6 +79,7 @@ describe("issue 32625, issue 31635", () => {
       },
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -135,6 +138,7 @@ describe("issue 32964", () => {
       },
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -162,6 +166,7 @@ describe("issue 33079", () => {
       breakout: [["field", ORDERS.CREATED_AT, { "temporal-unit": "month" }]],
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -191,6 +196,7 @@ describe("issue 34414", () => {
     query: { "source-table": INVOICES_ID },
     type: "model",
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsNormalUser();
@@ -262,24 +268,25 @@ describe("issue 38176", () => {
 
     cy.findByPlaceholderText("Country").type("NL");
 
-    cy.findByTestId("query-builder-main").button("Get Answer").click();
+    cy.findByTestId("qb-header").icon("play").click();
 
     questionInfoButton().click();
-    rightSidebar().within(() => {
-      cy.findByText("History");
-
+    sidesheet().within(() => {
       cy.findByPlaceholderText("Add description")
         .type("This is a question")
         .blur();
 
       cy.wait("@updateQuestion");
+      cy.findByRole("tab", { name: "History" }).click();
       cy.findByText(/added a description/i);
       cy.findByTestId("question-revert-button").click();
 
+      cy.findByRole("tab", { name: "History" }).click();
       cy.findByText(/reverted to an earlier version/i).should("be.visible");
     });
 
-    cy.findAllByRole("gridcell").should("contain", "NL");
+    cy.findByLabelText("Close").click();
+    tableInteractive().should("contain", "NL");
   });
 });
 
@@ -290,6 +297,7 @@ describe("issue 38354", { tags: "@external" }, () => {
       limit: 5,
     },
   };
+
   beforeEach(() => {
     restore();
     restore("postgres-12");
@@ -360,6 +368,7 @@ describe("issue 39102", () => {
     },
     type: "question",
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -477,6 +486,7 @@ describe("issue 39795", () => {
 describe("issue 40176", () => {
   const DIALECT = "postgres";
   const TABLE = "uuid_pk_table";
+
   beforeEach(() => {
     restore(`${DIALECT}-writable`);
     cy.signInAsAdmin();
@@ -632,7 +642,7 @@ describe(
             .click();
 
           cy.findByTestId("string-filter-picker").within(() => {
-            cy.findByLabelText("Filter operator").should("have.value", "Is");
+            cy.findByLabelText("Filter operator").should("have.text", "Is");
             cy.findByPlaceholderText("Search by ID").type(id);
             cy.button("Add filter").click();
           });
@@ -918,7 +928,7 @@ describe("issue 32020", () => {
 
     cy.log("aggregation column from the source question");
     getNotebookStep("summarize")
-      .findByText(/Pick the metric/)
+      .findByText("Pick a function or metric")
       .click();
     popover().within(() => {
       cy.findByText("Sum of ...").click();
@@ -1207,11 +1217,12 @@ describe("issue 31960", () => {
     getDashboardCard().within(() => {
       cartesianChartCircle().eq(dotIndex).realHover();
     });
-    testTooltipPairs([
-      ["Created At:", "July 10–16, 2022"],
-      ["Count:", String(rowCount)],
-      ["Compared to previous week", "+10%"],
-    ]);
+    assertEChartsTooltip({
+      header: "July 10–16, 2022",
+      rows: [
+        { name: "Count", value: String(rowCount), secondaryValue: "+10%" },
+      ],
+    });
     getDashboardCard().within(() => {
       cartesianChartCircle().eq(dotIndex).click({ force: true });
     });
@@ -1247,10 +1258,11 @@ describe("issue 43294", () => {
     createQuestion(questionDetails, { visitQuestion: true });
     queryBuilderFooter().findByLabelText("Switch to data").click();
 
-    cy.log("compare action");
-    cy.button("Add column").click();
-    popover().findByText("Compare “Count” to previous months").click();
-    popover().button("Done").click();
+    // TODO: reenable this test when we reenable the "Compare to the past" components.
+    // cy.log("compare action");
+    // cy.button("Add column").click();
+    // popover().findByText("Compare to the past").click();
+    // popover().button("Done").click();
 
     cy.log("extract action");
     cy.button("Add column").click();
@@ -2122,6 +2134,120 @@ describe("issue 41612", () => {
         "CREATED_AT",
       ]);
     });
+  });
+});
+
+describe("issue 36027", () => {
+  beforeEach(() => {
+    restore();
+    cy.signInAsAdmin();
+
+    const CONCRETE_CREATED_AT_FIELD_REF = [
+      "field",
+      ORDERS.CREATED_AT,
+      { "base-type": "type/DateTime", "temporal-unit": "month" },
+    ];
+
+    const CREATED_AT_FIELD_REF = [
+      "field",
+      "CREATED_AT",
+      { "base-type": "type/DateTime", "temporal-unit": "month" },
+    ];
+
+    const BASE_QUERY = {
+      aggregation: [["count"]],
+      breakout: [CONCRETE_CREATED_AT_FIELD_REF],
+      "source-table": ORDERS_ID,
+    };
+
+    createQuestion({ query: BASE_QUERY }, { wrapId: true }).then(
+      baseQuestionId => {
+        createQuestion(
+          {
+            display: "waterfall",
+            query: {
+              aggregation: [
+                ["sum", ["field", "count", { "base-type": "type/Integer" }]],
+              ],
+              breakout: [CREATED_AT_FIELD_REF],
+              joins: [
+                {
+                  alias: "Q1",
+                  strategy: "left-join",
+                  "source-table": `card__${baseQuestionId}`,
+                  condition: [
+                    "<=",
+                    CREATED_AT_FIELD_REF,
+                    CONCRETE_CREATED_AT_FIELD_REF,
+                  ],
+                },
+              ],
+              "source-query": BASE_QUERY,
+            },
+            visualization_settings: {
+              "graph.dimensions": ["CREATED_AT"],
+              "graph.metrics": ["sum"],
+            },
+          },
+          { visitQuestion: true },
+        );
+      },
+    );
+  });
+
+  it("should use default metrics/dimensions if they're missing after removing some query clauses (metabase#36027)", () => {
+    openNotebook();
+    getNotebookStep("summarize", { stage: 1 })
+      .findByLabelText("Remove step")
+      .click({ force: true });
+    getNotebookStep("join", { stage: 1 })
+      .findByLabelText("Remove step")
+      .click({ force: true });
+    visualize();
+
+    echartsContainer().within(() => {
+      cy.findByText("Created At").should("be.visible"); // x-axis
+      cy.findByText("Count").should("be.visible"); // y-axis
+
+      // x-axis values
+      ["January 2023", "January 2024", "January 2025", "January 2026"].forEach(
+        state => {
+          cy.findByText(state).should("be.visible");
+        },
+      );
+
+      // y-axis values
+      [
+        "0",
+        "3,000",
+        "6,000",
+        "9,000",
+        "12,000",
+        "15,000",
+        "18,000",
+        "21,000",
+      ].forEach(state => {
+        cy.findByText(state).should("be.visible");
+      });
+    });
+  });
+});
+
+describe("issue 12586", () => {
+  beforeEach(() => {
+    restore();
+    cy.signInAsNormalUser();
+  });
+
+  it("should not show the run button overlay when an error occurs (metabase#12586)", () => {
+    openOrdersTable();
+    summarize();
+
+    cy.intercept("POST", "/api/dataset", req => req.destroy());
+
+    rightSidebar().button("Done").click();
+    main().findByText("We're experiencing server issues").should("be.visible");
+    cy.findByTestId("query-builder-main").icon("play").should("not.be.visible");
   });
 });
 

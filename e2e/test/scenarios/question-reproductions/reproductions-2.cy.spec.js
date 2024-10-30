@@ -2,33 +2,33 @@ import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ORDERS_QUESTION_ID } from "e2e/support/cypress_sample_instance_data";
 import {
+  chartPathWithFillColor,
   commandPalette,
   commandPaletteButton,
-  restore,
-  visualize,
-  openOrdersTable,
-  popover,
-  modal,
-  openNativeEditor,
-  startNewQuestion,
-  entityPickerModal,
-  entityPickerModalTab,
-  visitQuestion,
-  visitQuestionAdhoc,
-  openNotebook,
-  selectFilterOperator,
-  chartPathWithFillColor,
-  openQuestionActions,
-  queryBuilderHeader,
-  saveQuestion,
-  saveSavedQuestion,
-  tableHeaderClick,
-  onlyOnOSS,
-  entityPickerModalItem,
-  newButton,
   createNativeQuestion,
   createQuestion,
+  entityPickerModal,
+  entityPickerModalItem,
+  entityPickerModalTab,
   getNotebookStep,
+  modal,
+  newButton,
+  onlyOnOSS,
+  openNativeEditor,
+  openNotebook,
+  openOrdersTable,
+  openQuestionActions,
+  popover,
+  queryBuilderHeader,
+  restore,
+  saveQuestion,
+  saveSavedQuestion,
+  selectFilterOperator,
+  startNewQuestion,
+  tableHeaderClick,
+  visitQuestion,
+  visitQuestionAdhoc,
+  visualize,
 } from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID, PRODUCTS, PRODUCTS_ID, PEOPLE } = SAMPLE_DATABASE;
@@ -62,6 +62,7 @@ describe("issue 23023", () => {
       type: "query",
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -157,6 +158,7 @@ describe("issue 25016", () => {
       "table.cell_column": "count",
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -252,6 +254,7 @@ describe("issue 27104", () => {
     },
     display: "bar",
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -425,6 +428,7 @@ describe("issue 28874", () => {
       },
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsNormalUser();
@@ -564,6 +568,7 @@ describe("issue 36669", () => {
   beforeEach(() => {
     restore();
     cy.signInAsNormalUser();
+    cy.intercept("GET", "/api/search*").as("search");
   });
 
   it("should be able to change question data source to raw data after selecting saved question (metabase#36669)", () => {
@@ -580,8 +585,12 @@ describe("issue 36669", () => {
     });
 
     entityPickerModal().within(() => {
-      cy.findByPlaceholderText("Search…").type("Orders 36669");
+      cy.findByPlaceholderText("Search this collection or everywhere…").type(
+        "Orders 36669",
+      );
+      cy.wait("@search");
 
+      cy.findByText("Everywhere").click();
       cy.findByRole("tabpanel").findByText("Orders 36669").click();
     });
 
@@ -732,6 +741,7 @@ describe("Custom columns visualization settings", () => {
       },
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();

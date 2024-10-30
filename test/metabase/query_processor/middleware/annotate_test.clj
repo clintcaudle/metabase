@@ -1,4 +1,4 @@
-(ns metabase.query-processor.middleware.annotate-test
+(ns ^:mb/driver-tests metabase.query-processor.middleware.annotate-test
   (:require
    [clojure.test :refer :all]
    [medley.core :as m]
@@ -460,15 +460,14 @@
   (qp.store/with-metadata-provider meta/metadata-provider
     (testing (str "if a driver is kind enough to supply us with some information about the `:cols` that come back, we "
                   "should include that information in the results. Their information should be preferred over ours")
-      (is (=? {:cols [{:name           "metric"
-                       :display_name   "Total Events"
+      (is (=? {:cols [{:display_name   "Total Events"
                        :base_type      :type/Text
                        :effective_type :type/Text
                        :source         :aggregation
                        :field_ref      [:aggregation 0]}]}
               (add-column-info
                (lib.tu.macros/mbql-query venues {:aggregation [[:metric 1]]})
-               {:cols [{:name "totalEvents", :display_name "Total Events", :base_type :type/Text}]}))))))
+               {:cols [{:display_name "Total Events", :base_type :type/Text}]}))))))
 
 (deftest ^:parallel col-info-for-aggregation-clause-test-4
   (qp.store/with-metadata-provider meta/metadata-provider
@@ -483,8 +482,8 @@
 (defn- infered-col-type
   [expr]
   (-> (add-column-info (lib.tu.macros/mbql-query venues {:expressions {"expr" expr}
-                                              :fields      [[:expression "expr"]]
-                                              :limit       10})
+                                                         :fields      [[:expression "expr"]]
+                                                         :limit       10})
                        {})
       :cols
       first
@@ -492,9 +491,9 @@
 
 (deftest ^:parallel computed-columns-inference
   (letfn [(infer [expr] (-> (lib.tu.macros/mbql-query venues
-                                           {:expressions {"expr" expr}
-                                            :fields [[:expression "expr"]]
-                                            :limit 10})
+                              {:expressions {"expr" expr}
+                               :fields [[:expression "expr"]]
+                               :limit 10})
                             (add-column-info {})
                             :cols
                             first))]

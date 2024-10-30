@@ -1,37 +1,37 @@
-import type { Location, Query } from "history";
+import type { Query } from "history";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Route } from "react-router";
 import { usePrevious, useUnmount } from "react-use";
 import _ from "underscore";
 
 import { deletePermanently } from "metabase/archive/actions";
 import { ArchivedEntityBanner } from "metabase/archive/components/ArchivedEntityBanner";
 import {
-  moveDashboardToCollection,
   type NewDashCardOpts,
-  setArchivedDashboard,
   type SetDashboardAttributesOpts,
+  moveDashboardToCollection,
+  setArchivedDashboard,
 } from "metabase/dashboard/actions";
 import type { NavigateToNewCardFromDashboardOpts } from "metabase/dashboard/components/DashCard/types";
+import { useHasDashboardScroll } from "metabase/dashboard/components/Dashboard/use-has-dashboard-scroll";
 import { DashboardHeader } from "metabase/dashboard/components/DashboardHeader";
 import type {
+  CancelledFetchDashboardResult,
   DashboardDisplayOptionControls,
   FetchDashboardResult,
   SuccessfulFetchDashboardResult,
 } from "metabase/dashboard/types";
 import Bookmarks from "metabase/entities/bookmarks";
 import Dashboards from "metabase/entities/dashboards";
-import { getMainElement } from "metabase/lib/dom";
 import { useDispatch } from "metabase/lib/redux";
 import type {
   CardId,
-  Dashboard as IDashboard,
+  DashCardId,
+  DashCardVisualizationSettings,
   DashboardCard,
   DashboardId,
   DashboardTabId,
-  DashCardId,
-  DashCardVisualizationSettings,
+  Dashboard as IDashboard,
   ParameterId,
   ParameterValueOrArray,
   TemporalUnit,
@@ -39,6 +39,7 @@ import type {
   ValuesSourceConfig,
   ValuesSourceType,
 } from "metabase-types/api";
+import { isObject } from "metabase-types/guards";
 import type {
   DashboardSidebarName,
   SelectedTabId,
@@ -64,7 +65,6 @@ import {
 } from "./DashboardEmptyState/DashboardEmptyState";
 
 export type DashboardProps = {
-  route: Route;
   children?: ReactNode;
   canManageSubscriptions: boolean;
   isAdmin: boolean;
@@ -87,7 +87,6 @@ export type DashboardProps = {
   isNavigatingBackToDashboard: boolean;
   addCardOnLoad?: DashCardId;
   editingOnLoad?: string | string[] | boolean;
-  location: Location;
   dashboardId: DashboardId;
   parameterQueryParams: Query;
 
@@ -110,7 +109,6 @@ export type DashboardProps = {
 
   closeNavbar: () => void;
   setErrorPage: (error: unknown) => void;
-  onChangeLocation: (location: Location) => void;
 
   setParameterName: (id: ParameterId, name: string) => void;
   setParameterType: (id: ParameterId, type: string, sectionId: string) => void;
@@ -199,14 +197,16 @@ function Dashboard(props: DashboardProps) {
     setSharing,
     toggleSidebar,
     parameterQueryParams,
-    location,
+    downloadsEnabled = true,
+    noLoaderWrapper = false,
   } = props;
 
   const dispatch = useDispatch();
 
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [hasScroll, setHasScroll] = useState(getMainElement()?.scrollTop > 0);
+
+  const hasScroll = useHasDashboardScroll({ isInitialized });
 
   const previousDashboard = usePrevious(dashboard);
   const previousDashboardId = usePrevious(dashboardId);
@@ -261,7 +261,9 @@ function Dashboard(props: DashboardProps) {
       });
 
       if (!isSuccessfulFetchDashboardResult(result)) {
-        setErrorPage(result.payload);
+        if (!isCancelledFetchDashboardResult(result)) {
+          setErrorPage(result.payload);
+        }
         return;
       }
 
@@ -338,22 +340,6 @@ function Dashboard(props: DashboardProps) {
     selectedTabId,
   ]);
 
-  useEffect(() => {
-    if (!isInitialized) {
-      return;
-    }
-
-    const node = getMainElement();
-
-    const handleScroll = (event: any) => {
-      setHasScroll(event.target.scrollTop > 0);
-    };
-
-    node.addEventListener("scroll", handleScroll, { passive: true });
-
-    return () => node.removeEventListener("scroll", handleScroll);
-  }, [isInitialized]);
-
   useUnmount(() => {
     cancelFetchDashboardCardData();
   });
@@ -399,9 +385,7 @@ function Dashboard(props: DashboardProps) {
         navigateToNewCardFromDashboard={props.navigateToNewCardFromDashboard}
         selectedTabId={selectedTabId}
         onEditingChange={handleSetEditing}
-        // downloads are always enabled on internal dashboards
-        // you will still need to have permissions to download the data
-        downloadsEnabled
+        downloadsEnabled={downloadsEnabled}
       />
     );
   };
@@ -413,6 +397,7 @@ function Dashboard(props: DashboardProps) {
       isNightMode={shouldRenderAsNightMode}
       loading={!dashboard}
       error={error}
+      noWrapper={noLoaderWrapper}
     >
       {() => {
         if (!dashboard) {
@@ -443,7 +428,7 @@ function Dashboard(props: DashboardProps) {
 
             <DashboardHeaderContainer
               data-element-id="dashboard-header-container"
-              id="Dashboard-Header-Container"
+              data-testid="dashboard-header-container"
               isFullscreen={isFullscreen}
               isNightMode={shouldRenderAsNightMode}
             >
@@ -453,7 +438,7 @@ function Dashboard(props: DashboardProps) {
                * in Redux state which kicks off a fetch for the dashboard cards.
                */}
               <DashboardHeader
-                location={location}
+                parameterQueryParams={parameterQueryParams}
                 dashboard={dashboard}
                 isNightMode={shouldRenderAsNightMode}
                 isFullscreen={isFullscreen}
@@ -534,6 +519,12 @@ function isSuccessfulFetchDashboardResult(
 ): result is SuccessfulFetchDashboardResult {
   const hasError = "error" in result;
   return !hasError;
+}
+
+export function isCancelledFetchDashboardResult(
+  result: FetchDashboardResult,
+): result is CancelledFetchDashboardResult {
+  return isObject(result.payload) && Boolean(result.payload.isCancelled);
 }
 
 export { Dashboard };

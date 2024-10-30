@@ -62,6 +62,13 @@ module.exports = {
         warnOnUnassignedImports: false,
       },
     ],
+    "sort-imports": [
+      "error",
+      {
+        // allows this rule to work with import/order
+        ignoreDeclarationSort: true,
+      },
+    ],
     "no-console": [2, { allow: ["warn", "error", "errorBuffer"] }],
     "react/no-is-mounted": 2,
     "react/prefer-es6-class": 2,
@@ -81,6 +88,7 @@ module.exports = {
       { additionalHooks: "(useSafeAsyncFunction)" },
     ],
     "prefer-const": [1, { destructuring: "all" }],
+    "no-restricted-globals": ["error", "close"],
     "no-useless-escape": 0,
     "no-only-tests/no-only-tests": [
       "error",
@@ -133,6 +141,8 @@ module.exports = {
     "plugin:import/errors",
     "plugin:import/warnings",
     "plugin:import/typescript",
+    "plugin:depend/recommended",
+    "plugin:storybook/recommended",
   ],
   settings: {
     "import/internal-regex": "^metabase/|^metabase-lib/",
@@ -160,6 +170,17 @@ module.exports = {
       rules: {
         "no-unconditional-metabase-links-render": "error",
         "no-literal-metabase-strings": "error",
+        "depend/ban-dependencies": [
+          "error",
+          {
+            allowed: [
+              "underscore",
+              "moment",
+              "lodash.orderby",
+              "lodash.debounce",
+            ],
+          },
+        ],
       },
     },
     {
@@ -214,8 +235,9 @@ module.exports = {
         "plugin:jest/recommended",
         "plugin:jest-dom/recommended",
         "plugin:testing-library/react",
+        "plugin:jest-formatting/recommended",
       ],
-      plugins: ["jest", "jest-dom", "testing-library"],
+      plugins: ["jest", "jest-dom", "testing-library", "jest-formatting"],
       files: [
         "*.unit.spec.ts",
         "*.unit.spec.tsx",
@@ -225,6 +247,11 @@ module.exports = {
       rules: {
         "jest/valid-title": ["error", { ignoreTypeOfDescribeName: true }],
       },
+    },
+    {
+      // Enable jest formatting for cypress tests too, the plugin logic just works
+      extends: ["plugin:jest-formatting/recommended"],
+      files: ["*.cy.spec.ts", "*.cy.spec.js"],
     },
   ],
 };

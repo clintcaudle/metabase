@@ -4,16 +4,16 @@ import fetchMock from "fetch-mock";
 import { act, screen } from "__support__/ui";
 import type { SetupOpts } from "metabase/admin/performance/components/test-utils";
 import {
+  setupStrategyEditorForDatabases as baseSetup,
   changeInput,
   getSaveButton,
-  setupStrategyEditorForDatabases as baseSetup,
 } from "metabase/admin/performance/components/test-utils";
 import { getShortStrategyLabel } from "metabase/admin/performance/utils";
 import { PLUGIN_CACHING } from "metabase/plugins";
 import {
-  type ScheduleStrategy,
-  type DurationStrategy,
   CacheDurationUnit,
+  type DurationStrategy,
+  type ScheduleStrategy,
 } from "metabase-types/api";
 import { createMockTokenFeatures } from "metabase-types/api/mocks";
 
@@ -29,12 +29,15 @@ describe("StrategyEditorForDatabases", () => {
   beforeEach(() => {
     setup();
   });
+
   afterEach(() => {
     fetchMock.restore();
   });
+
   it("lets user override root strategy on enterprise instance", async () => {
     expect(PLUGIN_CACHING.canOverrideRootStrategy).toBe(true);
   });
+
   it("should show strategy form launchers", async () => {
     const rootStrategyHeading = await screen.findByText("Default policy");
     expect(rootStrategyHeading).toBeInTheDocument();

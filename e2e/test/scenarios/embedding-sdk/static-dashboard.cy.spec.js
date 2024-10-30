@@ -9,8 +9,8 @@ import {
   visitFullAppEmbeddingUrl,
 } from "e2e/support/helpers";
 import {
-  describeSDK,
   EMBEDDING_SDK_STORY_HOST,
+  describeSDK,
 } from "e2e/support/helpers/e2e-embedding-sdk-helpers";
 import {
   JWT_SHARED_SECRET,
@@ -23,6 +23,9 @@ describeSDK("scenarios > embedding-sdk > static-dashboard", () => {
     cy.signInAsAdmin();
     setTokenFeatures("all");
     setupJwt();
+    cy.request("PUT", "/api/setting", {
+      "enable-embedding-sdk": true,
+    });
 
     const textCard = getTextCardDetails({ col: 16, text: "Text text card" });
     const questionCard = {

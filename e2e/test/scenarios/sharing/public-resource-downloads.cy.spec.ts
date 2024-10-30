@@ -1,7 +1,7 @@
 import {
+  ORDERS_BY_YEAR_QUESTION_ID,
   ORDERS_DASHBOARD_DASHCARD_ID,
   ORDERS_DASHBOARD_ID,
-  ORDERS_BY_YEAR_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
 import {
   assertNotEmptyObject,
@@ -11,6 +11,7 @@ import {
   expectNoBadSnowplowEvents,
   getDashboardCardMenu,
   main,
+  openSharingMenu,
   popover,
   resetSnowplow,
   restore,
@@ -40,12 +41,11 @@ describeWithSnowplowEE(
 
         cy.visit(`/dashboard/${ORDERS_DASHBOARD_ID}`);
 
-        cy.icon("share").click();
-        popover().findByText("Create a public link").click();
+        openSharingMenu("Create a public link");
 
         popover()
           .findByTestId("public-link-input")
-          .should("not.have.value", "")
+          .should("contain.value", "/public/")
           .invoke("val")
           .then(url => {
             publicLink = url as string;
@@ -122,11 +122,11 @@ describeWithSnowplowEE(
 
         cy.visit(`/question/${ORDERS_BY_YEAR_QUESTION_ID}`);
 
-        cy.icon("share").click();
-        popover().findByText("Create a public link").click();
+        openSharingMenu("Create a public link");
 
         popover()
           .findByTestId("public-link-input")
+          .should("contain.value", "/public/")
           .invoke("val")
           .then(url => {
             publicLink = url as string;
@@ -147,7 +147,10 @@ describeWithSnowplowEE(
         waitLoading();
 
         cy.findByTestId("download-button").click();
-        popover().findByText(".png").click();
+        popover().within(() => {
+          cy.findByText(".png").click();
+          cy.findByTestId("download-results-button").click();
+        });
 
         cy.verifyDownload(".png", { contains: true });
 

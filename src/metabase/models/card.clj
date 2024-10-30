@@ -11,7 +11,6 @@
    [metabase.audit :as audit]
    [metabase.config :as config]
    [metabase.db.query :as mdb.query]
-   [metabase.email.messages :as messages]
    [metabase.events :as events]
    [metabase.legacy-mbql.normalize :as mbql.normalize]
    [metabase.lib.core :as lib]
@@ -22,13 +21,14 @@
    [metabase.models.audit-log :as audit-log]
    [metabase.models.card.metadata :as card.metadata]
    [metabase.models.collection :as collection]
+   [metabase.models.data-permissions :as data-perms]
    [metabase.models.field-values :as field-values]
    [metabase.models.interface :as mi]
    [metabase.models.moderation-review :as moderation-review]
    [metabase.models.parameter-card :as parameter-card :refer [ParameterCard]]
    [metabase.models.params :as params]
    [metabase.models.permissions :as perms]
-   [metabase.models.pulse :as pulse]
+   [metabase.models.pulse :as models.pulse]
    [metabase.models.query :as query]
    [metabase.models.query.permissions :as query-perms]
    [metabase.models.revision :as revision]
@@ -194,6 +194,20 @@
   [cards]
   (with-can-run-adhoc-query cards))
 
+;; note: perms lookup here in the course of fetching a card/model should hit a cache pre-warmed by
+;; the `:can_run_adhoc_query` above
+(mi/define-batched-hydration-method add-can-manage-db
+  :can_manage_db
+  "Hydrate can_manage_db onto cards. Indicates whether the current user has access to the database admin page for the
+  database powering this card."
+  [cards]
+  (map
+   (fn [card]
+     (assoc card
+            :can_manage_db
+            (data-perms/user-has-permission-for-database? api/*current-user-id* :perms/manage-database :yes (:database_id card))))
+   cards))
+
 (methodical/defmethod t2/batched-hydrate [:model/Card :parameter_usage_count]
   [_model k cards]
   (mi/instances-with-hydrated-data
@@ -242,11 +256,12 @@
   (mi/instances-with-hydrated-data
    cards k
    #(group-by :source_card_id
-              (t2/select :model/Card
-                         :source_card_id [:in (map :id cards)],
-                         :archived false,
-                         :type :metric,
-                         {:order-by [[:name :asc]]}))
+              (->> (t2/select :model/Card
+                              :source_card_id [:in (map :id cards)],
+                              :archived false,
+                              :type :metric,
+                              {:order-by [[:name :asc]]})
+                   (filter mi/can-read?)))
    :id))
 
 ;; There's more hydration in the shared metabase.moderation namespace, but it needs to be required:
@@ -415,7 +430,7 @@
       (collection/check-collection-namespace Card (:collection_id card)))))
 
 (defenterprise pre-update-check-sandbox-constraints
- "Checks additional sandboxing constraints for Metabase Enterprise Edition. The OSS implementation is a no-op."
+  "Checks additional sandboxing constraints for Metabase Enterprise Edition. The OSS implementation is a no-op."
   metabase-enterprise.sandbox.models.group-table-access-policy
   [_])
 
@@ -434,23 +449,23 @@
               {:keys [parameters]}   (t2/select-one [model :parameters] :id po-id)
               affected-param-ids-set (cond
                                       ;; update all parameters that use this card as source
-                                      (:archived changes)
-                                      (set (map :parameter_id param-cards))
+                                       (:archived changes)
+                                       (set (map :parameter_id param-cards))
 
                                       ;; update only parameters that have value_field no longer in this card
-                                      (:result_metadata changes)
-                                      (let [param-id->parameter (m/index-by :id parameters)]
-                                        (->> param-cards
-                                             (filter (fn [param-card]
+                                       (:result_metadata changes)
+                                       (let [param-id->parameter (m/index-by :id parameters)]
+                                         (->> param-cards
+                                              (filter (fn [param-card]
                                                        ;; if cant find the value-field in result_metadata, then we should
                                                        ;; remove it
-                                                       (nil? (qp.util/field->field-info
-                                                              (get-in (param-id->parameter (:parameter_id param-card)) [:values_source_config :value_field])
-                                                              (:result_metadata changes)))))
-                                             (map :parameter_id)
-                                             set))
+                                                        (nil? (qp.util/field->field-info
+                                                               (get-in (param-id->parameter (:parameter_id param-card)) [:values_source_config :value_field])
+                                                               (:result_metadata changes)))))
+                                              (map :parameter_id)
+                                              set))
 
-                                      :else #{})
+                                       :else #{})
               new-parameters (map (fn [parameter]
                                     (if (affected-param-ids-set (:id parameter))
                                       (-> parameter
@@ -527,13 +542,12 @@
       ;; TODO: this would ideally be done only once the query changes have been commited to the database, to avoid
       ;;       race conditions leading to stale analysis triggering the "last one wins" analysis update.
       (when (contains? changes :dataset_query)
-        (query-analysis/analyze-async! changes))
+        (query-analysis/analyze! changes))
       (when (:parameters changes)
         (parameter-card/upsert-or-delete-from-parameters! "card" id (:parameters changes)))
       ;; additional checks (Enterprise Edition only)
       (pre-update-check-sandbox-constraints changes)
       (assert-valid-type (merge old-card-info changes)))))
-
 
 (t2/define-after-select :model/Card
   [card]
@@ -558,7 +572,7 @@
       (log/info "Card references Fields in params:" field-ids)
       (field-values/update-field-values-for-on-demand-dbs! field-ids))
     (parameter-card/upsert-or-delete-from-parameters! "card" (:id card) (:parameters card))
-    (query-analysis/analyze-async! card)))
+    (query-analysis/analyze! card)))
 
 (t2/define-before-update :model/Card
   [{:keys [verified-result-metadata?] :as card}]
@@ -574,8 +588,8 @@
       ;; change for a native query, populate-result-metadata removes it (set to nil) unless prevented by the
       ;; verified-result-metadata? flag (see #37009).
       (cond-> #_changes
-        (or (empty? (:result_metadata card))
-            (not verified-result-metadata?))
+       (or (empty? (:result_metadata card))
+           (not verified-result-metadata?))
         card.metadata/populate-result-metadata)
       pre-update
       populate-query-fields
@@ -693,39 +707,24 @@
        (< 1 (count (get-in new-card [:dataset_query :query :breakout])))))
 
 (defn- delete-alert-and-notify!
-  "Removes all of the alerts and notifies all of the email recipients of the alerts change via `NOTIFY-FN!`"
-  [& {:keys [notify-fn! alerts actor]}]
-  (t2/delete! :model/Pulse :id [:in (map :id alerts)])
-  (doseq [{:keys [channels] :as alert} alerts
-          :let [email-channel (m/find-first #(= :email (:channel_type %)) channels)]]
-    (doseq [recipient (:recipients email-channel)]
-      (notify-fn! alert recipient actor))))
-
-(defn delete-alert-and-notify-archived!
-  "Removes all alerts and will email each recipient letting them know"
-  [& {:keys [alerts actor]}]
-  (delete-alert-and-notify! {:notify-fn! messages/send-alert-stopped-because-archived-email!
-                             :alerts     alerts
-                             :actor      actor}))
-
-(defn- delete-alert-and-notify-changed! [& {:keys [alerts actor]}]
-  (delete-alert-and-notify! {:notify-fn! messages/send-alert-stopped-because-changed-email!
-                             :alerts     alerts
-                             :actor      actor}))
+  "Removes all of the alerts and notifies all of the email recipients of the alerts change."
+  [topic actor alerts]
+  (t2/delete! :model/Pulse :id [:in (mapv u/the-id alerts)])
+  (events/publish-event! topic {:alerts alerts, :actor actor}))
 
 (defn- delete-alerts-if-needed! [& {:keys [old-card new-card actor]}]
   ;; If there are alerts, we need to check to ensure the card change doesn't invalidate the alert
-  (when-let [alerts (binding [pulse/*allow-hydrate-archived-cards* true]
-                      (seq (pulse/retrieve-alerts-for-cards {:card-ids [(:id new-card)]})))]
+  (when-let [alerts (binding [models.pulse/*allow-hydrate-archived-cards* true]
+                      (not-empty (models.pulse/retrieve-alerts-for-cards {:card-ids [(u/the-id new-card)]})))]
     (cond
 
       (card-archived? old-card new-card)
-      (delete-alert-and-notify-archived! :alerts alerts, :actor actor)
+      (delete-alert-and-notify! :event/card-update.alerts-deleted.card-archived actor alerts)
 
       (or (display-change-broke-alert? old-card new-card)
           (goal-missing? old-card new-card)
           (multiple-breakouts? new-card))
-      (delete-alert-and-notify-changed! :alerts alerts, :actor actor)
+      (delete-alert-and-notify! :event/card-update.alerts-deleted.card-became-invalid actor alerts)
 
       ;; The change doesn't invalidate the alert, do nothing
       :else
@@ -813,16 +812,14 @@
 
 ;;; ------------------------------------------------- Serialization --------------------------------------------------
 
-(defmethod serdes/extract-query "Card" [_ opts]
-  (serdes/extract-query-collections Card opts))
-
 (defn- export-result-metadata [metadata]
   (when metadata
     (for [m metadata]
       (-> (dissoc m :fingerprint)
           (m/update-existing :table_id  serdes/*export-table-fk*)
           (m/update-existing :id        serdes/*export-field-fk*)
-          (m/update-existing :field_ref serdes/export-mbql)))))
+          (m/update-existing :field_ref serdes/export-mbql)
+          (m/update-existing :fk_target_field_id serdes/*export-field-fk*)))))
 
 (defn- import-result-metadata [metadata]
   (when metadata
@@ -830,22 +827,29 @@
       (-> m
           (m/update-existing :table_id  serdes/*import-table-fk*)
           (m/update-existing :id        serdes/*import-field-fk*)
-          (m/update-existing :field_ref serdes/import-mbql)))))
+          (m/update-existing :field_ref serdes/import-mbql)
+          ;; FIXME: remove that `if` after v52
+          (m/update-existing :fk_target_field_id #(if (number? %) % (serdes/*import-field-fk* %)))))))
 
 (defn- result-metadata-deps [metadata]
   (when (seq metadata)
-    (reduce set/union #{} (for [m (seq metadata)]
-                            (reduce set/union (serdes/mbql-deps (:field_ref m))
-                                    [(when (:table_id m) #{(serdes/table->path (:table_id m))})
-                                     (when (:id m)       #{(serdes/field->path (:id m))})])))))
+    (-> (reduce into #{} (for [m metadata]
+                           (conj (serdes/mbql-deps (:field_ref m))
+                                 (when (:table_id m)
+                                   (serdes/table->path (:table_id m)))
+                                 (when (:id m)
+                                   (serdes/field->path (:id m)))
+                                 (when (and (:fk_target_field_id m)
+                                            ;; FIXME: remove that check after v52
+                                            (not (number? (:fk_target_field_id m))))
+                                   (serdes/field->path (:fk_target_field_id m))))))
+        (disj nil))))
 
 (defmethod serdes/make-spec "Card"
-  [_model-name]
-  {:copy [:archived :archived_directly :collection_position :collection_preview :created_at :description :display
+  [_model-name _opts]
+  {:copy [:archived :archived_directly :collection_position :collection_preview :description :display
           :embedding_params :enable_embedding :entity_id :metabase_version :public_uuid :query_type :type :name]
-   :skip [;; always instance-specific
-          :id :updated_at
-          ;; cache invalidation is instance-specific
+   :skip [;; cache invalidation is instance-specific
           :cache_invalidated_at
           ;; those are instance-specific analytic columns
           :view_count :last_used_at :initially_published_at
@@ -854,28 +858,18 @@
           ;; this column is not used anymore
           :cache_ttl]
    :transform
-   {:database_id            [#(serdes/*export-fk-keyed* % 'Database :name)
-                             #(serdes/*import-fk-keyed* % 'Database :name)]
-    :table_id               [serdes/*export-table-fk*
-                             serdes/*import-table-fk*]
-    :source_card_id         [#(serdes/*export-fk* % :model/Card)
-                             #(serdes/*import-fk* % :model/Card)]
-    :collection_id          [#(serdes/*export-fk* % 'Collection)
-                             #(serdes/*import-fk* % 'Collection)]
-    :creator_id             [serdes/*export-user*
-                             serdes/*import-user*]
-    :made_public_by_id      [serdes/*export-user*
-                             serdes/*import-user*]
-    :dataset_query          [serdes/export-mbql
-                             serdes/import-mbql]
-    :parameters             [serdes/export-parameters
-                             serdes/import-parameters]
-    :parameter_mappings     [serdes/export-parameter-mappings
-                             serdes/import-parameter-mappings]
-    :visualization_settings [serdes/export-visualization-settings
-                             serdes/import-visualization-settings]
-    :result_metadata        [export-result-metadata
-                             import-result-metadata]}})
+   {:created_at             (serdes/date)
+    :database_id            (serdes/fk :model/Database :name)
+    :table_id               (serdes/fk :model/Table)
+    :source_card_id         (serdes/fk :model/Card)
+    :collection_id          (serdes/fk :model/Collection)
+    :creator_id             (serdes/fk :model/User)
+    :made_public_by_id      (serdes/fk :model/User)
+    :dataset_query          {:export serdes/export-mbql :import serdes/import-mbql}
+    :parameters             {:export serdes/export-parameters :import serdes/import-parameters}
+    :parameter_mappings     {:export serdes/export-parameter-mappings :import serdes/import-parameter-mappings}
+    :visualization_settings {:export serdes/export-visualization-settings :import serdes/import-visualization-settings}
+    :result_metadata        {:export export-result-metadata :import import-result-metadata}}})
 
 (defmethod serdes/dependencies "Card"
   [{:keys [collection_id database_id dataset_query parameters parameter_mappings
@@ -898,18 +892,16 @@
         template-tags      (some->> card :dataset_query :native :template-tags vals (keep :card-id))
         parameters-card-id (some->> card :parameters (keep (comp :card_id :values_source_config)))
         snippets           (some->> card :dataset_query :native :template-tags vals (keep :snippet-id))]
-    (set
-     (concat
-      (when (and (string? source-table)
-                 (str/starts-with? source-table "card__"))
-        [["Card" (parse-long (subs source-table 6))]])
-      (for [card-id template-tags]
-        ["Card" card-id])
-      (for [card-id parameters-card-id]
-        ["Card" card-id])
-      (for [snippet-id snippets]
-        ["NativeQuerySnippet" snippet-id])))))
-
+    (into {} (concat
+              (when (and (string? source-table)
+                         (str/starts-with? source-table "card__"))
+                {["Card" (parse-long (subs source-table 6))] {"Card" id}})
+              (for [card-id template-tags]
+                {["Card" card-id] {"Card" id}})
+              (for [card-id parameters-card-id]
+                {["Card" card-id] {"Card" id}})
+              (for [snippet-id snippets]
+                {["NativeQuerySnippet" snippet-id] {"Card" id}})))))
 
 ;;; ------------------------------------------------ Audit Log --------------------------------------------------------
 

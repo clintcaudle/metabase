@@ -3,8 +3,7 @@ import { useMemo } from "react";
 import { getIsNightMode } from "metabase/dashboard/selectors";
 import { usePalette } from "metabase/hooks/use-palette";
 import { color } from "metabase/lib/colors";
-import { formatValue } from "metabase/lib/formatting/value";
-import { measureTextWidth, measureTextHeight } from "metabase/lib/measure-text";
+import { measureTextHeight, measureTextWidth } from "metabase/lib/measure-text";
 import { useSelector } from "metabase/lib/redux";
 import { useMantineTheme } from "metabase/ui";
 import { getVisualizationTheme } from "metabase/visualizations/shared/utils/theme";
@@ -34,7 +33,6 @@ export const useBrowserRenderingContext = (
 
     return {
       getColor: name => color(name, palette),
-      formatValue: (value, options) => String(formatValue(value, options)),
       measureText: measureTextWidth,
       measureTextHeight,
       fontFamily: `${fontFamily}, Arial, sans-serif`,

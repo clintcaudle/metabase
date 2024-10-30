@@ -7,16 +7,19 @@ import { getEmbeddingThemeOverride } from "./get-embedding-theme";
 
 describe("Transform Embedding Theme Override", () => {
   it("should transform MetabaseTheme to EmbeddingThemeOverride", () => {
-    const theme = getEmbeddingThemeOverride({
-      lineHeight: 1.5,
-      fontSize: "2rem",
-      fontFamily: "Roboto",
-      colors: {
-        brand: "hotpink",
-        "text-primary": "yellow",
-        "text-tertiary": "green",
+    const theme = getEmbeddingThemeOverride(
+      {
+        lineHeight: 1.5,
+        fontSize: "2rem",
+        fontFamily: "Roboto",
+        colors: {
+          brand: "hotpink",
+          "text-primary": "yellow",
+          "text-tertiary": "green",
+        },
       },
-    });
+      "Roboto",
+    );
 
     expect(theme).toEqual({
       lineHeight: 1.5,
@@ -24,7 +27,9 @@ describe("Transform Embedding Theme Override", () => {
       colors: {
         brand: expect.arrayContaining(["hotpink"]),
         "text-dark": expect.arrayContaining(["yellow"]),
+        "text-primary": expect.arrayContaining(["yellow"]),
         "text-light": expect.arrayContaining(["green"]),
+        "text-tertiary": expect.arrayContaining(["green"]),
       },
       other: {
         fontSize: "2rem",

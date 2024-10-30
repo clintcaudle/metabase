@@ -1,33 +1,41 @@
-import { type PropsWithChildren, useMemo } from "react";
+import type { PropsWithChildren } from "react";
 
-import { InteractiveQuestionResult } from "embedding-sdk/components/private/InteractiveQuestionResult";
-import { withPublicComponentWrapper } from "embedding-sdk/components/private/PublicComponentWrapper";
-import type { SdkPluginsConfig } from "embedding-sdk/lib/plugins";
-import type { CardId } from "metabase-types/api";
-
+import { EditorViewControl } from "embedding-sdk/components/private/EditorViewControl";
 import {
   BackButton,
-  FilterBar,
-  QuestionResetButton,
-  Title,
+  ChartTypeSelector,
+  Editor,
+  EditorButton,
   Filter,
+  FilterBar,
   FilterButton,
+  QuestionResetButton,
+  QuestionVisualization,
+  SaveButton,
+  SdkSaveQuestionForm,
   Summarize,
   SummarizeButton,
-  Notebook,
-  NotebookButton,
-  QuestionVisualization,
-} from "./components";
-import { InteractiveQuestionProvider } from "./context";
+  Title,
+} from "embedding-sdk/components/private/InteractiveQuestion/components";
+import {
+  InteractiveQuestionProvider,
+  type InteractiveQuestionProviderProps,
+} from "embedding-sdk/components/private/InteractiveQuestion/context";
+import {
+  InteractiveQuestionResult,
+  type InteractiveQuestionResultProps,
+} from "embedding-sdk/components/private/InteractiveQuestionResult";
+import { withPublicComponentWrapper } from "embedding-sdk/components/private/PublicComponentWrapper";
+import type { FlexibleSizeProps } from "embedding-sdk/components/private/util/FlexibleSizeComponent";
 
-type InteractiveQuestionProps = PropsWithChildren<{
-  questionId: CardId;
-  withResetButton?: boolean;
-  withTitle?: boolean;
-  customTitle?: React.ReactNode;
-  plugins?: SdkPluginsConfig;
-  height?: string | number;
-}>;
+export type InteractiveQuestionProps = PropsWithChildren<{
+  questionId?: InteractiveQuestionProviderProps["cardId"];
+  plugins?: InteractiveQuestionProviderProps["componentPlugins"];
+}> &
+  Pick<
+    InteractiveQuestionProviderProps,
+    "onBeforeSave" | "onSave" | "isSaveEnabled" | "entityTypeFilter"
+  >;
 
 export const _InteractiveQuestion = ({
   questionId,
@@ -36,43 +44,38 @@ export const _InteractiveQuestion = ({
   customTitle,
   plugins,
   height,
+  width,
+  className,
+  style,
   children = null,
-}: InteractiveQuestionProps): JSX.Element | null => {
-  const { location, params } = useMemo(
-    () => getQuestionParameters(questionId),
-    [questionId],
-  );
-
-  return (
-    <InteractiveQuestionProvider
-      location={location}
-      params={params}
-      componentPlugins={plugins}
-    >
-      {children ?? (
-        <InteractiveQuestionResult
-          height={height}
-          customTitle={customTitle}
-          withResetButton={withResetButton}
-          withTitle={withTitle}
-        />
-      )}
-    </InteractiveQuestionProvider>
-  );
-};
-
-export const getQuestionParameters = (questionId: CardId) => {
-  return {
-    location: {
-      query: {}, // TODO: add here wrapped parameterValues
-      hash: "",
-      pathname: `/question/${questionId}`,
-    },
-    params: {
-      slug: questionId.toString(),
-    },
-  };
-};
+  onBeforeSave,
+  onSave,
+  isSaveEnabled,
+  entityTypeFilter,
+}: InteractiveQuestionProps &
+  InteractiveQuestionResultProps &
+  FlexibleSizeProps): JSX.Element | null => (
+  <InteractiveQuestionProvider
+    cardId={questionId}
+    componentPlugins={plugins}
+    onBeforeSave={onBeforeSave}
+    onSave={onSave}
+    isSaveEnabled={isSaveEnabled}
+    entityTypeFilter={entityTypeFilter}
+  >
+    {children ?? (
+      <InteractiveQuestionResult
+        height={height}
+        width={width}
+        className={className}
+        style={style}
+        customTitle={customTitle}
+        withResetButton={withResetButton}
+        withTitle={withTitle}
+      />
+    )}
+  </InteractiveQuestionProvider>
+);
 
 const InteractiveQuestion = withPublicComponentWrapper(
   _InteractiveQuestion,
@@ -85,9 +88,17 @@ const InteractiveQuestion = withPublicComponentWrapper(
   Title: typeof Title;
   Summarize: typeof Summarize;
   SummarizeButton: typeof SummarizeButton;
-  Notebook: typeof Notebook;
-  NotebookButton: typeof NotebookButton;
+  /** @deprecated Use `InteractiveQuestion.Editor` instead */
+  Notebook: typeof Editor;
+  Editor: typeof Editor;
+  /** @deprecated Use `InteractiveQuestion.EditorButton` instead */
+  NotebookButton: typeof EditorButton;
+  EditorButton: typeof EditorButton;
   QuestionVisualization: typeof QuestionVisualization;
+  SaveQuestionForm: typeof SdkSaveQuestionForm;
+  SaveButton: typeof SaveButton;
+  ChartTypeSelector: typeof ChartTypeSelector;
+  EditorViewControl: typeof EditorViewControl;
 };
 
 InteractiveQuestion.BackButton = BackButton;
@@ -98,8 +109,16 @@ InteractiveQuestion.ResetButton = QuestionResetButton;
 InteractiveQuestion.Title = Title;
 InteractiveQuestion.Summarize = Summarize;
 InteractiveQuestion.SummarizeButton = SummarizeButton;
-InteractiveQuestion.Notebook = Notebook;
-InteractiveQuestion.NotebookButton = NotebookButton;
+/** @deprecated Use `InteractiveQuestion.Editor` instead */
+InteractiveQuestion.Notebook = Editor;
+InteractiveQuestion.Editor = Editor;
+/** @deprecated Use `InteractiveQuestion.EditorButton` instead */
+InteractiveQuestion.NotebookButton = EditorButton;
+InteractiveQuestion.EditorButton = EditorButton;
 InteractiveQuestion.QuestionVisualization = QuestionVisualization;
+InteractiveQuestion.SaveQuestionForm = SdkSaveQuestionForm;
+InteractiveQuestion.SaveButton = SaveButton;
+InteractiveQuestion.ChartTypeSelector = ChartTypeSelector;
+InteractiveQuestion.EditorViewControl = EditorViewControl;
 
 export { InteractiveQuestion };

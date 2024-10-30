@@ -46,7 +46,9 @@
   "Entities in the order they should be serialized/deserialized. This is done so we make sure that we load
   instances of entities before others that might depend on them, e.g. `Databases` before `Tables` before `Fields`."
   (concat
-   [:model/Database
+   [:model/Channel
+    :model/ChannelTemplate
+    :model/Database
     :model/User
     :model/Setting
     :model/Table
@@ -96,7 +98,12 @@
     :model/TablePrivileges
     :model/AuditLog
     :model/RecentViews
-    :model/UserParameterValue]
+    :model/UserParameterValue
+    ;; 51+
+    :model/Notification
+    :model/NotificationSubscription
+    :model/NotificationHandler
+    :model/NotificationRecipient]
    (when config/ee-available?
      [:model/GroupTableAccessPolicy
       :model/ConnectionImpersonation])))
@@ -364,7 +371,6 @@
             (throw (ex-info (format "Error updating sequence values for %s: %s" model (ex-message e))
                             {:model model}
                             e))))))))
-
 
 (defmethod update-sequence-values! :h2
   [_db-type data-source]

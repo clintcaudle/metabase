@@ -1,28 +1,44 @@
-import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
+import { SAMPLE_DB_ID, USERS } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
   ADMIN_PERSONAL_COLLECTION_ID,
+  ALL_USERS_GROUP_ID,
   ORDERS_COUNT_QUESTION_ID,
   ORDERS_MODEL_ID,
 } from "e2e/support/cypress_sample_instance_data";
 import {
+  type NativeQuestionDetails,
+  assertDatasetReqIsSandboxed,
   createNativeQuestion,
   createQuestion,
+  describeEE,
+  entityPickerModal,
+  entityPickerModalTab,
   getNotebookStep,
   openNotebook,
+  openProductsTable,
   openReviewsTable,
   popover,
   restore,
+  setTokenFeatures,
   tableInteractive,
   visitModel,
   visitQuestion,
   visitQuestionAdhoc,
   visualize,
-  type NativeQuestionDetails,
 } from "e2e/support/helpers";
+import { DataPermissionValue } from "metabase/admin/permissions/types";
+import { METAKEY } from "metabase/lib/browser";
 
-const { ORDERS, PRODUCTS_ID, REVIEWS, REVIEWS_ID, PEOPLE_ID, PRODUCTS } =
-  SAMPLE_DATABASE;
+const {
+  ORDERS,
+  ORDERS_ID,
+  PRODUCTS_ID,
+  REVIEWS,
+  REVIEWS_ID,
+  PEOPLE_ID,
+  PRODUCTS,
+} = SAMPLE_DATABASE;
 
 // https://docs.cypress.io/api/cypress-api/platform
 const macOSX = Cypress.platform === "darwin";
@@ -74,6 +90,17 @@ describe("scenarios > notebook > link to data source", () => {
       "Deselecting columns should have no effect on the linked data source in new tab/window",
     );
     openNotebook();
+
+    cy.log("Make sure tooltip is being shown on hover");
+    getNotebookStep("data")
+      .findByText("Reviews")
+      .should("be.visible")
+      .realHover();
+    cy.findByRole("tooltip").should(
+      "have.text",
+      `${METAKEY}+click to open in new tab`,
+    );
+
     getNotebookStep("data").findByText("Reviews").click(clickConfig);
     cy.wait("@dataset"); // already intercepted in `visualize()`
 
@@ -459,6 +486,75 @@ describe("scenarios > notebook > link to data source", () => {
         // cy.visit(`/question/${nestedQuestion.id}/notebook`);
       });
     });
+
+    describeEE("sandboxing", () => {
+      beforeEach(() => {
+        setTokenFeatures("all");
+
+        cy.updatePermissionsGraph({
+          [ALL_USERS_GROUP_ID]: {
+            [SAMPLE_DB_ID]: {
+              "view-data": DataPermissionValue.BLOCKED,
+            },
+          },
+        });
+
+        // @ts-expect-error - Non-trivial types in `sandboxTable` that should be addressed separately
+        cy.sandboxTable({
+          table_id: ORDERS_ID,
+          attribute_remappings: {
+            attr_uid: [
+              "dimension",
+              ["field", ORDERS.USER_ID, { "base-type": "type/Integer" }],
+            ],
+          },
+        });
+
+        cy.signInAsSandboxedUser();
+      });
+
+      it("should work for sandboxed users when opening a table/question/model", () => {
+        visitModel(ORDERS_MODEL_ID);
+        cy.findByTestId("question-row-count").should(
+          "have.text",
+          "Showing 11 rows",
+        );
+        openNotebook();
+        getNotebookStep("data").findByText("Orders Model").click(clickConfig);
+        cy.findByTestId("question-row-count").should(
+          "have.text",
+          "Showing 11 rows",
+        );
+        assertDatasetReqIsSandboxed({
+          requestAlias: `@modelQuery${ORDERS_MODEL_ID}`,
+        });
+      });
+
+      it("should work for sandboxed users when joined table is sandboxed", () => {
+        cy.intercept("/api/dataset").as("dataset");
+
+        openProductsTable({ mode: "notebook" });
+        cy.findByTestId("action-buttons").button("Join data").click();
+        entityPickerModal().within(() => {
+          entityPickerModalTab("Tables").click();
+          cy.findByText("Orders").click();
+        });
+
+        getNotebookStep("join")
+          .findByLabelText("Right table")
+          .should("have.text", "Orders")
+          .click(clickConfig);
+
+        cy.findByTestId("question-row-count").should(
+          "have.text",
+          "Showing 11 rows",
+        );
+        assertDatasetReqIsSandboxed({
+          columnId: ORDERS.USER_ID,
+          columnAssertion: USERS.sandboxed.login_attributes.attr_uid,
+        });
+      });
+    });
   });
 
   context("joins", () => {
@@ -549,9 +645,6 @@ describe("scenarios > notebook > link to data source", () => {
           cy.log("Model should open in a new tab");
 
           getNotebookStep("join", { stage: 0, index: 0 }).within(() => {
-            // Clicking on a left join cell does not have any effect
-            cy.findByLabelText("Left table").click(clickConfig);
-
             cy.findByLabelText("Right table")
               .should("have.text", "Orders Model")
               .click(clickConfig);
@@ -577,9 +670,6 @@ describe("scenarios > notebook > link to data source", () => {
           cy.log("Saved question should open in a new tab");
 
           getNotebookStep("join", { stage: 0, index: 1 }).within(() => {
-            // Clicking on a left join cell does not have any effect
-            cy.findByLabelText("Left table").click(clickConfig);
-
             cy.findByLabelText("Right table")
               .should("have.text", savedQuestion.name)
               .click(clickConfig);
@@ -604,9 +694,6 @@ describe("scenarios > notebook > link to data source", () => {
         (function testRawTable() {
           cy.log("Raw table should open in a new tab");
           getNotebookStep("join", { stage: 0, index: 2 }).within(() => {
-            // Clicking on a left join cell does not have any effect
-            cy.findByLabelText("Left table").click(clickConfig);
-
             cy.findByLabelText("Right table")
               .should("have.text", "Reviews")
               .click(clickConfig);

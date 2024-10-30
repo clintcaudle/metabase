@@ -1,5 +1,5 @@
 // polyfills useSyncExternalStore for React 17
-import "./lib/polyfill-use-sync-external-store";
+import "./lib/polyfill/use-sync-external-store";
 
 import "metabase/lib/dayjs";
 
@@ -24,3 +24,6 @@ export type {
   MetabaseColors,
   MetabaseComponentTheme,
 } from "./types/theme";
+
+export type { Dashboard } from "metabase-types/api";
+export { FlexibleSizeComponent } from "embedding-sdk/components/private/util/FlexibleSizeComponent";

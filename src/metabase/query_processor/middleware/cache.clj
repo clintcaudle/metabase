@@ -11,6 +11,7 @@
    [java-time.api :as t]
    [medley.core :as m]
    [metabase.config :as config]
+   [metabase.lib.query :as lib.query]
    [metabase.public-settings :as public-settings]
    [metabase.query-processor.middleware.cache-backend.db :as backend.db]
    [metabase.query-processor.middleware.cache-backend.interface :as i]
@@ -38,7 +39,6 @@
   "Current cache backend. Dynamically rebindable primary for test purposes."
   (i/cache-backend (config/config-kw :mb-qp-cache-backend)))
 
-
 ;;; ------------------------------------------------------ Save ------------------------------------------------------
 
 (defn- purge! [backend]
@@ -58,7 +58,8 @@
   "Add `object` (e.g. a result row or metadata) to the current cache entry."
   [object]
   (when *in-fn*
-    (*in-fn* object)))
+    (*in-fn* (cond-> object
+               (map? object) (m/update-existing :json_query lib.query/serializable)))))
 
 (def ^:private ^:dynamic *result-fn*
   "The `result-fn` provided by [[impl/do-with-serialization]]."
@@ -119,7 +120,6 @@
        (vreset! has-rows? true)
        (rf acc row)))))
 
-
 ;;; ----------------------------------------------------- Fetch ------------------------------------------------------
 
 (defn- cached-results-rff
@@ -138,7 +138,7 @@
          (let [normal-format? (and (map? (unreduced result))
                                    (seq (get-in (unreduced result) [:data :cols])))
                result*        (-> (if normal-format?
-                                    (merge-with merge @final-metadata (unreduced result))
+                                    (m/deep-merge @final-metadata (unreduced result))
                                     (unreduced result))
                                   (assoc :cache/details {:hash query-hash :cached true :updated_at last-ran}))]
            (rf (cond-> result*
@@ -150,10 +150,10 @@
            (rf acc row)))))))
 
 (mu/defn- maybe-reduce-cached-results :- [:tuple
-                                                   #_status
-                                                   [:enum ::ok ::miss ::canceled]
-                                                   #_result
-                                                   :any]
+                                          #_status
+                                          [:enum ::ok ::miss ::canceled]
+                                          #_result
+                                          :any]
   "Reduces cached results if there is a hit. Otherwise, returns `::miss` directly."
   [ignore-cache? query-hash strategy rff]
   (try
@@ -181,7 +181,6 @@
                   (i/short-hex-hash query-hash)
                   (ex-message e))
       [::miss nil])))
-
 
 ;;; --------------------------------------------------- Middleware ---------------------------------------------------
 

@@ -1,6 +1,6 @@
 import { assoc } from "icepick";
 import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
-import { t, ngettext, msgid } from "ttag";
+import { msgid, ngettext, t } from "ttag";
 import _ from "underscore";
 
 import { formatDateTimeWithUnit } from "metabase/lib/formatting";
@@ -146,7 +146,7 @@ function generateTimeValueDescription(value, bucketing, isExclude) {
     if (bucketing) {
       return formatDateTimeWithUnit(value, bucketing, { isExclude });
     } else if (m.hours() || m.minutes()) {
-      return m.format("MMMM D, YYYY hh:mm a");
+      return m.format("MMMM D, YYYY hh:mm A");
     } else {
       return m.format("MMMM D, YYYY");
     }

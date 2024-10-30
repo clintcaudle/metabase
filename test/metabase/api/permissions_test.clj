@@ -73,7 +73,7 @@
              (mt/user-http-request :crowberto :get 200 "permissions/group" :offset "1"))))
     (testing "Limit and offset pagination works for permissions list"
       (is (partial= [{:id (:id (perms-group/all-users)), :name "All Users"}]
-             (mt/user-http-request :crowberto :get 200 "permissions/group" :limit "1" :offset "1"))))))
+                    (mt/user-http-request :crowberto :get 200 "permissions/group" :limit "1" :offset "1"))))))
 
 (deftest fetch-group-test
   (testing "GET /permissions/group/:id"
@@ -103,7 +103,7 @@
                   (get id->member (mt/user->id :rasta))))
       (testing "Should *not* include inactive users"
         (is (nil?
-               (get id->member :trashbird)))))
+             (get id->member :trashbird)))))
 
     (testing "returns 404 for nonexistent id"
       (is (= "Not found."
@@ -138,8 +138,8 @@
 
     (testing "requires superuser"
       (t2.with-temp/with-temp [PermissionsGroup {group-id :id} {:name "Test group"}]
-         (is (= "You don't have permissions to do that."
-                (mt/user-http-request :rasta :delete 403 (format "permissions/group/%d" group-id))))))))
+        (is (= "You don't have permissions to do that."
+               (mt/user-http-request :rasta :delete 403 (format "permissions/group/%d" group-id))))))))
 
 (deftest fetch-perms-graph-test
   (testing "GET /api/permissions/graph"
@@ -302,9 +302,8 @@
   (testing "PUT /api/permissions/graph"
     (testing "make sure an error is thrown if the :sandboxes key is included in an OSS request"
       (mt/with-premium-features #{}
-        (is (= "Sandboxes is a paid feature not currently available to your instance. Please upgrade to use it. Learn more at metabase.com/upgrade/"
-               (mt/user-http-request :crowberto :put 402 "permissions/graph"
-                                     (assoc (data-perms.graph/api-graph) :sandboxes [{:card_id 1}]))))))))
+        (mt/assert-has-premium-feature-error "Sandboxes" (mt/user-http-request :crowberto :put 402 "permissions/graph"
+                                                                               (assoc (data-perms.graph/api-graph) :sandboxes [{:card_id 1}])))))))
 
 (deftest get-group-membership-test
   (testing "GET /api/permissions/membership"

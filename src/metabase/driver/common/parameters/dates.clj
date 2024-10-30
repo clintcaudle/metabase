@@ -11,10 +11,10 @@
    [metabase.lib.schema.parameter :as lib.schema.parameter]
    [metabase.query-processor.error-type :as qp.error-type]
    [metabase.query-processor.timezone :as qp.timezone]
-   [metabase.shared.util.time :as shared.ut]
    [metabase.util.date-2 :as u.date]
    [metabase.util.i18n :refer [tru]]
-   [metabase.util.malli :as mu])
+   [metabase.util.malli :as mu]
+   [metabase.util.time :as u.time])
   (:import
    (java.time.temporal Temporal)))
 
@@ -259,7 +259,6 @@
 (defn- ->iso-8601-date-time [t]
   (t/format :iso-local-date-time t))
 
-
 ;; TODO - using `range->filter` so much below seems silly. Why can't we just bucket the field and use `:=` clauses?
 (defn- range->filter
   [{:keys [start end]} field-clause]
@@ -406,9 +405,9 @@
       (m/update-existing :end #(if inclusive-end?
                                  %
                                  (u.date/add % (case (:unit temporal-range)
-                                                   (:year :quarter :month :week :day)
-                                                   :day
-                                                   (:unit temporal-range)) 1)))))
+                                                 (:year :quarter :month :week :day)
+                                                 :day
+                                                 (:unit temporal-range)) 1)))))
 
 (def ^:private DateStringRange
   "Schema for a valid date range returned by `date-string->range`."
@@ -474,7 +473,7 @@
   "Generate offset datetime from `date-str` with respect to qp's `results-timezone`."
   [date-str]
   (when date-str
-    (let [[y M d h m s] (shared.ut/yyyyMMddhhmmss->parts date-str)]
+    (let [[y M d h m s] (u.time/yyyyMMddhhmmss->parts date-str)]
       (try (.toOffsetDateTime (t/zoned-date-time y M d h m s 0 (t/zone-id (qp.timezone/results-timezone-id))))
            (catch Throwable _
              (t/offset-date-time y M d h m s 0 (t/zone-offset (qp.timezone/results-timezone-id))))))))
@@ -483,7 +482,7 @@
   "Return appropriate function for interval end adjustments in [[exclusive-datetime-range-end]]."
   [date-str]
   (when date-str
-    (if (re-matches shared.ut/local-date-regex date-str)
+    (if (re-matches u.time/local-date-regex date-str)
       t/days
       t/minutes)))
 
@@ -507,6 +506,13 @@
     {:start date-str
      :end   date-str}))
 
+(defn- maybe-adjust-open-range
+  [{:keys [start end] :as range} unit-fn]
+  (assert (some some? [start end]))
+  (cond (and start end) range
+        start           (update range :start t/+ (unit-fn 1))
+        end             (update range :end   t/- (unit-fn 1))))
+
 (mu/defn date-str->datetime-range :- DateStringRange
   "Generate range from `date-range-str`.
 
@@ -526,7 +532,8 @@
                        (catch Throwable _
                          (fallback-raw-range raw-date-str)))]
     (-> (update-vals range-raw date-str->qp-aware-offset-dt)
-        (update :end exclusive-datetime-range-end (date-str->unit-fn (:end range-raw)))
+        (m/update-existing :end exclusive-datetime-range-end (date-str->unit-fn (:end range-raw)))
+        (maybe-adjust-open-range (date-str->unit-fn ((some-fn :start :end) range-raw)))
         format-date-range)))
 
 (mu/defn date-string->filter :- mbql.s/Filter

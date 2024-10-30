@@ -1,5 +1,6 @@
 (ns metabase.util
   "Common utility functions useful throughout the codebase."
+  (:refer-clojure :exclude [group-by])
   (:require
    #?@(:clj ([clojure.math.numeric-tower :as math]
              [me.flowthing.pp :as pp]
@@ -17,11 +18,11 @@
    [clojure.walk :as walk]
    [flatland.ordered.map :refer [ordered-map]]
    [medley.core :as m]
-   [metabase.shared.util.i18n :refer [tru] :as i18n]
-   [metabase.shared.util.namespaces :as u.ns]
    [metabase.util.format :as u.format]
+   [metabase.util.i18n :refer [tru] :as i18n]
    [metabase.util.log :as log]
    [metabase.util.memoize :as memoize]
+   [metabase.util.namespaces :as u.ns]
    [net.cgrand.macrovich :as macros]
    [weavejester.dependency :as dep])
   #?(:clj (:import
@@ -35,7 +36,14 @@
 #?(:clj (set! *warn-on-reflection* true))
 
 (u.ns/import-fns
-  [u.format colorize format-bytes format-color format-milliseconds format-nanoseconds format-seconds])
+ [u.format
+  colorize
+  format-bytes
+  format-color
+  format-milliseconds
+  format-nanoseconds
+  format-seconds
+  format-plural])
 
 #?(:clj (p/import-vars [u.jvm
                         all-ex-data
@@ -58,7 +66,9 @@
                         with-timeout
                         with-us-locale]
                        [u.str
-                        build-sentence]))
+                        build-sentence]
+                       [u.ns
+                        find-and-load-namespaces!]))
 
 (defmacro or-with
   "Like or, but determines truthiness with `pred`."
@@ -80,6 +90,22 @@
                          :cljs 'js/Error
                          :clj  'Throwable)
                       ~'_)))
+
+(defn strip-error
+  "Transforms the error in a list of strings to log"
+  ([e]
+   (strip-error e nil))
+  ([e prefix]
+   (->> (for [[e prefix] (map vector
+                              (take-while some? (iterate #(.getCause ^Exception %) e))
+                              (cons prefix (repeat "  caused by")))]
+          (str (when prefix (str prefix ": "))
+               (ex-message e)
+               (when-let [data (-> (ex-data e)
+                                   (dissoc :toucan2/context-trace)
+                                   not-empty)]
+                 (str " " (pr-str data)))))
+        (str/join "\n"))))
 
 (defmacro prog1
   "Execute `first-form`, then any other expressions in `body`, presumably for side-effects; return the result of
@@ -147,15 +173,16 @@
 
 (defn add-period
   "Fixes strings that don't terminate in a period; also accounts for strings
-  that end in `:`. Used for formatting docs."
+  that end in `:` and triple backticks (e.g., if a string ends in codeblock).
+   Used for formatting docs."
   [s]
   (let [text (str s)]
-    (if (or (str/blank? text)
-            (#{\. \? \!} (last text)))
-      text
-      (if (str/ends-with? text ":")
-        (str (subs text 0 (- (count text) 1)) ".")
-        (str text ".")))))
+    (cond
+      (str/blank? text) text
+      (#{\. \? \!} (last text)) text
+      (str/ends-with? text "```") text
+      (str/ends-with? text ":") (str (subs text 0 (- (count text) 1)) ".")
+      :else (str text "."))))
 
 (defn lower-case-en
   "Locale-agnostic version of [[clojure.string/lower-case]]. [[clojure.string/lower-case]] uses the default locale in
@@ -183,6 +210,11 @@
       (upper-case-en s)
       (str (upper-case-en (subs s 0 1))
            (lower-case-en (subs s 1))))))
+
+(defn truncate
+  "Truncate a string to `n` characters."
+  [s n]
+  (subs s 0 (min (count s) n)))
 
 (defn regex->str
   "Returns the contents of a regex as a string.
@@ -233,7 +265,6 @@
   with namespaces, and returns `nil` when passed `nil` (rather than throwing an exception)."
   (memoize/fast-bounded (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->camelCaseEn*)
                         :bounded/threshold 10000))
-
 
 (def ^{:arglists '([x])} ->SCREAMING_SNAKE_CASE_EN
   "Like [[camel-snake-kebab.core/->SCREAMING_SNAKE_CASE]], but always uses English for upper- and lower-casing, supports
@@ -536,7 +567,6 @@
        :present #{:a :b :c}
        :non-nil #{:d :e :f})
      ;; -> {:a 100, :b nil, :d 200}"
-  {:style/indent 1}
   [m & {:keys [present non-nil], :as options}]
   {:pre [(every? #{:present :non-nil} (keys options))]}
   (merge (select-keys m present)
@@ -639,18 +669,18 @@
      (pprint-to-str 'green some-obj)"
   (^String [x]
    (#?@
-    (:clj
-     (with-out-str
-       #_{:clj-kondo/ignore [:discouraged-var]}
-       (pp/pprint x {:max-width 120}))
+     (:clj
+      (with-out-str
+        #_{:clj-kondo/ignore [:discouraged-var]}
+        (pp/pprint x {:max-width 120}))
 
-     :cljs
+      :cljs
      ;; we try to set this permanently above, but it doesn't seem to work in Cljs, so just bind it every time. The
      ;; default value wastes too much space, 120 is a little easier to read actually.
-     (binding [pprint/*print-right-margin* 120]
-       (with-out-str
-         #_{:clj-kondo/ignore [:discouraged-var]}
-         (pprint/pprint x))))))
+      (binding [pprint/*print-right-margin* 120]
+        (with-out-str
+          #_{:clj-kondo/ignore [:discouraged-var]}
+          (pprint/pprint x))))))
 
   (^String [color-symb x]
    (u.format/colorize color-symb (pprint-to-str x))))
@@ -835,17 +865,16 @@
   return a map of 3 keys: `:to-create`, `:to-update`, `:to-delete`.
 
   Where:
-  - `:to-create` is a list of maps that ids in `new-rows`
+  - `:to-create` is a list of maps that has ids only in `new-rows`
   - `:to-delete` is a list of maps that has ids only in `current-rows`
   - `:to-skip`   is a list of identical maps that has ids in both lists
   - `:to-update` is a list of different maps that has ids in both lists
 
   Optional arguments:
   - `id-fn` - function to get row-matching identifiers
-  - `to-compare` - function to get rows into a comparable state
-  "
+  - `to-compare` - function to get rows into a comparable state"
   [current-rows new-rows & {:keys [id-fn to-compare]
-                            :or   {id-fn   :id
+                            :or   {id-fn      :id
                                    to-compare identity}}]
   (let [[delete-ids
          create-ids
@@ -854,10 +883,10 @@
         known-map        (m/index-by id-fn current-rows)
         {to-update false
          to-skip   true} (when (seq update-ids)
-                           (group-by (fn [x]
-                                       (let [y (get known-map (id-fn x))]
-                                         (= (to-compare x) (to-compare y))))
-                                     (filter #(update-ids (id-fn %)) new-rows)))]
+                           (clojure.core/group-by (fn [x]
+                                                    (let [y (get known-map (id-fn x))]
+                                                      (= (to-compare x) (to-compare y))))
+                                                  (filter #(update-ids (id-fn %)) new-rows)))]
     {:to-create (when (seq create-ids) (filter #(create-ids (id-fn %)) new-rows))
      :to-delete (when (seq delete-ids) (filter #(delete-ids (id-fn %)) current-rows))
      :to-update to-update
@@ -873,18 +902,19 @@
   "Traverses a graph of nodes using a user-defined function.
 
   `nodes`: A collection of initial nodes to start the traversal from.
-  `traverse-fn`: A function that, given a node, returns its directly connected nodes.
+  `traverse-fn`: A function that, given a node, returns a map of connected nodes to source they are connected from.
 
   The function performs a breadth-first traversal starting from the initial nodes, applying
   `traverse-fn` to each node to find connected nodes, and continues until all reachable nodes
   have been visited. Returns a set of all traversed nodes."
   [nodes traverse-fn]
-  (loop [to-traverse (set nodes)
-         traversed   #{}]
+  (loop [to-traverse (zipmap nodes (repeat nil))
+         traversed   {}]
     (let [item        (first to-traverse)
-          found       (traverse-fn item)
+          found       (traverse-fn (key item))
           traversed   (conj traversed item)
-          to-traverse (set/union (disj to-traverse item) (set/difference found traversed))]
+          to-traverse (into (dissoc to-traverse (key item))
+                            (apply dissoc found (keys traversed)))]
       (if (empty? to-traverse)
         traversed
         (recur to-traverse traversed)))))
@@ -955,9 +985,9 @@
 
 #?(:clj
    (let [sym->enum (fn ^Enum [sym]
-                    (Reflector/invokeStaticMethod ^Class (resolve (symbol (namespace sym)))
-                                                  "valueOf"
-                                                  (to-array [(name sym)])))
+                     (Reflector/invokeStaticMethod ^Class (resolve (symbol (namespace sym)))
+                                                   "valueOf"
+                                                   (to-array [(name sym)])))
          ordinal (fn [^Enum e] (.ordinal e))]
      (defmacro case-enum
        "Like `case`, but explicitly dispatch on Java enum ordinals.
@@ -1035,9 +1065,56 @@
      [timer]
      (/ (- (System/nanoTime) timer) 1e6)))
 
+(defn group-by
+  "(group-by first                  [[1 3]   [1 4]   [2 5]])   => {1 [[1 3] [1 4]], 2 [[2 5]]}
+   (group-by first second           [[1 3]   [1 4]   [2 5]])   => {1 [3 4],         2 [5]}
+   (group-by first second +      0  [[1 3]   [1 4]   [2 5]])   => {1 7,             2 5}
+   (group-by first second           [[1 [3]] [1 [4]] [2 [5]]]) => {1 [[3] [4]],     2 [[5]]}
+   (group-by first second concat    [[1 [3]] [1 [4]] [2 [5]]]) => {1 (3 4),         2 (5)}
+   (group-by first second into      [[1 [3]] [1 [4]] [2 [5]]]) => {1 [3 4],         2 [5]}
+   (group-by first second into   [] [[1 [3]] [1 [4]] [2 [5]]]) => {1 [3 4],         2 [5]}
+   (group-by first second into   () [[1 [3]] [1 [4]] [2 [5]]]) => {1 (4 3),         2 (5)}
+   ;; as a filter:
+             kf    kpred  vf     vpred rf   init
+   (group-by first any?   second even? conj () [[1 3] [1 4] [2 5]])      => {1 (4)}
+   ;; as a reducer (see index-by below):
+             kf    kpred  vf     vpred rf   init
+   (group-by first any?   second even? max  0  [[1 3] [1 6] [1 4] [2 5]] => {1 6})"
+
+  ([kf coll] (clojure.core/group-by kf coll))
+  ([kf vf coll] (group-by kf vf conj [] coll))
+  ([kf vf rf coll] (group-by kf vf rf [] coll))
+  ([kf vf rf init coll]
+   (->> coll
+        (reduce
+         (fn [m x]
+           (let [k (kf x)]
+             (assoc! m k (rf (get m k init) (vf x)))))
+         (transient {}))
+        (persistent!)))
+  ([kf kpred vf vpred rf init coll]
+   (->> coll
+        (reduce
+         (fn [m x]
+           (let [k (kf x)]
+             (if-not (kpred k)
+               m
+               (let [v (vf x)]
+                 ;; no empty collections as a 'side effect':
+                 (if-not (vpred v)
+                   m
+                   (assoc! m k (rf (get m k init) v)))))))
+         (transient {}))
+        (persistent!))))
+
 (defn index-by
   "(index-by first second [[1 3] [1 4] [2 5]]) => {1 4, 2 5}"
- ([kf coll]
-  (reduce (fn [acc v] (assoc acc (kf v) v)) {} coll))
- ([kf vf coll]
-  (reduce (fn [acc v] (assoc acc (kf v) (vf v))) {} coll)))
+  ([kf coll]
+   (reduce (fn [acc v] (assoc acc (kf v) v)) {} coll))
+  ([kf vf coll]
+   (reduce (fn [acc v] (assoc acc (kf v) (vf v))) {} coll)))
+
+(defn rfirst
+  "Return first item from Reducible"
+  [reducible]
+  (reduce (fn [_ fst] (reduced fst)) nil reducible))

@@ -4,8 +4,7 @@ import querystring from "querystring";
 import { fetchAlertsForQuestion } from "metabase/alert/alert";
 import Questions from "metabase/entities/questions";
 import Snippets from "metabase/entities/snippets";
-import * as MetabaseAnalytics from "metabase/lib/analytics";
-import { deserializeCardFromUrl, loadCard } from "metabase/lib/card";
+import { deserializeCardFromUrl } from "metabase/lib/card";
 import { isNotNull } from "metabase/lib/types";
 import * as Urls from "metabase/lib/urls";
 import {
@@ -36,6 +35,7 @@ import { getQueryBuilderModeFromLocation } from "../../typed-utils";
 import { updateUrl } from "../navigation";
 import { cancelQuery, runQuestionQuery } from "../querying";
 
+import { loadCard } from "./card";
 import { resetQB } from "./core";
 import {
   getParameterValuesForQuestion,
@@ -302,12 +302,6 @@ async function handleQBInit(
     });
   }
 
-  MetabaseAnalytics.trackStructEvent(
-    "QueryBuilder",
-    hasCard ? "Query Loaded" : "Query Started",
-    card.dataset_query.type,
-  );
-
   if (isSavedCard(card)) {
     dispatch(fetchAlertsForQuestion(card.id));
   }
@@ -328,7 +322,6 @@ async function handleQBInit(
 
     if (currentUser?.is_qbnewb) {
       uiControls.isShowingNewbModal = true;
-      MetabaseAnalytics.trackStructEvent("QueryBuilder", "Show Newb Modal");
     }
   }
 
@@ -353,9 +346,8 @@ async function handleQBInit(
 
   const objectId = params?.objectId || queryParams?.objectId;
 
-  uiControls.isShowingNotebookNativePreview = getIsNotebookNativePreviewShown(
-    getState(),
-  );
+  uiControls.isShowingNotebookNativePreview =
+    getIsNotebookNativePreviewShown(getState());
   uiControls.notebookNativePreviewSidebarWidth =
     getNotebookNativePreviewSidebarWidth(getState());
 

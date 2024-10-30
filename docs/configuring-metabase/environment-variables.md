@@ -69,6 +69,36 @@ Must be less than 1048575. This environment variable also affects how many rows 
   This environment variable also affects how many rows Metabase includes in dashboard subscription attachments.
   See also MB_UNAGGREGATED_QUERY_ROW_LIMIT.
 
+### `MB_ALLOWED_IFRAME_HOSTS`
+
+- Type: string
+- Default: `youtube.com,
+youtu.be,
+loom.com,
+vimeo.com,
+docs.google.com,
+calendar.google.com,
+airtable.com,
+typeform.com,
+canva.com,
+codepen.io,
+figma.com,
+grafana.com,
+miro.com,
+excalidraw.com,
+notion.com,
+atlassian.com,
+trello.com,
+asana.com,
+gist.github.com,
+linkedin.com,
+twitter.com,
+x.com`
+- [Exported as](../installation-and-operation/serialization.md): `allowed-iframe-hosts`.
+- [Configuration file name](./config-file.md): `allowed-iframe-hosts`
+
+Allowed iframe hosts.
+
 ### `MB_ANON_TRACKING_ENABLED`
 
 - Type: boolean
@@ -76,17 +106,6 @@ Must be less than 1048575. This environment variable also affects how many rows 
 - [Configuration file name](./config-file.md): `anon-tracking-enabled`
 
 Enable the collection of anonymous usage data in order to help Metabase improve.
-
-### `MB_API_KEY`
-
-- Type: string
-- Default: `null`
-
-When set, this API key is required for all API requests.
-
-Middleware that enforces validation of the client via the request header X-Metabase-Apikey.
-        If the header is available, then it’s validated against MB_API_KEY.
-        When it matches, the request continues; otherwise it’s blocked with a 403 Forbidden response.
 
 ### `MB_APPLICATION_COLORS`
 
@@ -248,7 +267,7 @@ Identify when new versions of Metabase are available.
 - Type: boolean
 - Default: `true`
 
-Whether to sync newly created Databases during config-from-file initialization. By default, true, but you can disable
+Whether to (asynchronously) sync newly created Databases during config-from-file initialization. By default, true, but you can disable
   this behavior if you want to sync it manually or use SerDes to populate its data model.
 
 ### `MB_CUSTOM_FORMATTING`
@@ -296,6 +315,26 @@ Consider metabase.driver/can-connect? / can-connect-with-details? to have failed
 Timeout in milliseconds for connecting to databases, both Metabase application database and data connections.
         In case you're connecting via an SSH tunnel and run into a timeout, you might consider increasing this value
         as the connections via tunnels have more overhead than connections without.
+
+### `MB_DB_QUERY_TIMEOUT_MINUTES`
+
+- Type: integer
+- Default: `3`
+
+By default, this is 20 minutes.
+
+Timeout in minutes for databases query execution, both Metabase application database and data connections.
+  If you have long-running queries, you might consider increasing this value.
+  Adjusting the timeout does not impact Metabase’s frontend.
+  Please be aware that other services (like Nginx) may still drop long-running queries.
+
+### `MB_DOWNLOAD_ROW_LIMIT`
+
+- Type: integer
+- Default: `null`
+- [Exported as](../installation-and-operation/serialization.md): `download-row-limit`.
+
+Exports row limit excluding the header. xlsx downloads are limited to 1048575 rows even if this limit is higher.
 
 ### `MB_EE_AI_FEATURES_ENABLED`
 
@@ -391,15 +430,25 @@ SMTP secure connection protocol. (tls, ssl, starttls, or none).
 
 SMTP username.
 
-### `MB_EMBEDDING_APP_ORIGIN`
+### `MB_EMBEDDING_APP_ORIGINS_INTERACTIVE`
 
 > Only available on Metabase [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.
 
 - Type: string
 - Default: `null`
-- [Configuration file name](./config-file.md): `embedding-app-origin`
+- [Configuration file name](./config-file.md): `embedding-app-origins-interactive`
 
-Allow this origin to embed the full Metabase application.
+Allow these space delimited origins to embed Metabase interactive.
+
+### `MB_EMBEDDING_APP_ORIGINS_SDK`
+
+> Only available on Metabase [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.
+
+- Type: string
+- Default: `localhost:*`
+- [Configuration file name](./config-file.md): `embedding-app-origins-sdk`
+
+Allow Metabase SDK access to these space delimited origins.
 
 ### `MB_EMBEDDING_HOMEPAGE`
 
@@ -418,14 +467,29 @@ Embedding homepage status, indicating if its visible, hidden or has been dismiss
 
 Secret key used to sign JSON Web Tokens for requests to `/api/embed` endpoints.
 
-### `MB_ENABLE_EMBEDDING`
+### `MB_ENABLE_EMBEDDING_INTERACTIVE`
 
 - Type: boolean
 - Default: `false`
-- [Exported as](../installation-and-operation/serialization.md): `enable-embedding`.
-- [Configuration file name](./config-file.md): `enable-embedding`
+- [Configuration file name](./config-file.md): `enable-embedding-interactive`
 
-Allow admins to securely embed questions and dashboards within other applications?
+Allow admins to embed Metabase via interactive embedding?
+
+### `MB_ENABLE_EMBEDDING_SDK`
+
+- Type: boolean
+- Default: `false`
+- [Configuration file name](./config-file.md): `enable-embedding-sdk`
+
+Allow admins to embed Metabase via the SDK?
+
+### `MB_ENABLE_EMBEDDING_STATIC`
+
+- Type: boolean
+- Default: `false`
+- [Configuration file name](./config-file.md): `enable-embedding-static`
+
+Allow admins to embed Metabase via static embedding?
 
 ### `MB_ENABLE_PASSWORD_LOGIN`
 
@@ -468,6 +532,13 @@ Allow users to explore data using X-rays.
 - Default: `60`
 
 Enumerated field values with cardinality at or below this point are treated as enums in the pseudo-ddl used in some model prompts.
+
+### `MB_EXPERIMENTAL_FULLTEXT_SEARCH_ENABLED`
+
+- Type: boolean
+- Default: `false`
+
+Enables search engines which are still in the experimental stage.
 
 ### `MB_FOLLOW_UP_EMAIL_SENT`
 
@@ -919,6 +990,14 @@ When attempting to assemble prompts, the threshold at which prompt will no longe
 
 Matching style for native query editors autocomplete. Can be "substring", "prefix", or "off". Larger instances can have performance issues matching using substring, so can use prefix matching,  or turn autocompletions off.
 
+### `MB_NESTED_FIELD_COLUMNS_VALUE_LENGTH_LIMIT`
+
+- Type: integer
+- Default: `50000`
+- [Exported as](../installation-and-operation/serialization.md): `nested-field-columns-value-length-limit`.
+
+Maximum length of a JSON string before skipping it during sync for JSON unfolding. If this is set too high it could lead to slow syncs or out of memory errors.
+
 ### `MB_NO_DATA_ILLUSTRATION`
 
 > Only available on Metabase [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.
@@ -974,6 +1053,13 @@ By default "Site Url" is used in notification links, but can be overridden.
 
 The base URL where dashboard notitification links will point to instead of the Metabase base URL.
         Only applicable for users who utilize interactive embedding and subscriptions.
+
+### `MB_NOTIFICATION_THREAD_POOL_SIZE`
+
+- Type: integer
+- Default: `10`
+
+The size of the thread pool used to send notifications.
 
 ### `MB_NUM_METABOT_CHOICES`
 
@@ -1035,6 +1121,7 @@ Token for premium features. Go to the MetaStore to get yours!
 
 - Type: boolean
 - Default: `true`
+- [Configuration file name](./config-file.md): `query-analysis-enabled`
 
 Whether or not we analyze any queries at all.
 
@@ -1282,6 +1369,14 @@ Is SAML Single Log Out enabled?
 When we enable SAML user provisioning, we automatically create a Metabase account on SAML signin for users who
 don't have one.
 
+### `MB_SCIM_ENABLED`
+
+- Type: boolean
+- Default: `null`
+- [Configuration file name](./config-file.md): `scim-enabled`
+
+Is SCIM currently enabled?
+
 ### `MB_SEARCH_TYPEAHEAD_ENABLED`
 
 - Type: boolean
@@ -1293,7 +1388,7 @@ Enable typeahead search in the Metabase navbar?
 
 ### `MB_SEND_NEW_SSO_USER_ADMIN_EMAIL`
 
-- Type: string
+- Type: boolean
 - Default: `null`
 - [Configuration file name](./config-file.md): `send-new-sso-user-admin-email`
 
@@ -1308,7 +1403,7 @@ Should new email notifications be sent to admins, for all new SSO users?
 Value for the session cookies `SameSite` directive.
 
 See [Embedding Metabase in a different domain](../embedding/interactive-embedding.md#embedding-metabase-in-a-different-domain).
-        Related to [MB_EMBEDDING_APP_ORIGIN](#mb_embedding_app_origin). Read more about [interactive Embedding](../embedding/interactive-embedding.md).
+        Read more about [interactive Embedding](../embedding/interactive-embedding.md).
         Learn more about [SameSite cookies](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite).
 
 ### `MB_SESSION_COOKIES`
@@ -1534,6 +1629,15 @@ Must be less than 1048575, and less than the number configured in MB_AGGREGATED_
         This environment variable also affects how many rows Metabase returns in dashboard subscription attachments.
         See also MB_AGGREGATED_QUERY_ROW_LIMIT.
 
+### `MB_UPDATE_CHANNEL`
+
+- Type: string
+- Default: `latest`
+- [Exported as](../installation-and-operation/serialization.md): `update-channel`.
+- [Configuration file name](./config-file.md): `update-channel`
+
+Well notify you here when theres a new version of this type of release.
+
 ### `MB_UPLOADS_SETTINGS`
 
 - Type: json
@@ -1702,15 +1806,6 @@ Type: integer<br>
 Default: `null`
 
 The port for [MB_DB_HOST](#mb_db_host).
-
-
-### `MB_DB_QUERY_TIMEOUT_MINUTES`
-
-Type: integer<br>
-Default: `180`
-
-Timeout in minutes for query execution, both Metabase application database and data connections. In case you're execute a query and run into a timeout, you might consider increasing this value.
-
 
 ### `MB_DB_TYPE`
 
@@ -1921,6 +2016,13 @@ Default: True
 
 If you want to exclude the [Metabase analytics](../usage-and-performance-tools/usage-analytics.md) collection, you can set `MB_LOAD_ANALYTICS_CONTENT=false`. Setting this environment variable to false can also come in handy when migrating environments, as it can simplify the migration process.
 
+### `MB_LOAD_SAMPLE_CONTENT`
+
+Type: Boolean<br>
+Default: True
+
+Whether to include the Sample Database in your Metabase. To exclude the Sample Database, set `MB_LOAD_SAMPLE_CONTENT=false`.
+
 ### `MB_NO_SURVEYS`
 
 Type: boolean<br>
@@ -2011,29 +2113,6 @@ Type: boolean<br>
 Default: `true`
 
 Send email notifications to users in Admin group, when a new SSO users is created on Metabase.
-
-### `MB_SESSION_COOKIE_SAMESITE`
-
-Only available on Metabase [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.<br>
-Type: string (`"none"`, `"lax"`, `"strict"`)<br>
-Default: `"lax"`
-
-See [Embedding Metabase in a different domain](../embedding/interactive-embedding.md#embedding-metabase-in-a-different-domain).
-
-Related to [MB_EMBEDDING_APP_ORIGIN](#mb_embedding_app_origin). Read more about [interactive Embedding](../embedding/interactive-embedding.md).
-
-Learn more about SameSite cookies: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite
-
-### `MB_SESSION_COOKIES`
-
-Type: boolean<br>
-Default: `null`
-
-When set to `true`, the user login session will expire when the browser is closed. The user login session will always expire after the amount of time defined in [MAX_SESSION_AGE](#max_session_age) (by default 2 weeks).
-
-This overrides the "Remember me" checkbox when logging in.
-
-Also see the [Changing session expiration](../people-and-groups/changing-session-expiration.md) documentation page.
 
 ### `MB_SETUP_TOKEN`
 

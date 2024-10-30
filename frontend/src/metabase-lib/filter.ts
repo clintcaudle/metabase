@@ -1,22 +1,22 @@
 import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
 
 import * as ML from "cljs/metabase.lib.js";
-import type { DatasetColumn, TemporalUnit } from "metabase-types/api";
+import type { CardId, DatasetColumn, TemporalUnit } from "metabase-types/api";
 
 import {
   isBoolean,
-  isTime,
-  isTemporal,
   isCoordinate,
-  isStringOrStringLike,
+  isDateOrDateTime,
   isNumeric,
+  isStringOrStringLike,
+  isTime,
 } from "./column_types";
 import {
   BOOLEAN_FILTER_OPERATORS,
   COORDINATE_FILTER_OPERATORS,
+  DEFAULT_FILTER_OPERATORS,
   EXCLUDE_DATE_BUCKETS,
   EXCLUDE_DATE_FILTER_OPERATORS,
-  DEFAULT_FILTER_OPERATORS,
   NUMBER_FILTER_OPERATORS,
   RELATIVE_DATE_BUCKETS,
   SPECIFIC_DATE_FILTER_OPERATORS,
@@ -40,6 +40,8 @@ import type {
   ColumnMetadata,
   CoordinateFilterOperatorName,
   CoordinateFilterParts,
+  DefaultFilterOperatorName,
+  DefaultFilterParts,
   ExcludeDateBucketName,
   ExcludeDateFilterOperatorName,
   ExcludeDateFilterParts,
@@ -48,8 +50,6 @@ import type {
   ExpressionOperatorName,
   ExpressionOptions,
   ExpressionParts,
-  DefaultFilterOperatorName,
-  DefaultFilterParts,
   FilterClause,
   FilterOperator,
   FilterParts,
@@ -211,7 +211,11 @@ export function coordinateFilterParts(
   }
 
   const [column, ...otherArgs] = args;
-  if (!isColumnMetadata(column) || !isCoordinate(column)) {
+  if (
+    !isColumnMetadata(column) ||
+    !isNumeric(column) ||
+    !isCoordinate(column)
+  ) {
     return null;
   }
 
@@ -300,7 +304,7 @@ export function specificDateFilterParts(
   const [column, ...serializedValues] = args;
   if (
     !isColumnMetadata(column) ||
-    !isTemporal(column) ||
+    !isDateOrDateTime(column) ||
     !isStringLiteralArray(serializedValues)
   ) {
     return null;
@@ -399,14 +403,19 @@ export function excludeDateFilterParts(
   }
 
   const [column, ...serializedValues] = args;
-  if (!isColumnMetadata(column) || !isTemporal(column)) {
+  if (!isColumnMetadata(column)) {
+    return null;
+  }
+
+  const columnWithoutBucket = withTemporalBucket(column, null);
+  if (!isDateOrDateTime(columnWithoutBucket)) {
     return null;
   }
 
   const bucket = temporalBucket(column);
   if (!bucket) {
     return serializedValues.length === 0
-      ? { column, operator, bucket, values: [] }
+      ? { column: columnWithoutBucket, operator, bucket, values: [] }
       : null;
   }
 
@@ -423,7 +432,7 @@ export function excludeDateFilterParts(
   }
 
   return {
-    column,
+    column: columnWithoutBucket,
     operator,
     bucket: bucketInfo.shortName,
     values,
@@ -494,7 +503,8 @@ export function defaultFilterParts(
     isStringOrStringLike(column) ||
     isNumeric(column) ||
     isBoolean(column) ||
-    isTemporal(column)
+    isDateOrDateTime(column) ||
+    isTime(column)
   ) {
     return null;
   }
@@ -728,7 +738,7 @@ function relativeDateFilterPartsWithoutOffset({
   const [column, value, bucket] = args;
   if (
     !isColumnMetadata(column) ||
-    !isTemporal(column) ||
+    !isDateOrDateTime(column) ||
     !isNumberOrCurrentLiteral(value) ||
     !isStringLiteral(bucket) ||
     !isRelativeDateBucket(bucket)
@@ -773,7 +783,7 @@ function relativeDateFilterPartsWithOffset({
   const [column, intervalParts] = offsetParts.args;
   if (
     !isColumnMetadata(column) ||
-    !isTemporal(column) ||
+    !isDateOrDateTime(column) ||
     !isExpression(intervalParts) ||
     intervalParts.operator !== "interval"
   ) {
@@ -825,7 +835,7 @@ function relativeDateFilterPartsRelativeTimeInterval({
 
   const [column, value, bucket, offsetValue, offsetBucket] = args;
 
-  if (!isColumnMetadata(column) || !isTemporal(column)) {
+  if (!isColumnMetadata(column) || !isDateOrDateTime(column)) {
     return null;
   }
 
@@ -924,6 +934,7 @@ export function updateLatLonFilter(
   stageIndex: number,
   latitudeColumn: DatasetColumn,
   longitudeColumn: DatasetColumn,
+  cardId: CardId | undefined,
   bounds: UpdateLatLonFilterBounds,
 ): Query {
   return ML.update_lat_lon_filter(
@@ -931,6 +942,7 @@ export function updateLatLonFilter(
     stageIndex,
     latitudeColumn,
     longitudeColumn,
+    cardId,
     bounds,
   );
 }
@@ -942,10 +954,18 @@ export function updateNumericFilter(
   query: Query,
   stageIndex: number,
   numericColumn: DatasetColumn,
+  cardId: CardId | undefined,
   start: number,
   end: number,
 ): Query {
-  return ML.update_numeric_filter(query, stageIndex, numericColumn, start, end);
+  return ML.update_numeric_filter(
+    query,
+    stageIndex,
+    numericColumn,
+    cardId,
+    start,
+    end,
+  );
 }
 
 /**
@@ -956,6 +976,7 @@ export function updateTemporalFilter(
   query: Query,
   stageIndex: number,
   temporalColumn: DatasetColumn,
+  cardId: CardId | undefined,
   start: string | Date,
   end: string | Date,
 ): Query {
@@ -963,6 +984,7 @@ export function updateTemporalFilter(
     query,
     stageIndex,
     temporalColumn,
+    cardId,
     start,
     end,
   );

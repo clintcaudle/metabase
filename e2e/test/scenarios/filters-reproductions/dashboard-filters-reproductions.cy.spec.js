@@ -1,5 +1,6 @@
 import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
 
+import { WRITABLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
   ADMIN_PERSONAL_COLLECTION_ID,
@@ -11,11 +12,15 @@ import {
   addOrUpdateDashboardCard,
   appBar,
   assertQueryBuilderRowCount,
+  assertTabSelected,
+  changeSynchronousBatchUpdateSetting,
   commandPalette,
   commandPaletteSearch,
+  createDashboard,
   createDashboardWithTabs,
   createNativeQuestion,
   createQuestion,
+  dashboardParameterSidebar,
   dashboardParametersContainer,
   editDashboard,
   filterWidget,
@@ -26,20 +31,22 @@ import {
   openNavigationSidebar,
   openQuestionsSidebar,
   popover,
+  resetTestTable,
   restore,
+  resyncDatabase,
   saveDashboard,
   selectDashboardFilter,
   setFilter,
+  setModelMetadata,
   sidebar,
+  tableHeaderClick,
+  tableInteractive,
   undoToast,
   updateDashboardCards,
   visitDashboard,
   visitEmbeddedPage,
   visitModel,
   visitPublicDashboard,
-  setModelMetadata,
-  tableHeaderClick,
-  dashboardParameterSidebar,
 } from "e2e/support/helpers";
 import {
   createMockDashboardCard,
@@ -240,7 +247,7 @@ describe("issue 8030 + 32444", () => {
   });
 });
 
-describe("issue 12720", () => {
+describe("issue 12720, issue 47172", () => {
   function clickThrough(title) {
     visitDashboard(ORDERS_DASHBOARD_ID);
     cy.findAllByTestId("dashcard-container").contains(title).click();
@@ -274,6 +281,7 @@ describe("issue 12720", () => {
       },
     },
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -291,7 +299,7 @@ describe("issue 12720", () => {
             {
               card_id: SQL_ID,
               row: 0,
-              col: 6, // making sure it doesn't overlap the existing card
+              col: 8, // making sure it doesn't overlap the existing card
               size_x: 7,
               size_y: 5,
               parameter_mappings: [
@@ -330,6 +338,33 @@ describe("issue 12720", () => {
     clickThrough("12720_SQL");
     clickThrough("Orders");
   });
+
+  it("should apply the specific (before|after) filter on a native question with field filter (metabase#47172)", () => {
+    visitDashboard(ORDERS_DASHBOARD_ID);
+
+    getDashboardCard(1).within(() => {
+      cy.findByTestId("TableFooter").should("exist");
+      cy.findByText("There was a problem displaying this chart.").should(
+        "not.exist",
+      );
+
+      cy.log("Drill down to the question");
+      cy.intercept("POST", "/api/card/*/query").as("cardQuery");
+      cy.findByText(questionDetails.name).click();
+    });
+
+    cy.location("search").should("eq", `?filter=${dashboardFilter.default}`);
+    cy.wait("@cardQuery");
+    tableInteractive().should("be.visible").and("contain", "97.44");
+    cy.findByTestId("question-row-count").should(
+      "not.have.text",
+      "Showing 0 rows",
+    );
+    cy.findByTestId("question-row-count").should(
+      "have.text",
+      "Showing 1,980 rows",
+    );
+  });
 });
 
 describe("issue 12985 > dashboard filter dropdown/search", () => {
@@ -342,6 +377,7 @@ describe("issue 12985 > dashboard filter dropdown/search", () => {
   };
 
   const dashboardDetails = { parameters: [categoryFilter] };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -658,6 +694,7 @@ describe("issue 17211", () => {
   const dashboardDetails = {
     parameters: [filter],
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -811,6 +848,7 @@ describe("issue 17775", () => {
   ];
 
   const dashboardDetails = { parameters };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -894,6 +932,7 @@ describe("issue 19494", () => {
   function checkAppliedFilter(name, value) {
     cy.findByText(name).closest("fieldset").contains(value);
   }
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -963,7 +1002,7 @@ describe("issue 16177", () => {
   it("should not lose the default value of the parameter connected to a field with a coercion strategy applied (metabase#16177)", () => {
     visitDashboard(ORDERS_DASHBOARD_ID);
     editDashboard();
-    setFilter("Time", "All Options");
+    setFilter("Date picker", "All Options");
     selectDashboardFilter(getDashboardCard(), "Quantity");
     dashboardParameterSidebar().findByText("No default").click();
     popover().findByText("Yesterday").click();
@@ -1182,7 +1221,7 @@ describe("issue 22482", () => {
     visitDashboard(ORDERS_DASHBOARD_ID);
 
     editDashboard();
-    setFilter("Time", "All Options");
+    setFilter("Date picker", "All Options");
 
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Select…").click();
@@ -1213,7 +1252,7 @@ describe("issue 22482", () => {
 
 describe("issue 22788", () => {
   const ccName = "Custom Category";
-  const ccDisplayName = "Product.Custom Category";
+  const ccDisplayName = "Products.Custom Category";
 
   const questionDetails = {
     name: "22788",
@@ -1239,8 +1278,10 @@ describe("issue 22788", () => {
 
   function addFilterAndAssert() {
     filterWidget().click();
-    popover().findByText("Gizmo").click();
-    cy.button("Add filter").click();
+    popover().within(() => {
+      cy.findByRole("searchbox").type("Gizmo");
+      cy.button("Add filter").click();
+    });
 
     cy.findAllByText("Gizmo");
     cy.findAllByText("Doohickey").should("not.exist");
@@ -1370,13 +1411,13 @@ describe("issue 24235", () => {
     popover().within(() => {
       cy.findByText("Exclude...").click();
       cy.findByText("Days of the week...").click();
-      cy.findByText("Select none...").click();
+      cy.findByText("Select all").click();
       cy.findByText("Add filter").click();
     });
 
     filterWidget().click();
     popover().within(() => {
-      cy.findByText("Select all...").click();
+      cy.findByText("Select none").click();
       cy.findByText("Update filter").click();
     });
 
@@ -1429,6 +1470,12 @@ describe("issues 15279 and 24500", () => {
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
+    changeSynchronousBatchUpdateSetting(true);
+  });
+
+  afterEach(() => {
+    cy.signInAsAdmin();
+    changeSynchronousBatchUpdateSetting(false);
   });
 
   it("corrupted dashboard filter should still appear in the UI without breaking other filters (metabase#15279, metabase#24500)", () => {
@@ -1587,6 +1634,7 @@ describe("issue 25322", () => {
 
     cy.intercept(matcher, req => req.on("response", res => res.setDelay(100)));
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -1687,7 +1735,7 @@ describe("issue 25248", () => {
     popover().findAllByText("Created At").first().click();
 
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Order.Created At").should("be.visible");
+    cy.findByText("Orders.Created At").should("be.visible");
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Select…").should("be.visible");
   });
@@ -1804,56 +1852,68 @@ describe("issue 25374", () => {
     cy.location("search").should("eq", "?equal_to=1%2C2%2C3");
   });
 
-  it("should retain comma-separated values when reverting to default (metabase#25374-3)", () => {
-    editDashboard();
-    cy.findByTestId("edit-dashboard-parameters-widget-container")
-      .findByText("Equal to")
-      .click();
-    dashboardParameterSidebar().findByLabelText("Default value").type("1,2,3");
-    saveDashboard();
+  it(
+    "should retain comma-separated values when reverting to default (metabase#25374-3)",
+    { tags: "@flaky" },
+    () => {
+      editDashboard();
+      cy.findByTestId("edit-dashboard-parameters-widget-container")
+        .findByText("Equal to")
+        .click();
+      dashboardParameterSidebar()
+        .findByLabelText("Default value")
+        .type("1,2,3");
+      saveDashboard();
 
-    cy.button("Clear").click();
-    cy.location("search").should("eq", "?equal_to=");
+      cy.button("Clear").click();
+      cy.location("search").should("eq", "?equal_to=");
 
-    cy.button("Reset filter to default state").click();
-    cy.location("search").should("eq", "?equal_to=1%2C2%2C3");
+      cy.button("Reset filter to default state").click();
+      cy.location("search").should("eq", "?equal_to=1%2C2%2C3");
 
-    // Drill-through and go to the question
-    getDashboardCard(0).findByText(questionDetails.name).click();
-    cy.wait("@cardQuery");
+      // Drill-through and go to the question
+      getDashboardCard(0).findByText(questionDetails.name).click();
+      cy.wait("@cardQuery");
 
-    cy.get("[data-testid=cell-data]")
-      .should("contain", "COUNT(*)")
-      .and("contain", "3");
+      cy.get("[data-testid=cell-data]")
+        .should("contain", "COUNT(*)")
+        .and("contain", "3");
 
-    cy.location("search").should("eq", "?num=1%2C2%2C3");
-  });
+      cy.location("search").should("eq", "?num=1%2C2%2C3");
+    },
+  );
 
-  it("should retain comma-separated values when reverting to default via 'Reset all filters' (metabase#25374-4)", () => {
-    editDashboard();
-    cy.findByTestId("edit-dashboard-parameters-widget-container")
-      .findByText("Equal to")
-      .click();
-    dashboardParameterSidebar().findByLabelText("Default value").type("1,2,3");
-    saveDashboard();
+  it(
+    "should retain comma-separated values when reverting to default via 'Reset all filters' (metabase#25374-4)",
+    { tags: "@flaky" },
+    () => {
+      editDashboard();
+      cy.findByTestId("edit-dashboard-parameters-widget-container")
+        .findByText("Equal to")
+        .click();
+      dashboardParameterSidebar()
+        .findByLabelText("Default value")
+        .type("1,2,3");
+      saveDashboard();
 
-    cy.button("Clear").click();
-    cy.location("search").should("eq", "?equal_to=");
+      cy.button("Clear").click();
+      cy.location("search").should("eq", "?equal_to=");
 
-    cy.button("Move, trash, and more…").click();
-    popover().findByText("Reset all filters").should("be.visible").click();
-    cy.location("search").should("eq", "?equal_to=1%2C2%2C3");
+      cy.button("Move, trash, and more…").click();
+      popover().findByText("Reset all filters").should("be.visible").click();
+      cy.location("search").should("eq", "?equal_to=1%2C2%2C3");
 
-    // Drill-through and go to the question
-    getDashboardCard(0).findByText(questionDetails.name).click();
-    cy.wait("@cardQuery");
+      // Drill-through and go to the question
+      getDashboardCard(0).findByText(questionDetails.name).click();
+      cy.wait("@cardQuery");
 
-    cy.get("[data-testid=cell-data]")
-      .should("contain", "COUNT(*)")
-      .and("contain", "3");
+      cy.get("[data-testid=cell-data]")
+        .should("contain", "COUNT(*)")
+        .and("contain", "3");
 
-    cy.location("search").should("eq", "?num=1%2C2%2C3");
-  });
+      cy.location("search").should("eq", "?num=1%2C2%2C3");
+    },
+  );
 });
 
 describe("issue 25908", () => {
@@ -2130,8 +2190,10 @@ describe("issue 27768", () => {
     saveDashboard();
 
     filterWidget().click();
-    popover().findByText("Gizmo").click();
-    cy.button("Add filter").click();
+    popover().within(() => {
+      cy.findByRole("searchbox").type("Gizmo");
+      cy.button("Add filter").click();
+    });
 
     cy.findAllByText("Doohickey").should("not.exist");
 
@@ -2141,7 +2203,7 @@ describe("issue 27768", () => {
 
     getDashboardCard().within(() => {
       cy.findByText("Select…").should("not.exist");
-      cy.contains("Product.CCategory");
+      cy.contains("Products.CCategory");
     });
   });
 });
@@ -2404,6 +2466,7 @@ describe("issue 31662", () => {
     name: "Dashboard",
     parameters: [parameterDetails],
   };
+
   beforeEach(() => {
     restore();
     cy.signInAsAdmin();
@@ -2429,6 +2492,7 @@ describe("issue 31662", () => {
     });
   });
 });
+
 describe("issue 38245", () => {
   function filterPanel() {
     return cy.findByTestId("edit-dashboard-parameters-widget-container");
@@ -2455,6 +2519,7 @@ describe("issue 38245", () => {
     slug: "filter-text",
     type: "string/contains",
   });
+
   beforeEach(() => {
     cy.intercept("POST", "/api/card/*/query").as("cardQuery");
     restore();
@@ -2560,6 +2625,7 @@ describe("issue 43154", () => {
       cy.button("Add filter").click();
     });
   }
+
   beforeEach(() => {
     restore();
     cy.signInAsNormalUser();
@@ -2676,16 +2742,14 @@ describe("issue 42829", () => {
     drillAndVerifyResults();
   });
 
-  // param_fields is null for public dashboards, should be fixed on the BE
-  it.skip("should be able to get field values coming from a sql model-based question in a public dashboard (metabase#42829)", () => {
+  it("should be able to get field values coming from a sql model-based question in a public dashboard (metabase#42829)", () => {
     cy.get("@dashboardId").then(dashboardId =>
       visitPublicDashboard(dashboardId),
     );
     filterAndVerifyResults();
   });
 
-  // param_fields is null for embedded dashboards, should be fixed on the BE
-  it.skip("should be able to get field values coming from a sql model-based question in a embedded dashboard (metabase#42829)", () => {
+  it("should be able to get field values coming from a sql model-based question in a embedded dashboard (metabase#42829)", () => {
     cy.get("@dashboardId").then(dashboardId =>
       visitEmbeddedPage({
         resource: { dashboard: dashboardId },
@@ -2780,7 +2844,9 @@ describe("issue 43799", () => {
       },
     );
     editDashboard();
-    cy.findByTestId("dashboard-header").findByLabelText("Add a filter").click();
+    cy.findByTestId("dashboard-header")
+      .findByLabelText("Add a filter or parameter")
+      .click();
     popover().findByText("Text or Category").click();
     getDashboardCard().findByText("Select…").click();
     popover().findByText("People - User → Source").click();
@@ -2941,16 +3007,17 @@ describe("issue 27579", () => {
   it("should be able to remove the last exclude hour option (metabase#27579)", () => {
     visitDashboard(ORDERS_DASHBOARD_ID);
     editDashboard();
-    setFilter("Time", "All Options");
+    setFilter("Date picker", "All Options");
     selectDashboardFilter(getDashboardCard(), "Created At");
     saveDashboard();
     filterWidget().click();
     popover().within(() => {
       cy.findByText("Exclude...").click();
       cy.findByText("Hours of the day...").click();
+      cy.findByText("Select all").click();
       cy.findByLabelText("12 AM").should("be.checked");
 
-      cy.findByText("Select none...").click();
+      cy.findByText("Select none").click();
       cy.findByLabelText("12 AM").should("not.be.checked");
     });
   });
@@ -3489,20 +3556,13 @@ describe("issue 44790", () => {
       });
     });
 
-    cy.log(
-      "wrong value for id filter should be handled and card should not hang",
-    );
-
+    cy.log("wrong value for id filter should be ignored");
     visitDashboard("@dashboardId", {
       params: {
         [idFilter.slug]: "{{test}}",
       },
     });
-
-    getDashboardCard().should(
-      "contain",
-      "There was a problem displaying this chart.",
-    );
+    getDashboardCard().should("contain", "borer-hudson@yahoo.com");
 
     cy.log("wrong value for number filter should be ignored");
     visitDashboard("@dashboardId", {
@@ -3511,7 +3571,6 @@ describe("issue 44790", () => {
         [idFilter.slug]: "1",
       },
     });
-
     getDashboardCard().should("contain", "borer-hudson@yahoo.com");
   });
 });
@@ -3573,10 +3632,10 @@ describe("issue 34955", () => {
       visitDashboard(dashboard_id);
       editDashboard();
 
-      setFilter("Time", "Single Date", "On");
+      setFilter("Date picker", "Single Date", "On");
       connectFilterToColumn(ccName);
 
-      setFilter("Time", "Date Range", "Between");
+      setFilter("Date picker", "Date Range", "Between");
       connectFilterToColumn(ccName);
 
       saveDashboard();
@@ -3744,4 +3803,268 @@ describe("issue 35852", () => {
       });
     });
   }
+});
+
+describe("issue 32573", () => {
+  const modelDetails = {
+    name: "M1",
+    type: "model",
+    query: {
+      "source-table": ORDERS_ID,
+      fields: [["field", ORDERS.TAX, null]],
+    },
+  };
+
+  const parameterDetails = {
+    id: "92eb69ea",
+    name: "ID",
+    sectionId: "id",
+    slug: "id",
+    type: "id",
+    default: 1,
+  };
+
+  const dashboardDetails = {
+    parameters: [parameterDetails],
+  };
+
+  function getQuestionDetails(modelId) {
+    return {
+      name: "Q1",
+      type: "question",
+      query: {
+        "source-table": `card__${modelId}`,
+      },
+    };
+  }
+
+  function getParameterMapping(questionId) {
+    return {
+      card_id: questionId,
+      parameter_id: parameterDetails.id,
+      target: [
+        "dimension",
+        ["field", "ID", { "base-type": "type/BigInteger" }],
+      ],
+    };
+  }
+
+  beforeEach(() => {
+    restore();
+    cy.signInAsNormalUser();
+  });
+
+  it("should not crash a dashboard when there is a missing parameter column (metabase#32573)", () => {
+    createQuestion(modelDetails).then(({ body: model }) => {
+      createQuestion(getQuestionDetails(model.id)).then(
+        ({ body: question }) => {
+          createDashboard(dashboardDetails).then(({ body: dashboard }) => {
+            return cy
+              .request("PUT", `/api/dashboard/${dashboard.id}`, {
+                dashcards: [
+                  createMockDashboardCard({
+                    card_id: question.id,
+                    parameter_mappings: [getParameterMapping(question.id)],
+                    size_x: 6,
+                    size_y: 6,
+                  }),
+                ],
+              })
+              .then(() => visitDashboard(dashboard.id));
+          });
+        },
+      );
+    });
+    getDashboardCard()
+      .findByText("There was a problem displaying this chart.")
+      .should("be.visible");
+
+    editDashboard();
+    cy.findByTestId("fixed-width-filters").findByText("ID").click();
+    getDashboardCard().within(() => {
+      cy.findByText("Unknown Field").should("be.visible");
+      cy.findByLabelText("Disconnect").click();
+    });
+    saveDashboard();
+    getDashboardCard().within(() => {
+      cy.findByText("Q1").should("be.visible");
+      cy.findByText("Tax").should("be.visible");
+    });
+  });
+});
+
+describe("issue 45670", { tags: ["@external"] }, () => {
+  const dialect = "postgres";
+  const tableName = "many_data_types";
+
+  const parameterDetails = {
+    id: "92eb69ea",
+    name: "boolean",
+    type: "string/=",
+    slug: "boolean",
+    sectionId: "string",
+  };
+
+  const dashboardDetails = {
+    parameters: [parameterDetails],
+  };
+
+  function getField() {
+    return cy.request("GET", "/api/table").then(({ body: tables }) => {
+      const table = tables.find(table => table.name === tableName);
+      return cy
+        .request("GET", `/api/table/${table.id}/query_metadata`)
+        .then(({ body: metadata }) => {
+          const { fields } = metadata;
+          return fields.find(field => field.name === "boolean");
+        });
+    });
+  }
+
+  function getQuestionDetails(fieldId) {
+    return {
+      database: WRITABLE_DB_ID,
+      native: {
+        query: "SELECT id, boolean FROM many_data_types WHERE {{boolean}}",
+        "template-tags": {
+          boolean: {
+            id: "4b77cc1f-ea70-4ef6-84db-58432fce6928",
+            name: "boolean",
+            type: "dimension",
+            "display-name": "Boolean",
+            dimension: ["field", fieldId, null],
+            "widget-type": "string/=",
+          },
+        },
+      },
+    };
+  }
+
+  function getParameterMapping(cardId) {
+    return {
+      card_id: cardId,
+      parameter_id: parameterDetails.id,
+      target: ["dimension", ["template-tag", parameterDetails.name]],
+    };
+  }
+
+  beforeEach(() => {
+    resetTestTable({ type: dialect, table: tableName });
+    restore(`${dialect}-writable`);
+    cy.signInAsAdmin();
+    resyncDatabase({ dbId: WRITABLE_DB_ID, tableName });
+    cy.intercept("PUT", "/api/card/*").as("updateCard");
+  });
+
+  it("should be able to pass query string parameters for boolean parameters in dashboards (metabase#45670)", () => {
+    getField().then(field => {
+      createNativeQuestion(getQuestionDetails(field.id)).then(
+        ({ body: card }) => {
+          createDashboard(dashboardDetails).then(({ body: dashboard }) => {
+            cy.request("PUT", `/api/dashboard/${dashboard.id}`, {
+              dashcards: [
+                createMockDashboardCard({
+                  card_id: card.id,
+                  parameter_mappings: [getParameterMapping(card.id, field.id)],
+                  size_x: 8,
+                  size_y: 8,
+                }),
+              ],
+            });
+            visitDashboard(dashboard.id, {
+              params: {
+                [parameterDetails.slug]: "true",
+              },
+            });
+          });
+        },
+      );
+    });
+    filterWidget().should("contain.text", "true");
+    getDashboardCard().within(() => {
+      cy.findByText("true").should("be.visible");
+      cy.findByText("false").should("not.exist");
+    });
+  });
+});
+
+describe("issue 48351", () => {
+  beforeEach(() => {
+    restore();
+    cy.signInAsNormalUser();
+  });
+
+  it("should navigate to the specified tab with click behaviors (metabase#48351)", () => {
+    createDashboardWithTabs({
+      name: "Dashboard 1",
+      tabs: [
+        { id: 1, name: "Tab 1" },
+        { id: 2, name: "Tab 2" },
+      ],
+      dashcards: [
+        createMockDashboardCard({
+          id: -1,
+          card_id: ORDERS_QUESTION_ID,
+          dashboard_tab_id: 1,
+          size_x: 8,
+          size_y: 8,
+        }),
+        createMockDashboardCard({
+          id: -2,
+          card_id: ORDERS_QUESTION_ID,
+          dashboard_tab_id: 2,
+          col: 8,
+          size_x: 8,
+          size_y: 8,
+        }),
+      ],
+    }).then(dashboard1 => {
+      createDashboardWithTabs({
+        name: "Dashboard 2",
+        tabs: [
+          { id: 3, name: "Tab 3" },
+          { id: 4, name: "Tab 4" },
+        ],
+        dashcards: [
+          createMockDashboardCard({
+            id: -1,
+            card_id: ORDERS_QUESTION_ID,
+            dashboard_tab_id: 3,
+            size_x: 8,
+            size_y: 8,
+          }),
+          createMockDashboardCard({
+            id: -2,
+            card_id: ORDERS_QUESTION_ID,
+            dashboard_tab_id: 4,
+            visualization_settings: {
+              column_settings: {
+                '["name","ID"]': {
+                  click_behavior: {
+                    type: "link",
+                    linkType: "dashboard",
+                    targetId: dashboard1.id,
+                    tabId: dashboard1.tabs[1].id,
+                    parameterMapping: {},
+                  },
+                },
+              },
+            },
+            col: 8,
+            size_x: 8,
+            size_y: 8,
+          }),
+        ],
+      }).then(dashboard2 => visitDashboard(dashboard2.id));
+    });
+    goToTab("Tab 4");
+    getDashboardCard().within(() =>
+      cy.findAllByTestId("cell-data").eq(0).click(),
+    );
+    cy.findByTestId("dashboard-name-heading").should(
+      "have.value",
+      "Dashboard 1",
+    );
+    assertTabSelected("Tab 2");
+  });
 });

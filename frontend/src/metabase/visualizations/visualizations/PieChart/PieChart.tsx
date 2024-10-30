@@ -1,16 +1,25 @@
 import type { EChartsType } from "echarts/core";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { type MouseEvent, useCallback, useMemo, useRef, useState } from "react";
+import { useSet } from "react-use";
 
+import { isNotNull } from "metabase/lib/types";
+import { extractRemappings } from "metabase/visualizations";
 import ChartWithLegend from "metabase/visualizations/components/ChartWithLegend";
+import { ResponsiveEChartsRenderer } from "metabase/visualizations/components/EChartsRenderer";
 import { getPieChartFormatters } from "metabase/visualizations/echarts/pie/format";
 import { getPieChartModel } from "metabase/visualizations/echarts/pie/model";
 import { getPieChartOption } from "metabase/visualizations/echarts/pie/option";
+import { getTooltipOption } from "metabase/visualizations/echarts/pie/tooltip";
+import { getArrayFromMapValues } from "metabase/visualizations/echarts/pie/util";
+import {
+  useCloseTooltipOnScroll,
+  usePieChartValuesColorsClasses,
+} from "metabase/visualizations/echarts/tooltip";
 import { useBrowserRenderingContext } from "metabase/visualizations/hooks/use-browser-rendering-context";
 import type { VisualizationProps } from "metabase/visualizations/types";
 
-import { ChartRenderer } from "./PieChart.styled";
 import { PIE_CHART_DEFINITION } from "./chart-definition";
-import { getTooltipModel, useChartEvents } from "./use-chart-events";
+import { useChartEvents } from "./use-chart-events";
 
 Object.assign(PieChart, PIE_CHART_DEFINITION);
 
@@ -22,11 +31,19 @@ export function PieChart(props: VisualizationProps) {
     onRender,
     isDashboard,
     isFullscreen,
+    isPlaceholder,
+    series: transformedSeries,
   } = props;
   const hoveredIndex = props.hovered?.index;
+  const hoveredSliceKeyPath = props.hovered?.pieSliceKeyPath;
 
+  const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType>();
   const [sideLength, setSideLength] = useState(0);
+
+  const [hiddenSlices, { toggle: toggleSliceVisibility }] = useSet<
+    string | number
+  >();
 
   const showWarning = useCallback(
     (warning: string) => onRender({ warnings: [warning] }),
@@ -38,24 +55,44 @@ export function PieChart(props: VisualizationProps) {
     isDashboard,
     isFullscreen,
   });
+  const rawSeriesWithRemappings = useMemo(
+    () => extractRemappings(rawSeries),
+    [rawSeries],
+  );
+
+  const seriesToRender = useMemo(
+    () => (isPlaceholder ? transformedSeries : rawSeriesWithRemappings),
+    [isPlaceholder, transformedSeries, rawSeriesWithRemappings],
+  );
+
   const chartModel = useMemo(
-    () => getPieChartModel(rawSeries, settings, renderingContext, showWarning),
-    [rawSeries, settings, renderingContext, showWarning],
+    () =>
+      getPieChartModel(
+        seriesToRender,
+        settings,
+        Array.from(hiddenSlices),
+        renderingContext,
+        showWarning,
+      ),
+    [seriesToRender, settings, hiddenSlices, renderingContext, showWarning],
   );
   const formatters = useMemo(
-    () => getPieChartFormatters(chartModel, settings, renderingContext),
-    [chartModel, settings, renderingContext],
+    () => getPieChartFormatters(chartModel, settings),
+    [chartModel, settings],
   );
   const option = useMemo(
-    () =>
-      getPieChartOption(
+    () => ({
+      ...getPieChartOption(
         chartModel,
         formatters,
         settings,
         renderingContext,
         sideLength,
         hoveredIndex,
+        hoveredSliceKeyPath,
       ),
+      tooltip: getTooltipOption(chartModel, formatters, containerRef),
+    }),
     [
       chartModel,
       formatters,
@@ -63,8 +100,11 @@ export function PieChart(props: VisualizationProps) {
       renderingContext,
       sideLength,
       hoveredIndex,
+      hoveredSliceKeyPath,
     ],
   );
+
+  const valuesColorsCss = usePieChartValuesColorsClasses(chartModel);
 
   const handleInit = useCallback((chart: EChartsType) => {
     chartRef.current = chart;
@@ -75,27 +115,36 @@ export function PieChart(props: VisualizationProps) {
     [],
   );
 
-  const eventHandlers = useChartEvents(props, chartRef, chartModel, formatters);
+  const eventHandlers = useChartEvents(props, chartRef, chartModel);
 
-  const legendTitles = chartModel.slices
-    .filter(s => s.data.includeInLegend)
+  const slices = getArrayFromMapValues(chartModel.sliceTree);
+  const legendTitles = slices
+    .filter(s => s.includeInLegend)
     .map(s => {
-      const label = s.data.isOther
-        ? s.data.key
-        : formatters.formatDimension(s.data.key);
+      const label = s.name;
 
-      const percent =
-        settings["pie.percent_visibility"] === "legend" ||
-        settings["pie.percent_visibility"] === "both"
-          ? formatters.formatPercent(s.data.normalizedPercentage, "legend")
-          : undefined;
+      // Hidden slices don't have a percentage
+      const sliceHidden = s.normalizedPercentage === 0;
+      const percentDisabled =
+        settings["pie.percent_visibility"] !== "legend" &&
+        settings["pie.percent_visibility"] !== "both";
 
-      return [label, percent];
+      if (sliceHidden || percentDisabled) {
+        return [label];
+      }
+
+      return [
+        label,
+        formatters.formatPercent(s.normalizedPercentage, "legend"),
+      ];
     });
 
-  const legendColors = chartModel.slices
-    .filter(s => s.data.includeInLegend)
-    .map(s => s.data.color);
+  const hiddenSlicesLegendIndices = slices
+    .filter(s => s.includeInLegend)
+    .map((s, index) => (hiddenSlices.has(s.key) ? index : null))
+    .filter(isNotNull);
+
+  const legendColors = slices.filter(s => s.includeInLegend).map(s => s.color);
 
   const showLegend = settings["pie.show_legend"];
 
@@ -103,19 +152,28 @@ export function PieChart(props: VisualizationProps) {
     props.onHoverChange(
       hoverData && {
         ...hoverData,
-        stackedTooltipModel: getTooltipModel(
-          hoverData.index,
-          chartModel,
-          formatters,
-        ),
+        pieLegendHoverIndex: hoverData.index,
       },
     );
 
+  const handleToggleSeriesVisibility = (
+    event: MouseEvent,
+    sliceIndex: number,
+  ) => {
+    const slice = slices[sliceIndex];
+    const willShowSlice = hiddenSlices.has(slice.key);
+    const hasMoreVisibleSlices = slices.length - hiddenSlices.size > 1;
+    if (hasMoreVisibleSlices || willShowSlice) {
+      toggleSliceVisibility(slice.key);
+    }
+  };
+
+  useCloseTooltipOnScroll(chartRef);
+
   return (
-    // @ts-expect-error - `ChartWithLegend` has bad types due to it being in js
-    // and due to using a HoC
     <ChartWithLegend
       legendTitles={legendTitles}
+      legendHiddenIndices={hiddenSlicesLegendIndices}
       legendColors={legendColors}
       showLegend={showLegend}
       onHoverChange={onHoverChange}
@@ -123,11 +181,11 @@ export function PieChart(props: VisualizationProps) {
       gridSize={props.gridSize}
       hovered={props.hovered}
       isDashboard={isDashboard}
+      onToggleSeriesVisibility={handleToggleSeriesVisibility}
     >
-      <ChartRenderer
+      <ResponsiveEChartsRenderer
+        ref={containerRef}
         option={option}
-        width={"auto"}
-        height={"auto"}
         onInit={handleInit}
         onResize={handleResize}
         eventHandlers={eventHandlers}
@@ -135,8 +193,8 @@ export function PieChart(props: VisualizationProps) {
         // we need it to be `false`, otherwise echarts will bug out and be stuck
         // in emphasis state after hovering a slice
         notMerge={false}
-        style={null}
       />
+      {valuesColorsCss}
     </ChartWithLegend>
   );
 }

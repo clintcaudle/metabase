@@ -19,18 +19,17 @@
    [metabase.lib.schema.common :as lib.schema.common]
    [metabase.lib.schema.id :as lib.schema.id]
    [metabase.lib.schema.metadata :as lib.schema.metadata]
-   [metabase.lib.schema.temporal-bucketing
-    :as lib.schema.temporal-bucketing]
+   [metabase.lib.schema.temporal-bucketing :as lib.schema.temporal-bucketing]
    [metabase.lib.temporal-bucket :as lib.temporal-bucket]
    [metabase.lib.types.isa :as lib.types.isa]
    [metabase.lib.util :as lib.util]
-   [metabase.shared.util.i18n :as i18n]
-   [metabase.shared.util.time :as shared.ut]
    [metabase.util :as u]
    [metabase.util.humanization :as u.humanization]
+   [metabase.util.i18n :as i18n]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
-   [metabase.util.malli.registry :as mr]))
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.time :as u.time]))
 
 (mu/defn resolve-column-name-in-metadata :- [:maybe ::lib.schema.metadata/column]
   "Find the column with `column-name` in a sequence of `column-metadatas`."
@@ -93,6 +92,10 @@
                     {:base-type base-type})
                   (when-let [effective-type ((some-fn :effective-type :base-type) opts)]
                     {:effective-type effective-type})
+                  (when-let [original-effective-type (::original-effective-type opts)]
+                    {::original-effective-type original-effective-type})
+                  (when-let [original-temporal-unit (::original-temporal-unit opts)]
+                    {::original-temporal-unit original-temporal-unit})
                   ;; TODO -- some of the other stuff in `opts` probably ought to be merged in here as well. Also, if
                   ;; the Field is temporally bucketed, the base-type/effective-type would probably be affected, right?
                   ;; We should probably be taking that into consideration?
@@ -159,14 +162,14 @@
    metadata
    [_tag {source-uuid :lib/uuid :keys [base-type binning effective-type join-alias source-field temporal-unit], :as opts} :as field-ref]]
   (let [metadata (merge
-                  {:lib/type        :metadata/column
-                   :lib/source-uuid source-uuid}
+                  {:lib/type        :metadata/column}
                   metadata
                   {:display-name (or (:display-name opts)
                                      (lib.metadata.calculation/display-name query stage-number field-ref))})]
     (cond-> metadata
+      source-uuid    (assoc :lib/source-uuid source-uuid)
+      base-type      (assoc :base-type base-type, :effective-type base-type)
       effective-type (assoc :effective-type effective-type)
-      base-type      (assoc :base-type base-type)
       temporal-unit  (assoc ::temporal-unit temporal-unit)
       binning        (assoc ::binning binning)
       source-field   (assoc :fk-field-id source-field)
@@ -317,39 +320,21 @@
   (::temporal-unit metadata))
 
 (defmethod lib.temporal-bucket/with-temporal-bucket-method :field
-  [[_tag options id-or-name] unit]
-  ;; if `unit` is an extraction unit like `:month-of-year`, then the `:effective-type` of the ref changes to
-  ;; `:type/Integer` (month of year returns an int). We need to record the ORIGINAL effective type somewhere in case
-  ;; we need to refer back to it, e.g. to see what temporal buckets are available if we want to change the unit, or if
-  ;; we want to remove it later. We will record this with the key `::original-effective-type`. Note that changing the
-  ;; unit multiple times should keep the original first value of `::original-effective-type`.
-  (if unit
-    (let [extraction-unit?        (contains? lib.schema.temporal-bucketing/datetime-extraction-units unit)
-          original-effective-type ((some-fn ::original-effective-type :effective-type :base-type) options)
-          new-effective-type      (if extraction-unit?
-                                    :type/Integer
-                                    original-effective-type)
-          options                 (assoc options
-                                         :temporal-unit unit
-                                         :effective-type new-effective-type
-                                         ::original-effective-type original-effective-type)]
-      [:field options id-or-name])
-    ;; `unit` is `nil`: remove the temporal bucket.
-    (let [options (if-let [original-effective-type (::original-effective-type options)]
-                    (-> options
-                        (assoc :effective-type original-effective-type)
-                        (dissoc ::original-effective-type))
-                    options)
-          options (dissoc options :temporal-unit)]
-      [:field options id-or-name])))
+  [field-ref unit]
+  (lib.temporal-bucket/add-temporal-bucket-to-ref field-ref unit))
 
 (defmethod lib.temporal-bucket/with-temporal-bucket-method :metadata/column
   [metadata unit]
-  (if unit
-    (assoc metadata
-           ::temporal-unit unit
-           ::original-effective-type ((some-fn ::original-effective-type :effective-type :base-type) metadata))
-    (dissoc metadata ::temporal-unit ::original-effective-type)))
+  (let [original-effective-type ((some-fn ::original-effective-type :effective-type :base-type) metadata)
+        original-temporal-unit ((some-fn ::original-temporal-unit ::temporal-unit) metadata)]
+    (if unit
+      (-> metadata
+          (assoc ::temporal-unit unit
+                 ::original-effective-type original-effective-type)
+          (m/assoc-some ::original-temporal-unit original-temporal-unit))
+      (cond-> (dissoc metadata ::temporal-unit ::original-effective-type)
+        original-effective-type (assoc :effective-type original-effective-type)
+        original-temporal-unit  (assoc ::original-temporal-unit original-temporal-unit)))))
 
 (defmethod lib.temporal-bucket/available-temporal-buckets-method :field
   [query stage-number field-ref]
@@ -358,8 +343,8 @@
 (defn- fingerprint-based-default-unit [fingerprint]
   (u/ignore-exceptions
     (when-let [{:keys [earliest latest]} (-> fingerprint :type :type/DateTime)]
-      (let [days (shared.ut/day-diff (shared.ut/coerce-to-timestamp earliest)
-                                     (shared.ut/coerce-to-timestamp latest))]
+      (let [days (u.time/day-diff (u.time/coerce-to-timestamp earliest)
+                                  (u.time/coerce-to-timestamp latest))]
         (when-not (NaN? days)
           (condp > days
             1 :minute
@@ -367,27 +352,13 @@
             365 :week
             :month))))))
 
-(defn- mark-unit [options option-key unit]
-  (cond->> options
-    (some #(= (:unit %) unit) options)
-    (mapv (fn [option]
-            (cond-> option
-              (contains? option option-key) (dissoc option option-key)
-              (= (:unit option) unit)       (assoc option-key true))))))
-
 (defmethod lib.temporal-bucket/available-temporal-buckets-method :metadata/column
   [_query _stage-number field-metadata]
-  (if (not= (:lib/source field-metadata) :source/expressions)
-    (let [effective-type ((some-fn :effective-type :base-type) field-metadata)
-          fingerprint-default (some-> field-metadata :fingerprint fingerprint-based-default-unit)]
-      (cond-> (cond
-                (isa? effective-type :type/DateTime) lib.temporal-bucket/datetime-bucket-options
-                (isa? effective-type :type/Date)     lib.temporal-bucket/date-bucket-options
-                (isa? effective-type :type/Time)     lib.temporal-bucket/time-bucket-options
-                :else                                [])
-        fingerprint-default              (mark-unit :default fingerprint-default)
-        (::temporal-unit field-metadata) (mark-unit :selected (::temporal-unit field-metadata))))
-    []))
+  (lib.temporal-bucket/available-temporal-buckets-for-type
+   ((some-fn :effective-type :base-type) field-metadata)
+   (or (some-> field-metadata :fingerprint fingerprint-based-default-unit)
+       :month)
+   (::temporal-unit field-metadata)))
 
 ;;; ---------------------------------------- Binning ---------------------------------------------
 
@@ -465,6 +436,8 @@
                                    {:temporal-unit temporal-unit})
                                  (when-let [original-effective-type (::original-effective-type metadata)]
                                    {::original-effective-type original-effective-type})
+                                 (when-let [original-temporal-unit (::original-temporal-unit metadata)]
+                                   {::original-temporal-unit original-temporal-unit})
                                  (when-let [binning (::binning metadata)]
                                    {:binning binning})
                                  (when-let [source-field-id (when-not inherited-column?
@@ -637,13 +610,13 @@
         source (:lib/source column)]
     (-> (case source
           (:source/table-defaults
-            :source/fields
-            :source/card
-            :source/previous-stage
-            :source/expressions
-            :source/aggregations
-            :source/breakouts)         (cond-> query
-                                         (contains? stage :fields) (include-field stage-number column))
+           :source/fields
+           :source/card
+           :source/previous-stage
+           :source/expressions
+           :source/aggregations
+           :source/breakouts)         (cond-> query
+                                        (contains? stage :fields) (include-field stage-number column))
           :source/joins               (add-field-to-join query stage-number column)
           :source/implicitly-joinable (include-field query stage-number column)
           :source/native              (throw (ex-info (native-query-fields-edit-error) {:query query :stage stage-number}))
@@ -657,7 +630,7 @@
 
 (defn- remove-matching-ref [column refs]
   (let [match (lib.equality/find-matching-ref column refs)]
-     (remove #(= % match) refs)))
+    (remove #(= % match) refs)))
 
 (defn- exclude-field
   "This is called only for fields that plausibly need removing. If the stage has no `:fields`, this will populate it.
@@ -710,7 +683,7 @@
            :source/implicitly-joinable) (exclude-field query stage-number column)
           :source/joins                 (remove-field-from-join query stage-number column)
           :source/native                (throw (ex-info (native-query-fields-edit-error)
-                                                         {:query query :stage stage-number}))
+                                                        {:query query :stage stage-number}))
 
           (:source/breakouts
            :source/aggregations)        (throw (ex-info (source-clauses-only-fields-edit-error)

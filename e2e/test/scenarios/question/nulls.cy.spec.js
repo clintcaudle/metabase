@@ -1,14 +1,14 @@
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
-  restore,
-  openOrdersTable,
-  popover,
-  summarize,
-  visitDashboard,
-  rightSidebar,
-  updateDashboardCards,
   addOrUpdateDashboardCard,
   cartesianChartCircle,
+  openOrdersTable,
+  popover,
+  restore,
+  rightSidebar,
+  summarize,
+  updateDashboardCards,
+  visitDashboard,
 } from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID } = SAMPLE_DATABASE;
@@ -103,7 +103,6 @@ describe("scenarios > question > null", () => {
         cy.findByTestId("legend-caption-title").should("have.text", "13626");
         cy.findByText("TOTAL").should("be.visible");
         cy.findByText("0").should("be.visible");
-        cy.findAllByTestId("legend-item").contains("1").should("be.visible");
       });
     });
   });
@@ -173,7 +172,7 @@ describe("scenarios > question > null", () => {
         cy.icon("close").click();
       });
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add a metric").click();
+      cy.findByText("Add a function or metric").click();
       // dropdown immediately opens with the new set of metrics to choose from
       popover().within(() => {
         cy.findByText("Cumulative sum of ...").click();

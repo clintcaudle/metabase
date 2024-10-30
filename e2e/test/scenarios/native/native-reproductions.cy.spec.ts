@@ -1,10 +1,10 @@
 import {
-  restore,
-  withDatabase,
   adhocQuestionHash,
-  runNativeQuery,
-  openNativeEditor,
   createNativeQuestion,
+  openNativeEditor,
+  restore,
+  runNativeQuery,
+  withDatabase,
 } from "e2e/support/helpers";
 
 import { getRunQueryButton } from "../native-filters/helpers/e2e-sql-filter-helpers";
@@ -21,6 +21,7 @@ describe("issue 11727", { tags: "@external" }, () => {
       },
     },
   };
+
   beforeEach(() => {
     restore("postgres-12");
     cy.signInAsAdmin();

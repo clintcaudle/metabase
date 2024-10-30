@@ -1,16 +1,16 @@
 import { SAMPLE_DB_ID, SAMPLE_DB_SCHEMA_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
-  visitAlias,
-  restore,
+  appBar,
+  commandPalette,
+  commandPaletteButton,
+  navigationSidebar,
   openReviewsTable,
   popover,
+  restore,
   summarize,
-  commandPaletteButton,
-  commandPalette,
   tableHeaderClick,
-  navigationSidebar,
-  appBar,
+  visitAlias,
 } from "e2e/support/helpers";
 
 const { PEOPLE_ID, PEOPLE, REVIEWS, REVIEWS_ID, ORDERS, ORDERS_ID } =
@@ -85,6 +85,7 @@ describe("issue 18384", () => {
 
 describe("issue 21984", () => {
   const reviewsDataModelPage = `/admin/datamodel/database/${SAMPLE_DB_ID}/schema/${SAMPLE_DB_SCHEMA_ID}/table/${REVIEWS_ID}`;
+
   beforeEach(() => {
     cy.intercept("GET", "/api/table/*/query_metadata?**").as("tableMetadata");
 

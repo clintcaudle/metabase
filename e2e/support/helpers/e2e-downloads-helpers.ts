@@ -23,7 +23,16 @@ interface DownloadAndAssertParams {
   publicUuid?: string;
   dashboardId?: number;
   enableFormatting?: boolean;
+  pivoting?: "pivoted" | "non-pivoted";
 }
+
+export const exportFromDashcard = (format: string) => {
+  popover().within(() => {
+    cy.findByText("Download results").click();
+    cy.findByText(format).click();
+    cy.findByTestId("download-results-button").click();
+  });
+};
 
 /**
  * Trigger the download of CSV or XLSX files and assert on the results in the related sheet.
@@ -42,6 +51,7 @@ export function downloadAndAssert(
     downloadMethod = "POST",
     isDashboard,
     enableFormatting = true,
+    pivoting,
   }: DownloadAndAssertParams,
   callback: (data: unknown) => void,
 ) {
@@ -84,11 +94,31 @@ export function downloadAndAssert(
   } else {
     cy.findByTestId("download-button").click();
   }
-  // Initiate the file download
-  if (!enableFormatting) {
-    cy.window().trigger("keydown", { key: "Alt" });
-  }
-  popover().findByText(`.${fileType}`).click();
+
+  popover().within(() => {
+    cy.findByText(`.${fileType}`).click();
+
+    const formattingButtonLabel = enableFormatting
+      ? "Formatted"
+      : "Unformatted";
+
+    cy.findByText(formattingButtonLabel).click();
+
+    if (pivoting != null) {
+      cy.findByTestId("keep-data-pivoted")
+        .as("keep-data-pivoted")
+        .then($checkbox => {
+          const isChecked = $checkbox.prop("checked");
+
+          const shouldPivot = pivoting === "pivoted";
+          if (shouldPivot !== isChecked) {
+            cy.get("@keep-data-pivoted").click();
+          }
+        });
+    }
+
+    cy.findByTestId("download-results-button").click();
+  });
 
   cy.wait("@fileDownload")
     .its("request")
@@ -97,6 +127,7 @@ export function downloadAndAssert(
       fileType === "xlsx" && Object.assign(req, { encoding: "binary" });
 
       cy.request(req).then(({ body }) => {
+        ensureDownloadStatusDismissed();
         const { SheetNames, Sheets } = xlsx.read(body, {
           // See the full list of Parsing options: https://github.com/SheetJS/sheetjs#parsing-options
           type: "binary",
@@ -128,6 +159,7 @@ type GetEndPointParams = Pick<
   DownloadAndAssertParams,
   "fileType" | "questionId" | "publicUuid" | "dashcardId" | "dashboardId"
 >;
+
 function getEndpoint({
   fileType,
   questionId,
@@ -167,13 +199,12 @@ function getEndpoint({
   };
 }
 
-export function dismissDownloadStatus() {
-  cy.findByTestId("status-root-container").within(() => {
-    cy.findByRole("status").within(() => {
-      cy.findAllByText("Download completed");
-      cy.findByLabelText("Dismiss").click();
-    });
-
-    cy.findByRole("status").should("not.exist");
-  });
+export function ensureDownloadStatusDismissed() {
+  // Upon successful export, we display a status popup that automatically closes after a set time.
+  //  However, Cypress sometimes hangs after file downloads, making it difficult to determine if
+  //  the status popup has already closed on its own or if we need to close it manually which makes
+  //  any attempts to close it flaky. As a workaround we wait until it gets removed by itself.
+  cy.findByTestId("status-root-container")
+    .contains("Download", { timeout: 10000 })
+    .should("not.exist");
 }

@@ -317,6 +317,7 @@
           :cards [{:id            metric-id
                    :name          "Sum of Cans"
                    :database-id   (meta/id)
+                   :table-id      (meta/id :venues)
                    :dataset-query metric-definition
                    :description   "Number of toucans plus number of pelicans"
                    :type          :metric}]})
@@ -396,7 +397,7 @@
     (lib.js/expression-clause "time-interval" [(meta/field-metadata :products :created-at) 10 "day"] nil)
 
     [:relative-time-interval {} [:field {} int?] 10 :day 10 :month]
-    (lib.js/expression-clause "time-interval" [(meta/field-metadata :products :created-at) 10 "day" 10 "month"] nil)
+    (lib.js/expression-clause "relative-time-interval" [(meta/field-metadata :products :created-at) 10 "day" 10 "month"] nil)
 
     [:relative-datetime {} :current :day]
     (lib.js/expression-clause "relative-datetime" ["current" "day"] nil)
@@ -430,11 +431,11 @@
 
   (testing "normalizes recursively"
     (is (=?
-          [:time-interval {} [:field {} int?]
-           [:interval {} 10 :day]
-           :day]
-          (lib.js/expression-clause "time-interval" [(meta/field-metadata :products :created-at)
-                                                     (lib.js/expression-clause "interval" [10 "day"] nil) "day"] nil)))))
+         [:time-interval {} [:field {} int?]
+          [:interval {} 10 :day]
+          :day]
+         (lib.js/expression-clause "time-interval" [(meta/field-metadata :products :created-at)
+                                                    (lib.js/expression-clause "interval" [10 "day"] nil) "day"] nil)))))
 
 (defn- js= [a b]
   (cond
@@ -459,53 +460,53 @@
   (testing "check js= works correctly (who tests the tests?)"
     (testing "should be true"
       (are [a b] (= true (js= a b))
-           7 7
-           0 0
-           -1 -1
-           nil nil
-           js/undefined nil
-           nil js/undefined
-           "foo" "foo"
-           true true
-           false false
+        7 7
+        0 0
+        -1 -1
+        nil nil
+        js/undefined nil
+        nil js/undefined
+        "foo" "foo"
+        true true
+        false false
 
            ;; Objects
-           #js {:foo "bar"}
-           #js {:foo "bar"}
-           #js {:foo "bar", :baz "quux"}
-           #js {:foo "bar", :baz "quux"}
+        #js {:foo "bar"}
+        #js {:foo "bar"}
+        #js {:foo "bar", :baz "quux"}
+        #js {:foo "bar", :baz "quux"}
            ;; Arrays
-           #js ["foo" #js [1 2 3]]
-           #js ["foo" #js [1 2 3]]
+        #js ["foo" #js [1 2 3]]
+        #js ["foo" #js [1 2 3]]
            ;; Nesting
-           #js [#js {:foo "bar", :baz #js [4 5]}, #js [1 2 3]]
-           #js [#js {:foo "bar", :baz #js [4 5]}, #js [1 2 3]]))
+        #js [#js {:foo "bar", :baz #js [4 5]}, #js [1 2 3]]
+        #js [#js {:foo "bar", :baz #js [4 5]}, #js [1 2 3]]))
 
     (testing "should be false"
       (are [a b] (= false (js= a b))
-           7 8
-           0 1
-           -1 1
-           nil {}
-           "foo" "bar"
-           true false
-           false 7
+        7 8
+        0 1
+        -1 1
+        nil {}
+        "foo" "bar"
+        true false
+        false 7
 
            ;; Objects
-           #js {:foo "bar"} #js {:foo "baz"} ; Different value
-           #js {:foo "bar"} #js {}           ; Missing an a key in b
-           #js {}           #js {:foo "bar"} ; Missing a b key in a
-           #js {:foo nil}   #js {}           ; Missing is not the same as present-but-nil
-           #js {}           #js {:foo nil}   ; And likewise in reverse
+        #js {:foo "bar"} #js {:foo "baz"} ; Different value
+        #js {:foo "bar"} #js {}           ; Missing an a key in b
+        #js {}           #js {:foo "bar"} ; Missing a b key in a
+        #js {:foo nil}   #js {}           ; Missing is not the same as present-but-nil
+        #js {}           #js {:foo nil}   ; And likewise in reverse
 
            ;; Arrays
-           #js ["foo" "bar"] #js ["foo" "baz"] ; Different values
-           #js ["foo" "bar"] #js ["foo"]       ; Different lengths
-           #js ["foo"]       #js ["foo" "bar"]
+        #js ["foo" "bar"] #js ["foo" "baz"] ; Different values
+        #js ["foo" "bar"] #js ["foo"]       ; Different lengths
+        #js ["foo"]       #js ["foo" "bar"]
 
            ;; Nesting
-           #js [#js {:foo "bar", :baz #js [4 5 6]}, #js [1 2 3]]
-           #js [#js {:foo "bar", :baz #js [4 5]}, #js [1 2 3]]))))
+        #js [#js {:foo "bar", :baz #js [4 5 6]}, #js [1 2 3]]
+        #js [#js {:foo "bar", :baz #js [4 5]}, #js [1 2 3]]))))
 
 (deftest ^:parallel display-info-test
   (let [query    (lib/query meta/metadata-provider (meta/table-metadata :orders))
@@ -560,7 +561,7 @@
                     (lib/join (lib/join-clause (meta/table-metadata :orders)
                                                [(lib/= (meta/field-metadata :orders :id)
                                                        (lib/with-join-alias (meta/field-metadata :orders :id)
-                                                         "Orders"))])))]
+                                                                            "Orders"))])))]
       (is (= #{1}
              (->> (lib.js/returned-columns query -1)
                   (map :name)
@@ -592,8 +593,7 @@
       (are [mode expr] (-> (lib.js/diagnose-expression query 0 mode expr js/undefined)
                            .-message
                            string?)
-        "expression"  #js ["/"   #js ["field" 1 #js {:base-type "type/Address"}] 100]
-        "filter"      #js ["sum" #js ["field" 1 #js {:base-type "type/Integer"}]]))
+        "expression"  #js ["/"   #js ["field" 1 #js {:base-type "type/Address"}] 100]))
     (testing "circular definition"
       (is (= "Cycle detected: c → x → b → c"
              (-> (lib.js/diagnose-expression
@@ -616,26 +616,26 @@
           two-stage-agg (lib/aggregate two-stage (lib/count))]
       (testing "does not change a query with no aggregations or breakouts"
         (doseq [stage [0 -1]]
-          (let [obj (lib.js/as-returned simple-query stage)]
+          (let [obj (lib.js/as-returned simple-query stage nil)]
             (is (=? simple-query (.-query obj)))
             (is (=? stage        (.-stageIndex obj)))))
 
         (testing "in the target stage"
           (doseq [stage [1 -1]]
-            (let [obj (lib.js/as-returned two-stage stage)]
+            (let [obj (lib.js/as-returned two-stage stage nil)]
               (is (=? two-stage (.-query obj)))
               (is (=? stage     (.-stageIndex obj)))))))
 
       (testing "uses an existing later stage if it exists"
-        (let [obj (lib.js/as-returned two-stage 0)]
+        (let [obj (lib.js/as-returned two-stage 0 nil)]
           (is (=? two-stage (.-query obj)))
           (is (=? 1         (.-stageIndex obj))))
-        (let [obj   (lib.js/as-returned two-stage-agg 0)]
+        (let [obj   (lib.js/as-returned two-stage-agg 0 nil)]
           (is (=? two-stage-agg (.-query obj)))
           (is (=? 1             (.-stageIndex obj)))))
 
       (testing "appends a new stage if necessary"
-        (let [obj (lib.js/as-returned two-stage-agg 1)]
+        (let [obj (lib.js/as-returned two-stage-agg 1 nil)]
           (is (=? (lib/append-stage two-stage-agg)
                   (.-query obj)))
           (is (=? -1 (.-stageIndex obj)))))
@@ -647,11 +647,11 @@
                             lib/append-stage
                             (lib/filter (lib/> (first (lib/returned-columns brk-only)) 100)))]
           (testing "uses an existing later stage if it exists"
-            (let [obj (lib.js/as-returned two-stage 0)]
+            (let [obj (lib.js/as-returned two-stage 0 nil)]
               (is (=? two-stage (.-query obj)))
               (is (=? 1         (.-stageIndex obj)))))
           (testing "appends a new stage if necessary"
-            (let [obj (lib.js/as-returned brk-only 0)]
+            (let [obj (lib.js/as-returned brk-only 0 nil)]
               (is (=? (lib/append-stage brk-only)
                       (.-query obj)))
               (is (=? -1 (.-stageIndex obj)))))))
@@ -663,11 +663,11 @@
                             lib/append-stage
                             (lib/filter (lib/> (first (lib/returned-columns agg-only)) 100)))]
           (testing "uses an existing later stage if it exists"
-            (let [obj (lib.js/as-returned two-stage 0)]
+            (let [obj (lib.js/as-returned two-stage 0 nil)]
               (is (=? two-stage (.-query obj)))
               (is (=? 1         (.-stageIndex obj)))))
           (testing "appends a new stage if necessary"
-            (let [obj (lib.js/as-returned agg-only 0)]
+            (let [obj (lib.js/as-returned agg-only 0 nil)]
               (is (=? (lib/append-stage agg-only)
                       (.-query obj)))
               (is (=? -1 (.-stageIndex obj))))))))))

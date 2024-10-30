@@ -13,7 +13,6 @@ import {
   questionInfoButton,
   renameColumn,
   restore,
-  rightSidebar,
   saveMetadataChanges,
   setColumnType,
   setModelMetadata,
@@ -280,8 +279,8 @@ describe("scenarios > models metadata", () => {
       cy.reload();
       questionInfoButton().click();
 
-      rightSidebar().within(() => {
-        cy.findByText("History");
+      cy.findByTestId("sidesheet").within(() => {
+        cy.findByRole("tab", { name: "History" }).click();
         cy.findAllByTestId("question-revert-button").first().click();
       });
 
@@ -410,6 +409,7 @@ describe("scenarios > models metadata", () => {
           // Drill to People table
           // FK column is mapped to real DB column
           drillDashboardFK({ id: 1 });
+          popover().findByText("View details").click();
           cy.wait("@dataset");
           cy.findByTestId("object-detail").within(() => {
             cy.findAllByText("1");
@@ -421,6 +421,7 @@ describe("scenarios > models metadata", () => {
           // Drill to Reviews table
           // FK column has a FK semantic type, no mapping to real DB columns
           drillDashboardFK({ id: 7 });
+          popover().findByText("View details").click();
           cy.wait("@dataset");
           cy.findByTestId("object-detail").within(() => {
             cy.findAllByText("7");

@@ -131,6 +131,8 @@
       (is (client/client :get 200 "user/current" {:request-options {:headers {"x-api-key" api-key}}}))
       (is (= "Unauthenticated"
              (client/client :get 401 "user/current" {:request-options {:headers {"x-api-key" "mb_not_an_api_key"}}})))
+      (let [user-id (:id (client/client :get 200 "user/current" {:request-options {:headers {"x-api-key" api-key}}}))]
+        (is (not (t2/exists? :model/Collection :personal_owner_id user-id))))
       (testing "A deleted API Key can no longer be used"
         (mt/user-http-request :crowberto :delete 204 (format "api-key/%s" id))
         (is (= "Unauthenticated"
@@ -164,9 +166,9 @@
       (let [name-1      (str "My First Name" (random-uuid))
             name-2      (str "My Second Name" (random-uuid))
             {id :id}    (mt/user-http-request :crowberto
-                                           :post 200 "api-key"
-                                           {:group_id group-id-1
-                                            :name     name-1})
+                                              :post 200 "api-key"
+                                              {:group_id group-id-1
+                                               :name     name-1})
             api-user-id (-> (t2/select-one :model/ApiKey :id id) (t2/hydrate :user) :user :id)]
 
         (testing "before the change..."

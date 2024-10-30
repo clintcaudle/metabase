@@ -69,7 +69,7 @@
   [n & body]
   `(do-with-expected-messages ~n (fn [] ~@body)))
 
-(defn do-with-fake-inbox
+(defn do-with-fake-inbox!
   "Impl for `with-fake-inbox` macro; prefer using that rather than calling this directly."
   [f]
   (with-redefs [email/send-email! fake-inbox-email-fn]
@@ -78,6 +78,8 @@
                                        email-smtp-port 587]
       (f))))
 
+;;; TODO -- rename to `with-fake-inbox!` since it's not thread-safe and remove the Kondo ignore below.
+#_{:clj-kondo/ignore [:metabase/test-helpers-use-non-thread-safe-functions]}
 (defmacro with-fake-inbox
   "Clear `inbox`, bind `send-email!` to `fake-inbox-email-fn`, set temporary settings for `email-smtp-username`
    and `email-smtp-password` (which will cause `metabase.email/email-configured?` to return `true`, and execute `body`.
@@ -89,7 +91,7 @@
        @inbox)"
   [& body]
   {:style/indent 0}
-  `(do-with-fake-inbox (fn [] ~@body)))
+  `(do-with-fake-inbox! (fn [] ~@body)))
 
 (defn- create-email-body->regex-fn
   "Returns a function expecting the email body structure. It will apply the regexes in `regex-seq` over the body and
@@ -110,9 +112,9 @@
                              :let [matches (-> body first email-body->regex-boolean)]
                              :when (some true? (vals matches))]
                          (cond-> email
-                             (:to email)  (update :to set)
-                             (:bcc email) (update :bcc set)
-                             true         (assoc :body matches)))))
+                           (:to email)  (update :to set)
+                           (:bcc email) (update :bcc set)
+                           true         (assoc :body matches)))))
          (m/filter-vals seq))))
 
 (defn regex-email-bodies
@@ -194,11 +196,11 @@
   [email & regexes]
   (let [email-body->regex-boolean (create-email-body->regex-fn regexes)
         body-or-content           (fn [email-body-seq]
-                                      (doall
-                                       (for [{email-type :type :as email-part} email-body-seq]
-                                         (if (string? email-type)
-                                           (email-body->regex-boolean email-part)
-                                           (summarize-attachment email-part)))))]
+                                    (doall
+                                     (for [{email-type :type :as email-part} email-body-seq]
+                                       (if (string? email-type)
+                                         (email-body->regex-boolean email-part)
+                                         (summarize-attachment email-part)))))]
     (cond-> email
       (:recipients email) (update :recipients set)
       (:to email)         (update :to set)
@@ -232,8 +234,8 @@
 (defn temp-csv
   [file-basename content]
   (prog1 (File/createTempFile file-basename ".csv")
-    (with-open [file (io/writer <>)]
-      (.write ^java.io.Writer file ^String content))))
+         (with-open [file (io/writer <>)]
+           (.write ^java.io.Writer file ^String content))))
 
 (defn mock-send-email!
   "To stub out email sending, instead returning the would-be email contents as a string"
@@ -268,7 +270,7 @@
              (@inbox "test@test.com")))))
     (testing "metrics collection"
       (let [calls (atom nil)]
-        (with-redefs [prometheus/inc #(swap! calls conj %)]
+        (with-redefs [prometheus/inc! #(swap! calls conj %)]
           (with-fake-inbox
             (email/send-message!
              :subject      "101 Reasons to use Metabase"
@@ -283,7 +285,7 @@
                                 :max-attempts 1
                                 :initial-interval-millis 1)
             test-retry   (retry/random-exponential-backoff-retry "test-retry" retry-config)]
-        (with-redefs [prometheus/inc    #(swap! calls conj %)
+        (with-redefs [prometheus/inc!   #(swap! calls conj %)
                       retry/decorate    (rt/test-retry-decorate-fn test-retry)
                       email/send-email! (fn [_ _] (throw (Exception. "test-exception")))]
           (email/send-message!

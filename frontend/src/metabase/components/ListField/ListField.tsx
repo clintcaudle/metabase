@@ -1,5 +1,5 @@
 import type * as React from "react";
-import { useMemo, useState, useContext } from "react";
+import { useContext, useMemo, useState } from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
@@ -12,11 +12,10 @@ import { Checkbox } from "metabase/ui";
 import type { RowValue } from "metabase-types/api";
 
 import {
-  OptionContainer,
-  LabelWrapper,
-  OptionsList,
   EmptyStateContainer,
   FilterInputContainer,
+  OptionContainer,
+  OptionsList,
 } from "./ListField.styled";
 import type { ListFieldProps, Option } from "./types";
 import { isValidOptionItem } from "./utils";
@@ -88,6 +87,12 @@ export const ListField = ({
     });
   }, [augmentedOptions, debouncedFilter, sortedOptions]);
 
+  const selectedFilteredOptions = filteredOptions.filter(([value]) =>
+    selectedValues.has(value),
+  );
+  const isAll = selectedFilteredOptions.length === filteredOptions.length;
+  const isNone = selectedFilteredOptions.length === 0;
+
   const shouldShowEmptyState =
     augmentedOptions.length > 0 && filteredOptions.length === 0;
 
@@ -112,6 +117,19 @@ export const ListField = ({
   const handleFilterChange: InputProps["onChange"] = e =>
     setFilter(e.target.value);
 
+  const handleToggleAll = () => {
+    const newSelectedValuesSet = new Set(selectedValues);
+    filteredOptions.forEach(([value]) => {
+      if (isAll) {
+        newSelectedValuesSet.delete(value);
+      } else {
+        newSelectedValuesSet.add(value);
+      }
+    });
+    onChange(Array.from(newSelectedValuesSet));
+    setSelectedValues(newSelectedValuesSet);
+  };
+
   return (
     <>
       <FilterInputContainer isDashboardFilter={isDashboardFilter}>
@@ -133,12 +151,23 @@ export const ListField = ({
       )}
 
       <OptionsList isDashboardFilter={isDashboardFilter}>
+        {filteredOptions.length > 0 && (
+          <OptionContainer>
+            <Checkbox
+              variant="stacked"
+              label={getToggleAllLabel(debouncedFilter, isAll)}
+              checked={isAll}
+              indeterminate={!isAll && !isNone}
+              onChange={handleToggleAll}
+            />
+          </OptionContainer>
+        )}
         {filteredOptions.map((option, index) => (
           <OptionContainer key={index}>
             <Checkbox
               data-testid={`${option[0]}-filter-value`}
               checked={selectedValues.has(option[0])}
-              label={<LabelWrapper>{optionRenderer(option)}</LabelWrapper>}
+              label={optionRenderer(option)}
               onChange={() => handleToggleOption(option[0])}
             />
           </OptionContainer>
@@ -147,3 +176,11 @@ export const ListField = ({
     </>
   );
 };
+
+function getToggleAllLabel(searchValue: string, isAll: boolean) {
+  if (isAll) {
+    return t`Select none`;
+  } else {
+    return searchValue ? t`Select these` : t`Select all`;
+  }
+}

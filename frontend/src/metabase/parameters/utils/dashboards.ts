@@ -7,8 +7,8 @@ import Question from "metabase-lib/v1/Question";
 import type Field from "metabase-lib/v1/metadata/Field";
 import type Metadata from "metabase-lib/v1/metadata/Metadata";
 import type {
-  UiParameter,
   FieldFilterUiParameter,
+  UiParameter,
 } from "metabase-lib/v1/parameters/types";
 import { isFieldFilterParameter } from "metabase-lib/v1/parameters/utils/parameter-type";
 import {
@@ -17,14 +17,15 @@ import {
 } from "metabase-lib/v1/parameters/utils/targets";
 import type {
   Card,
+  CardId,
+  DashCardId,
   Dashboard,
+  DashboardCard,
   DashboardParameterMapping,
-  QuestionDashboardCard,
   Parameter,
   ParameterMappingOptions,
-  DashCardId,
-  CardId,
   ParameterTarget,
+  QuestionDashboardCard,
 } from "metabase-types/api";
 
 type ExtendedMapping = DashboardParameterMapping & {
@@ -142,6 +143,28 @@ export function getDashboardUiParameters(
   return uiParameters;
 }
 
+export function getDashboardQuestions(
+  dashcards: DashboardCard[],
+  metadata: Metadata,
+) {
+  return dashcards.reduce<Record<CardId, Question>>((acc, dashcard) => {
+    if (isQuestionDashCard(dashcard)) {
+      const cards = [dashcard.card, ...(dashcard.series ?? [])];
+
+      for (const card of cards) {
+        const question = isQuestionCard(card)
+          ? new Question(card, metadata)
+          : undefined;
+        if (question) {
+          acc[card.id] = question;
+        }
+      }
+    }
+
+    return acc;
+  }, {});
+}
+
 function buildFieldFilterUiParameter(
   parameter: Parameter,
   mappings: ExtendedMapping[],
@@ -201,7 +224,7 @@ function buildFieldFilterUiParameter(
       },
     )
     .map(({ field, shouldResolveFkField }) => {
-      return shouldResolveFkField ? field.target ?? field : field;
+      return shouldResolveFkField ? (field.target ?? field) : field;
     });
 
   return {

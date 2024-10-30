@@ -2,19 +2,15 @@ import { match } from "ts-pattern";
 import { jt, t } from "ttag";
 
 import { UpsellMetabaseBanner } from "metabase/admin/upsells/UpsellMetabaseBanner";
-import { getPlan } from "metabase/common/utils/plan";
+import { useDocsUrl } from "metabase/common/hooks";
 import ExternalLink from "metabase/core/components/ExternalLink";
 import { color } from "metabase/lib/colors";
 import { useSelector } from "metabase/lib/redux";
 import type {
-  EmbeddingDisplayOptions,
   EmbedResourceType,
+  EmbeddingDisplayOptions,
 } from "metabase/public/lib/types";
-import {
-  getDocsUrl,
-  getSetting,
-  getUpgradeUrl,
-} from "metabase/selectors/settings";
+import { getSetting, getUpgradeUrl } from "metabase/selectors/settings";
 import { getCanWhitelabel } from "metabase/selectors/whitelabel";
 import {
   Divider,
@@ -32,7 +28,7 @@ const THEME_OPTIONS = [
   { label: t`Light`, value: "light" },
   { label: t`Dark`, value: "night" },
 ] as const;
-type ThemeOptions = typeof THEME_OPTIONS[number]["value"];
+type ThemeOptions = (typeof THEME_OPTIONS)[number]["value"];
 
 interface AppearanceSettingsProps {
   resourceType: EmbedResourceType;
@@ -45,23 +41,26 @@ export const LookAndFeelSettings = ({
   displayOptions,
   onChangeDisplayOptions,
 }: AppearanceSettingsProps): JSX.Element => {
-  const docsUrl = useSelector(state =>
-    // eslint-disable-next-line no-unconditional-metabase-links-render -- Only appear to admins
-    getDocsUrl(state, {
-      page: "embedding/static-embedding",
-    }),
-  );
+  // eslint-disable-next-line no-unconditional-metabase-links-render -- Only appear to admins
+  const { url: docsUrl } = useDocsUrl("embedding/static-embedding", {
+    anchor: "customizing-the-appearance-of-static-embeds",
+    utm: {
+      utm_source: "product",
+      utm_medium: "docs",
+      utm_campaign: "embedding-static",
+      utm_content: "static-embed-settings-look-and-feel",
+    },
+  });
   const upgradePageUrl = useSelector(state =>
-    getUpgradeUrl(state, { utm_media: "static-embed-settings-appearance" }),
-  );
-  const plan = useSelector(state =>
-    getPlan(getSetting(state, "token-features")),
+    getUpgradeUrl(state, {
+      utm_campaign: "embedding-static-font",
+      utm_content: "static-embed-settings-look-and-feel",
+    }),
   );
   const canWhitelabel = useSelector(getCanWhitelabel);
   const availableFonts = useSelector(state =>
     getSetting(state, "available-fonts"),
   );
-  const utmTags = `?utm_source=${plan}&utm_media=static-embed-settings-appearance`;
 
   return (
     <>
@@ -72,7 +71,7 @@ export const LookAndFeelSettings = ({
           <Text>{jt`These options require changing the server code. You can play around with and preview the options here. Check out the ${(
             <ExternalLink
               key="doc"
-              href={`${docsUrl}${utmTags}#customizing-the-appearance-of-static-embeds`}
+              href={docsUrl}
             >{t`documentation`}</ExternalLink>
           )} for more.`}</Text>
 

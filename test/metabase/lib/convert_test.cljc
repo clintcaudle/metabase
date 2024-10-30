@@ -1,5 +1,6 @@
 (ns metabase.lib.convert-test
   (:require
+   #?@(:cljs ([metabase.test-runner.assert-exprs.approximately-equal]))
    [clojure.test :refer [are deftest is testing]]
    [malli.core :as mc]
    [metabase.lib.convert :as lib.convert]
@@ -7,8 +8,7 @@
    [metabase.lib.options :as lib.options]
    [metabase.lib.test-metadata :as meta]
    [metabase.lib.test-util :as lib.tu]
-   [metabase.util :as u]
-   #?@(:cljs ([metabase.test-runner.assert-exprs.approximately-equal]))))
+   [metabase.util :as u]))
 
 #?(:cljs (comment metabase.test-runner.assert-exprs.approximately-equal/keep-me))
 
@@ -200,6 +200,7 @@
                                         :aggregation  [[:aggregation-options
                                                         [:sum [:field 1 nil]]
                                                         {:display-name "Revenue"}]]}}))))
+
 (deftest ^:parallel effective-type-drop-test
   (testing ":effective_type values should be dropped in ->legacy-MBQL"
     (is (=? {:type  :query
@@ -233,7 +234,7 @@
                   (lib.convert/->legacy-MBQL [tag {} [:field {} 12] "ABC"])))
           (is (=? [tag [:field 12 nil] "ABC" {:case-sensitive false}]
                   (lib.convert/->legacy-MBQL
-                    (lib.options/ensure-uuid [tag {:case-sensitive false} [:field {} 12] "ABC"]))))))
+                   (lib.options/ensure-uuid [tag {:case-sensitive false} [:field {} 12] "ABC"]))))))
 
       (testing "with multiple arguments (pMBQL style)"
         (testing "->pMBQL"
@@ -249,7 +250,7 @@
                   (lib.convert/->legacy-MBQL [tag {} [:field {} 12] "ABC" "HJK" "XYZ"])))
           (is (=? [tag {:case-sensitive false} [:field 12 nil] "ABC" "HJK" "XYZ"]
                   (lib.convert/->legacy-MBQL
-                    (lib.options/ensure-uuid [tag {:case-sensitive false} [:field {} 12] "ABC" "HJK" "XYZ"])))))))))
+                   (lib.options/ensure-uuid [tag {:case-sensitive false} [:field {} 12] "ABC" "HJK" "XYZ"])))))))))
 
 (deftest ^:parallel source-card-test
   (let [original {:database 1
@@ -475,6 +476,123 @@
                :source-table 1}
     :type     :query}))
 
+(deftest ^:parallel unclean-stage-round-trip-test
+  (binding [lib.convert/*clean-query* false]
+    (doseq [query
+            [{:database 7
+              :type :query
+              :query {:joins [{:alias "__join"
+                               :strategy :left-join
+                               :condition [:= [:field 388 nil] 1]
+                               :source-table 44}]
+                      :source-table 43
+                      :fields [[:field 390 nil]
+                               [:field 391 nil]
+                               [:field 388 nil]
+                               [:field 392 nil]
+                               [:field 393 nil]
+                               [:field 389 nil]]}}
+             {:database 7
+              :qp/source-card-id 1
+              :info {:card-id 1}
+              :type :query
+              :query {:limit 2
+                      :fields [[:field 350 {:base-type :type/Text :join-alias "Card 2 - Category"}]
+                               [:field "count" {:base-type :type/Integer}]
+                               [:field 350 {:join-alias "Card 2 - Category"}]]
+                      :joins [{:fields [[:field 350 {:join-alias "Card 2 - Category"}]]
+                               :source-metadata [{:semantic_type :type/Category
+                                                  :table_id 45
+                                                  :name "CATEGORY"
+                                                  :field_ref [:field 350 {:base-type :type/Text}]
+                                                  :effective_type :type/Text
+                                                  :id 350
+                                                  :display_name "Category"
+                                                  :fingerprint {:global {:distinct-count 4
+                                                                         :nil% 0}
+                                                                :type {:type/Text {:percent-json 0
+                                                                                   :percent-url 0
+                                                                                   :percent-email 0
+                                                                                   :percent-state 0
+                                                                                   :average-length 6.375}}}
+                                                  :base_type :type/Text}]
+                               :alias "Card 2 - Category"
+                               :strategy :left-join
+                               :source-query/model? false
+                               :qp/stage-had-source-card 2
+                               :condition [:=
+                                           [:field "Products__CATEGORY" {:base-type :type/Text}]
+                                           [:field 350 {:base-type :type/Text, :join-alias "Card 2 - Category"}]]
+                               :source-query {:source-table 45
+                                              :breakout [[:field 350 {:base-type :type/Text}]]
+                                              :qp/stage-is-from-source-card 2
+                                              :order-by [[:asc [:field 350 {:base-type :type/Text}]]]}}]
+                      :source-query {:qp/stage-had-source-card 1
+                                     :source-query/model? false
+                                     :fields [[:field 350 {:base-type :type/Text, :join-alias "Products"}]
+                                              [:field "count" {:base-type :type/Integer}]]
+                                     :source-query {:source-table 42
+                                                    :breakout [[:field 350 {:base-type :type/Text, :join-alias "Products"}]]
+                                                    :aggregation [[:count]]
+                                                    :qp/stage-is-from-source-card 1
+                                                    :order-by [[:asc [:field 350 {:base-type :type/Text, :join-alias "Products"}]]]
+                                                    :joins [{:alias "Products"
+                                                             :strategy :left-join
+                                                             :condition [:=
+                                                                         [:field 382 {:base-type :type/Integer}]
+                                                                         [:field 351 {:base-type :type/BigInteger
+                                                                                      :join-alias "Products"}]]
+                                                             :source-table 45}
+                                                            {:alias "People - User"
+                                                             :strategy :left-join
+                                                             :condition [:=
+                                                                         [:field 381 {:base-type :type/Integer}]
+                                                                         [:field 370 {:base-type :type/BigInteger
+                                                                                      :join-alias "People - User"}]]
+                                                             :source-table 40}]}
+                                     :source-metadata [{:semantic_type :type/Category
+                                                        :table_id 45
+                                                        :name "CATEGORY"
+                                                        :field_ref [:field 350 {:base-type :type/Text, :join-alias "Products"}]
+                                                        :effective_type :type/Text
+                                                        :id 350
+                                                        :display_name "Products → Category"
+                                                        :fingerprint {:global {:distinct-count 4, :nil% 0}
+                                                                      :type {:type/Text {:percent-json 0
+                                                                                         :percent-url 0
+                                                                                         :percent-email 0
+                                                                                         :percent-state 0
+                                                                                         :average-length 6.375}}}
+                                                        :base_type :type/Text
+                                                        :source_alias "Products"}
+                                                       {:name "count"
+                                                        :display_name "Count"
+                                                        :base_type :type/Integer
+                                                        :semantic_type :type/Quantity
+                                                        :field_ref [:aggregation 0]}]}
+                      :source-metadata [{:semantic_type :type/Category
+                                         :table_id 45
+                                         :name "CATEGORY"
+                                         :field_ref [:field 350 {:base-type :type/Text
+                                                                 :join-alias "Card 2 - Category"}]
+                                         :effective_type :type/Text
+                                         :id 350
+                                         :display_name "Products → Category"
+                                         :fingerprint {:global {:distinct-count 4, :nil% 0}
+                                                       :type {:type/Text {:percent-json 0
+                                                                          :percent-url 0
+                                                                          :percent-email 0
+                                                                          :percent-state 0
+                                                                          :average-length 6.375}}}
+                                         :base_type :type/Text
+                                         :source_alias "Products"}
+                                        {:name "count"
+                                         :display_name "Count"
+                                         :base_type :type/Integer
+                                         :semantic_type :type/Quantity
+                                         :field_ref [:field "count" {:base-type :type/Integer}]}]}}]]
+      (test-round-trip query))))
+
 (deftest ^:parallel round-trip-options-test
   (testing "Round-tripping (p)MBQL caluses with options (#30280)"
     (testing "starting with pMBQL"
@@ -665,7 +783,6 @@
             converted (lib.convert/->pMBQL query)]
         (is (empty? (get-in converted [:stages 0 :breakout])))
         (is (empty? (get-in converted [:stages 0 :group-by])))))))
-
 
 (deftest ^:parallel remove-namespaced-lib-keys-from-legacy-refs-test
   (testing "namespaced lib keys should be removed when converting to legacy (#33012)"

@@ -28,8 +28,8 @@
    [metabase.lib.types.isa :as lib.types.isa]
    [metabase.lib.util :as lib.util]
    [metabase.lib.util.match :as lib.util.match]
-   [metabase.shared.util.i18n :as i18n]
    [metabase.util :as u]
+   [metabase.util.i18n :as i18n]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]))
 
@@ -587,8 +587,8 @@
    (join query -1 a-join))
 
   ([query        :- ::lib.schema/query
-     stage-number :- :int
-     a-join       :- [:or lib.join.util/PartialJoin Joinable]]
+    stage-number :- :int
+    a-join       :- [:or lib.join.util/PartialJoin Joinable]]
    (let [a-join              (join-clause a-join)
          suggested-conditions (when (empty? (join-conditions a-join))
                                 (suggested-join-conditions query stage-number (joined-thing query a-join)))
@@ -774,11 +774,11 @@
    lib.filter.operator/join-operators))
 
 (mu/defn- fk-columns-to :- [:maybe [:sequential
-                                             {:min 1}
-                                             [:and
-                                              ::lib.schema.metadata/column
-                                              [:map
-                                               [::target ::lib.schema.metadata/column]]]]]
+                                    {:min 1}
+                                    [:and
+                                     ::lib.schema.metadata/column
+                                     [:map
+                                      [::target ::lib.schema.metadata/column]]]]]
   "Find FK columns in `source` pointing at a column in `target`. Includes the target column under the `::target` key."
   [query        :- ::lib.schema/query
    stage-number :- :int

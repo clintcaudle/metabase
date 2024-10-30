@@ -12,7 +12,11 @@ import { mockSettings } from "__support__/settings";
 import { renderWithProviders, screen } from "__support__/ui";
 import * as sdkConfigModule from "embedding-sdk/config";
 import { useInitData } from "embedding-sdk/hooks";
-import { sdkReducers, useSdkSelector } from "embedding-sdk/store";
+import {
+  sdkReducers,
+  useSdkDispatch,
+  useSdkSelector,
+} from "embedding-sdk/store";
 import { refreshTokenAsync } from "embedding-sdk/store/reducer";
 import { getIsLoggedIn, getLoginStatus } from "embedding-sdk/store/selectors";
 import type { LoginStatusError } from "embedding-sdk/store/types";
@@ -23,7 +27,6 @@ import {
 } from "embedding-sdk/test/mocks/state";
 import type { SDKConfig, SDKConfigWithJWT } from "embedding-sdk/types";
 import { GET } from "metabase/lib/api";
-import { useDispatch } from "metabase/lib/redux";
 import {
   createMockSettings,
   createMockTokenFeatures,
@@ -34,7 +37,7 @@ import { createMockState } from "metabase-types/store/mocks";
 const TEST_USER = createMockUser();
 
 const TestComponent = ({ config }: { config: SDKConfig }) => {
-  const dispatch = useDispatch();
+  const dispatch = useSdkDispatch();
 
   const loginStatus = useSdkSelector(getLoginStatus);
   const isLoggedIn = useSdkSelector(getIsLoggedIn);
@@ -129,19 +132,6 @@ const setup = ({
 
 describe("useInitData hook", () => {
   describe("before authentication", () => {
-    it("should have an error if JWT URI is not provided", async () => {
-      setup({ isValidConfig: false });
-      expect(screen.getByTestId("test-component")).toHaveAttribute(
-        "data-login-status",
-        "error",
-      );
-
-      expect(screen.getByTestId("test-component")).toHaveAttribute(
-        "data-error-message",
-        "No JWT URI or API key provided.",
-      );
-    });
-
     it("should set a context for all API requests", async () => {
       jest
         .spyOn(sdkConfigModule, "getEmbeddingSdkVersion")

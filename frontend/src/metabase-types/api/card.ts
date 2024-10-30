@@ -1,20 +1,31 @@
 import type { EmbeddingParameters } from "metabase/public/lib/types";
+import type { PieRow } from "metabase/visualizations/echarts/pie/model/types";
 
-import type { Collection, CollectionId } from "./collection";
-import type { DashboardId, DashCardId } from "./dashboard";
-import type { DatabaseId, Database } from "./database";
+import type { Collection, CollectionId, LastEditInfo } from "./collection";
+import type { DashCardId, DashboardId } from "./dashboard";
+import type { Database, DatabaseId } from "./database";
+import type { BaseEntityId } from "./entity-id";
 import type { Field } from "./field";
+import type { PaginationRequest, PaginationResponse } from "./pagination";
 import type { Parameter } from "./parameters";
 import type { DatasetQuery, FieldReference, PublicDatasetQuery } from "./query";
+import type { CollectionEssentials } from "./search";
 import type { Table } from "./table";
 import type { UserInfo } from "./user";
+import type { CardDisplayType, VisualizationDisplay } from "./visualization";
 import type { SmartScalarComparison } from "./visualization-settings";
 
 export type CardType = "model" | "question" | "metric";
 
+type CreatorInfo = Pick<
+  UserInfo,
+  "first_name" | "last_name" | "email" | "id" | "common_name"
+>;
+
 export interface Card<Q extends DatasetQuery = DatasetQuery>
   extends UnsavedCard<Q> {
   id: CardId;
+  entity_id: CardEntityId;
   created_at: string;
   updated_at: string;
   name: string;
@@ -28,6 +39,7 @@ export interface Card<Q extends DatasetQuery = DatasetQuery>
   can_write: boolean;
   can_restore: boolean;
   can_delete: boolean;
+  can_manage_db: boolean;
   initially_published_at: string | null;
 
   database_id?: DatabaseId;
@@ -37,6 +49,7 @@ export interface Card<Q extends DatasetQuery = DatasetQuery>
 
   result_metadata: Field[];
   moderation_reviews?: ModerationReview[];
+  persisted?: boolean;
 
   query_average_duration?: number | null;
   last_query_start: string | null;
@@ -46,7 +59,8 @@ export interface Card<Q extends DatasetQuery = DatasetQuery>
 
   archived: boolean;
 
-  creator?: UserInfo;
+  creator?: CreatorInfo;
+  "last-edit-info"?: LastEditInfo;
 }
 
 export interface PublicCard {
@@ -59,10 +73,8 @@ export interface PublicCard {
   dataset_query: PublicDatasetQuery;
 }
 
-export type CardDisplayType = string;
-
 export interface UnsavedCard<Q extends DatasetQuery = DatasetQuery> {
-  display: CardDisplayType;
+  display: VisualizationDisplay;
   dataset_query: Q;
   parameters?: Parameter[];
   visualization_settings: VisualizationSettings;
@@ -114,13 +126,14 @@ export type PivotTableCollapsedRowsSetting = {
 export type TableColumnOrderSetting = {
   name: string;
   enabled: boolean;
+  fieldRef?: FieldReference;
 };
 
 export type StackType = "stacked" | "normalized" | null;
 export type StackValuesDisplay = "total" | "all" | "series";
 
 export const numericScale = ["linear", "pow", "log"] as const;
-export type NumericScale = typeof numericScale[number];
+export type NumericScale = (typeof numericScale)[number];
 
 export type XAxisScale = "ordinal" | "histogram" | "timeseries" | NumericScale;
 
@@ -139,6 +152,15 @@ export type VisualizationSettings = {
   "graph.show_values"?: boolean;
   "stackable.stack_type"?: StackType;
   "graph.show_stack_values"?: StackValuesDisplay;
+  "graph.max_categories_enabled"?: boolean;
+  "graph.max_categories"?: number;
+  "graph.other_category_aggregation_fn"?:
+    | "sum"
+    | "avg"
+    | "min"
+    | "max"
+    | "stddev"
+    | "median";
 
   // Table
   "table.columns"?: TableColumnOrderSetting[];
@@ -203,16 +225,25 @@ export type VisualizationSettings = {
   "scalar.compact_primary_number"?: boolean;
 
   // Pie Settings
-  "pie.dimension"?: string;
+  "pie.dimension"?: string | string[];
+  "pie.middle_dimension"?: string;
+  "pie.outer_dimension"?: string;
+  "pie.rows"?: PieRow[];
   "pie.metric"?: string;
+  "pie.sort_rows"?: boolean;
   "pie.show_legend"?: boolean;
   "pie.show_total"?: boolean;
+  "pie.show_labels"?: boolean;
   "pie.percent_visibility"?: "off" | "legend" | "inside" | "both";
   "pie.decimal_places"?: number;
   "pie.slice_threshold"?: number;
   "pie.colors"?: Record<string, string>;
 
   [key: string]: any;
+} & EmbedVisualizationSettings;
+
+export type EmbedVisualizationSettings = {
+  iframe?: string;
 };
 
 export interface ModerationReview {
@@ -223,6 +254,7 @@ export interface ModerationReview {
 }
 
 export type CardId = number;
+export type CardEntityId = BaseEntityId;
 export type ModerationReviewStatus = "verified" | null;
 
 export type CardFilterOption =
@@ -286,3 +318,53 @@ export interface UpdateCardRequest {
   cache_ttl?: number;
   collection_preview?: boolean;
 }
+
+export type UpdateCardKeyRequest<PropertyKey extends keyof UpdateCardRequest> =
+  Required<Pick<UpdateCardRequest, "id" | PropertyKey>>;
+
+export type CardError = {
+  field?: string;
+  table: string;
+  type: "inactive-field" | "inactive-table" | "unknown-field" | "unknown-table";
+};
+
+export type InvalidCard = Pick<
+  Card,
+  | "archived"
+  | "collection_id"
+  | "collection_position"
+  | "dataset_query"
+  | "description"
+  | "id"
+  | "name"
+  | "updated_at"
+  | "creator"
+> & {
+  collection: CollectionEssentials;
+  collection_preview: boolean;
+  entity_id: string;
+  errors: CardError[];
+  display: CardDisplayType;
+};
+
+export type InvalidCardResponse = {
+  data: InvalidCard[];
+} & PaginationResponse;
+
+export type InvalidCardRequest = {
+  sort_direction?: "asc" | "desc";
+  sort_column?: string;
+  collection_id?: CollectionId | null;
+} & PaginationRequest;
+
+export type CardQueryRequest = {
+  cardId: CardId;
+  dashboardId?: DashboardId;
+  collection_preview?: boolean;
+  ignore_cache?: boolean;
+  parameters?: unknown[];
+};
+
+export type GetPublicCard = Pick<Card, "id" | "name" | "public_uuid">;
+
+export type GetEmbeddableCard = Pick<Card, "id" | "name">;

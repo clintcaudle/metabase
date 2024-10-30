@@ -104,14 +104,32 @@ title: Driver interface changelog
   `metabase.test.data.sql.ddl/insert-rows-dml-statements`, since `INSERT` is DML, not DDL. Please update your method
   implementations accordingly.
 
-- The `:foreign-keys` driver feature has been removed. `:metadata/keys-constraints` should be used for drivers that support
-  foreign key relationships reporting during sync. Implicit joins now depend on the `:left-join` feature instead. The
-  default value is true for `:sql` based drivers. All join features are now enabled for `:sql` based drivers
-  by default. Previously, those depended on the `:foreign-keys` feature. If your driver supports `:left-join`,
+- The `:foreign-keys` driver feature has been removed. `:metadata/keys-constraints` should be used for drivers that
+  support foreign key relationships reporting during sync. Implicit joins now depend on the `:left-join` feature
+  instead. The default value is true for `:sql` based drivers. All join features are now enabled for `:sql` based
+  drivers by default. Previously, those depended on the `:foreign-keys` feature. If your driver supports `:left-join`,
   the test for remapping and implicit joins will be now executed.
 
 -  The`:parameterized-sql` driver feature has been added to distinguish drivers that don't support parametrized SQL in
    tests. Currently, this is disabled only for `:sparksql`.
+
+- The test methods `metabase.test.data.interface/supports-time-type?` and
+  `metabase.test.data.interface/supports-timestamptz-type?` have been removed and replaced by the features
+  `:test/time-type` and `:test/timestamptz-type` respectively. If you implemented these methods, replace
+  implementations with implementations of `metabase.driver/database-supports?` for your driver and the equivalent
+  feature keyword instead.
+
+- Drivers that use `metabase.driver.sql.query-processor/->honeysql` can implement
+  `:metabase.driver.sql.query-processor/nfc-path` to include the nfc-path in the field identifier. So that record-like
+  fields can be referenced with `<table>.<record>.<record-field>`. See `bigquery-cloud-sdk` for an example. Defaults to  `nil` to indicate that the path should not be part of the identifier.
+
+- `:test/dynamic-dataset-loading` feature has been added. It enables drivers to bail out of tests that require
+  creation of new, not pre-loaded, dataset during test run time.
+
+- The `:temporal/requires-default-unit` feature has been added. It should be false for most drivers, but it's necessary
+  for a few (like the old, pre-JDBC Druid driver) to find all temporal field refs and put a `:temporal-unit :default` on them.
+  That default setting was previously done for all drivers, but it introduced some downstream issues, so now only those
+  drivers which need it can set the feature.
 
 ## Metabase 0.50.17
 

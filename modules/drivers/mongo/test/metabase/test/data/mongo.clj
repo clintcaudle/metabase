@@ -20,8 +20,11 @@
 
 (tx/add-test-extensions! :mongo)
 
-(defmethod tx/supports-time-type? :mongo [_driver] false)
-(defmethod tx/supports-timestamptz-type? :mongo [_driver] false)
+(doseq [feature [:test/time-type
+                 :test/timestamptz-type]]
+  (defmethod driver/database-supports? [:mongo feature]
+    [_driver _feature _database]
+    false))
 
 ;; During tests don't treat Mongo as having FK support
 (defmethod driver/database-supports? [:mongo :foreign-keys] [_driver _feature _db] (not config/is-test?))
@@ -73,17 +76,20 @@
         (when indexed?
           (mongo.util/create-index (mongo.util/collection db table-name) {field-name 1})))
       (let [field-names (for [field-definition field-definitions]
-                          (keyword (:field-name field-definition)))]
-        ;; Use map-indexed so we can get an ID for each row (index + 1)
-        (doseq [[i row] (map-indexed vector rows)]
-          (try
-            ;; Insert each row
-            (mongo.util/insert-one (mongo.util/collection db (name table-name))
-                                  (into (ordered-map/ordered-map :_id (inc i))
-                                        (cond->> (zipmap field-names row)
-                                          *remove-nil?* (m/remove-vals nil?))))
-            ;; If row already exists then nothing to do
-            (catch com.mongodb.MongoException _)))))))
+                          (keyword (:field-name field-definition)))
+            rows (map (fn [[i row]]
+                        (into (ordered-map/ordered-map :_id (inc i))
+                              (cond->> (zipmap field-names row)
+                                *remove-nil?* (m/remove-vals nil?))))
+                      ;; Use map-indexed so we can get an ID for each row (index + 1)
+                      (map-indexed vector rows))]
+        (try
+          ;; Insert each row
+          (mongo.util/insert-many
+           (mongo.util/collection db (name table-name))
+           rows)
+          ;; If row already exists then nothing to do
+          (catch com.mongodb.MongoException _))))))
 
 (defmethod tx/destroy-db! :mongo
   [driver dbdef]

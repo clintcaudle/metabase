@@ -34,7 +34,9 @@
   :type :integer
   :default 30000)
 
-(defn- retry-configuration []
+(defn retry-configuration
+  "Returns a map with the default retry configuration."
+  []
   {:max-attempts (retry-max-attempts)
    :initial-interval-millis (retry-initial-interval)
    :multiplier (retry-multiplier)
@@ -74,5 +76,15 @@
    (decorate f (random-exponential-backoff-retry (str (random-uuid)) (retry-configuration))))
   ([f ^Retry retry]
    (fn [& args]
-     (let [callable (reify Callable (call [_] (apply f args)))]
+     (let [callable (reify Callable (call [_]
+                                      (apply f args)))]
        (.call (Retry/decorateCallable retry callable))))))
+
+(defn make
+  "Make a retrying function from `f` with the given `retry-config`.
+
+    (let [retrier (retry/make retry-config)]
+      (retrier f))"
+  [retry-config]
+  (fn [f]
+    ((decorate f (random-exponential-backoff-retry (str (random-uuid)) retry-config)))))

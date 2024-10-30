@@ -7,9 +7,9 @@ import { loadMetadataForCard } from "metabase/questions/actions";
 import { addUndo } from "metabase/redux/undo";
 import { getMetadata } from "metabase/selectors/metadata";
 
-import { getOriginalCard, getQuestion } from "../selectors";
+import { getQuestion } from "../selectors";
 
-import { apiUpdateQuestion, updateQuestion, API_UPDATE_QUESTION } from "./core";
+import { API_UPDATE_QUESTION, apiUpdateQuestion, updateQuestion } from "./core";
 import { runDirtyQuestionQuery, runQuestionQuery } from "./querying";
 import { setQueryBuilderMode } from "./ui";
 
@@ -24,17 +24,7 @@ export const onCancelCreateNewModel = () => async dispatch => {
   await dispatch(push("/"));
 };
 
-export const CANCEL_DATASET_CHANGES = "metabase/qb/CANCEL_DATASET_CHANGES";
-export const onCancelDatasetChanges = () => (dispatch, getState) => {
-  const cardBeforeChanges = getOriginalCard(getState());
-  dispatch({
-    type: CANCEL_DATASET_CHANGES,
-    payload: { card: cardBeforeChanges },
-  });
-  dispatch(runDirtyQuestionQuery());
-};
-
-export const turnQuestionIntoDataset = () => async (dispatch, getState) => {
+export const turnQuestionIntoModel = () => async (dispatch, getState) => {
   const question = getQuestion(getState());
 
   await dispatch(
@@ -42,7 +32,12 @@ export const turnQuestionIntoDataset = () => async (dispatch, getState) => {
       {
         id: question.id(),
       },
-      question.setType("model").setPinned(true).setDisplay("table").card(),
+      question
+        .setType("model")
+        .setPinned(true)
+        .setDisplay("table")
+        .setSettings({})
+        .card(),
     ),
   );
 

@@ -1,10 +1,17 @@
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ORDERS_QUESTION_ID } from "e2e/support/cypress_sample_instance_data";
 import {
-  restore,
-  setupSMTP,
-  visitQuestion,
+  mockSlackConfigured,
+  modal,
+  openSharingMenu,
   openTable,
+  popover,
+  restore,
+  setupNotificationChannel,
+  setupSMTP,
+  toggleAlertChannel,
+  updateSetting,
+  visitQuestion,
 } from "e2e/support/helpers";
 
 const { PEOPLE_ID } = SAMPLE_DATABASE;
@@ -16,6 +23,7 @@ describe("scenarios > alert > email_alert", { tags: "@external" }, () => {
 
     restore();
     cy.signInAsAdmin();
+    cy.setCookie("metabase.SEEN_ALERT_SPLASH", "true");
 
     setupSMTP();
   });
@@ -30,6 +38,15 @@ describe("scenarios > alert > email_alert", { tags: "@external" }, () => {
 
   it("should set up an email alert", () => {
     openAlertForQuestion(ORDERS_QUESTION_ID);
+
+    cy.log(
+      "Should not display slack channel if it is not configured metabase#48407",
+    );
+    cy.findByTestId("alert-create").within(() => {
+      cy.findByTestId("loading-indicator").should("not.exist");
+      cy.findByRole("heading", { name: "Slack" }).should("not.exist");
+    });
+
     cy.button("Done").click();
 
     cy.wait("@savedAlert").then(({ response: { body } }) => {
@@ -40,9 +57,12 @@ describe("scenarios > alert > email_alert", { tags: "@external" }, () => {
   });
 
   it("should respect email alerts toggled off (metabase#12349)", () => {
-    cy.request("PUT", "/api/setting/report-timezone", {
-      value: "America/New_York",
-    });
+    updateSetting("report-timezone", "America/New_York");
+    mockSlackConfigured();
+
+    //For this test, we need to pretend that slack is set up
+    mockSlackConfigured();
+    setupNotificationChannel({ name: "Webhook" });
 
     openAlertForQuestion(ORDERS_QUESTION_ID);
 
@@ -50,22 +70,27 @@ describe("scenarios > alert > email_alert", { tags: "@external" }, () => {
       cy.findByText(/Emails will be sent at 12:00 AM ET/).should("exist");
 
       // Turn off email
-      toggleChannel("Email");
+      toggleAlertChannel("Email");
       cy.findByText(/Emails will be sent/).should("not.exist");
       cy.findByText(/Slack messages will be sent/).should("not.exist");
 
       // Turn on Slack
-      toggleChannel("Slack");
+      toggleAlertChannel("Slack");
+      cy.findByPlaceholderText(/Pick a user or channel/).click();
+    });
 
+    popover().findByText("#work").click();
+
+    cy.findByTestId("alert-create").within(() => {
       cy.findByText(/Slack messages will be sent at 12:00 AM ET/).should(
         "exist",
       );
 
-      toggleChannel("Email");
+      toggleAlertChannel("Email");
       cy.findByText(
         /Emails and Slack messages will be sent at 12:00 AM ET/,
       ).should("exist");
-      toggleChannel("Email");
+      toggleAlertChannel("Email");
 
       cy.button("Done").click();
     });
@@ -75,6 +100,19 @@ describe("scenarios > alert > email_alert", { tags: "@external" }, () => {
       expect(body.channels[0].channel_type).to.eq("email");
       expect(body.channels[0].enabled).to.eq(false);
     });
+
+    cy.log(
+      "ensure that when the alert is deleted, the delete modal is correct metabase#48402",
+    );
+    openSharingMenu("Edit alerts");
+    popover().within(() => {
+      cy.findByText("You set up an alert").should("be.visible");
+      cy.findByText("Edit").click();
+    });
+
+    cy.findByRole("button", { name: "Delete this alert" }).click();
+    cy.findByRole("checkbox", { name: /be emailed to / }).should("not.exist");
+    cy.findByRole("checkbox", { name: /Slack channel / }).should("exist");
   });
 
   it("should set up an email alert for newly created question", () => {
@@ -108,9 +146,9 @@ describe("scenarios > alert > email_alert", { tags: "@external" }, () => {
       .findByText("Your alert is all set up.")
       .should("be.visible");
 
-    clickAlertBell();
+    openSharingMenu("Edit alerts");
 
-    cy.findByTestId("popover").within(() => {
+    popover().within(() => {
       cy.findByText("You set up an alert").should("be.visible");
       cy.findByText("Edit").click();
     });
@@ -138,30 +176,18 @@ describe("scenarios > alert > email_alert", { tags: "@external" }, () => {
 
 function openAlertForQuestion(id) {
   visitQuestion(id);
-  cy.icon("bell").click();
-  cy.findByText("Set up an alert").click();
-}
-
-function toggleChannel(channel) {
-  cy.findByText(channel).parent().find("input").click();
-}
-
-function clickAlertBell() {
-  cy.findByTestId("view-footer").icon("bell").click();
+  openSharingMenu("Create alert");
 }
 
 function saveAlert() {
-  clickAlertBell();
+  openSharingMenu();
 
-  cy.findByRole("dialog").within(() => {
+  modal().within(() => {
     cy.findByLabelText("Name").type(" alert");
     cy.button("Save").click();
   });
-
   cy.wait("@saveCard");
 
-  cy.findByTestId("alert-education-screen").within(() => {
-    cy.button("Set up an alert").click();
-  });
-  cy.button("Done").click();
+  openSharingMenu("Create alert");
+  modal().button("Done").click();
 }

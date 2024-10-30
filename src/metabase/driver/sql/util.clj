@@ -134,10 +134,10 @@
   - if input column doesn't have a timezone both target-timezone and source-timezone are required."
   [has-timezone? target-timezone source-timezone]
   (when (and has-timezone? source-timezone)
-      (throw (ex-info (tru "input column already has a set timezone. Please remove the source parameter in convertTimezone.")
-                      {:type            qp.error-type/invalid-query
-                       :target-timezone target-timezone
-                       :source-timezone source-timezone})))
+    (throw (ex-info (tru "input column already has a set timezone. Please remove the source parameter in convertTimezone.")
+                    {:type            qp.error-type/invalid-query
+                     :target-timezone target-timezone
+                     :source-timezone source-timezone})))
   (when (and (not has-timezone?) (not source-timezone))
     (throw (ex-info (tru "input column doesn't have a set timezone. Please set the source parameter in convertTimezone to convert it.")
                     {:type            qp.error-type/invalid-query
@@ -155,6 +155,7 @@
 (def dialects
   "Mapping of dialect kw to dialect, used by sql formatter in [[format-sql]], to dialect."
   {:db2         Dialect/Db2
+   :databricks  Dialect/SparkSql
    :mariadb     Dialect/MariaDb
    :mysql       Dialect/MySql
    :n1ql        Dialect/N1ql

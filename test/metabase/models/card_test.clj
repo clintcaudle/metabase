@@ -4,7 +4,6 @@
    [clojure.set :as set]
    [clojure.test :refer :all]
    [java-time.api :as t]
-   [metabase.api.common :as api]
    [metabase.audit :as audit]
    [metabase.config :as config]
    [metabase.lib.core :as lib]
@@ -663,7 +662,7 @@
                    :model/Card card2 {:name "derived card"
                                       :dataset_query {:query {:source-table (str "card__" (:id card1))}}}]
       (is (empty? (serdes/descendants "Card" (:id card1))))
-      (is (= #{["Card" (:id card1)]}
+      (is (= {["Card" (:id card1)] {"Card" (:id card2)}}
              (serdes/descendants "Card" (:id card2)))))))
 
 (deftest ^:parallel descendants-test-3
@@ -677,7 +676,7 @@
                                                                :snippet-name "snippet"
                                                                :snippet-id   (:id snippet)}}
                                      :query "select * from products where {{snippet}}"}}}]
-      (is (= #{["NativeQuerySnippet" (:id snippet)]}
+      (is (= {["NativeQuerySnippet" (:id snippet)] {"Card" (:id card)}}
              (serdes/descendants "Card" (:id card)))))))
 
 (deftest ^:parallel descendants-test-4
@@ -688,7 +687,7 @@
                                                     :type                 "id"
                                                     :values_source_type   "card"
                                                     :values_source_config {:card_id (:id card1)}}]}]
-      (is (= #{["Card" (:id card1)]}
+      (is (= {["Card" (:id card1)] {"Card" (:id card2)}}
              (serdes/descendants "Card" (:id card2)))))))
 
 (deftest ^:parallel extract-test
@@ -731,12 +730,11 @@
                  :visualization_settings
                  (json/parse-string keyword)))))))
 
-
 ;;; -------------------------------------------- Revision tests  --------------------------------------------
 
 (deftest ^:parallel diff-cards-str-test
   (are [x y expected] (= expected
-                       (u/build-sentence (revision/diff-strings :model/Card x y)))
+                         (u/build-sentence (revision/diff-strings :model/Card x y)))
     {:name        "Diff Test"
      :description nil}
     {:name        "Diff Test Changed"
@@ -942,8 +940,8 @@
                                  :parameter_id              "param_3"
                                  :parameterized_object_type "card"
                                  :parameterized_object_id (:id card3)}]
-   (is (= [2 1 0]
-          (map :parameter_usage_count (t2/hydrate [card1 card2 card3] :parameter_usage_count))))))
+    (is (= [2 1 0]
+           (map :parameter_usage_count (t2/hydrate [card1 card2 card3] :parameter_usage_count))))))
 
 (deftest ^:parallel average-query-time-and-last-query-started-test
   (let [now       (t/offset-date-time)
@@ -1015,7 +1013,7 @@
   (let [metadata-provider (lib.metadata.jvm/application-database-metadata-provider (mt/id))
         venues            (lib.metadata/table metadata-provider (mt/id :venues))
         query             (lib/query metadata-provider venues)]
-    (binding [api/*current-user-id* (mt/user->id :crowberto)]
+    (mt/with-current-user (mt/user->id :crowberto)
       (mt/with-temp [:model/Card card {:dataset_query query}
                      :model/Card no-query {}]
         (is (=? {:can_run_adhoc_query true}

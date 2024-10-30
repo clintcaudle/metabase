@@ -24,8 +24,8 @@
    [metabase.lib.schema.metadata :as lib.schema.metadata]
    [metabase.lib.schema.ref :as lib.schema.ref]
    [metabase.lib.util.match :as lib.util.match]
-   [metabase.shared.util.i18n :as i18n]
    [metabase.util :as u]
+   [metabase.util.i18n :as i18n]
    [metabase.util.malli :as mu]))
 
 #?(:clj
@@ -73,10 +73,10 @@
    If the expression has an original-effective-type due to bucketing, check that."
   [expression typ]
   (isa?
-    (or (and (clause? expression)
-             (:metabase.lib.field/original-effective-type (second expression)))
-        (lib.schema.expression/type-of expression))
-    typ))
+   (or (and (clause? expression)
+            (:metabase.lib.field/original-effective-type (second expression)))
+       (lib.schema.expression/type-of expression))
+   typ))
 
 (defn expression-name
   "Returns the :lib/expression-name of `clause`. Returns nil if `clause` is not a clause."
@@ -190,7 +190,7 @@
   [m legacy-key pMBQL-key]
   (cond-> m
     (contains? m legacy-key) (update legacy-key #(if (and (vector? %)
-                                                       (= (first %) :and))
+                                                          (= (first %) :and))
                                                    (vec (drop 1 %))
                                                    [%]))
     (contains? m legacy-key) (set/rename-keys {legacy-key pMBQL-key})))
@@ -344,12 +344,19 @@
         stages'                     (apply update (vec stages) stage-number' f args)]
     (assoc query :stages stages')))
 
+(defn native-stage?
+  "Is this query stage a native stage?"
+  [query stage-number]
+  (-> (query-stage query stage-number)
+      :lib/type
+      (= :mbql.stage/native)))
+
 (mu/defn ensure-mbql-final-stage :- ::lib.schema/query
   "Convert query to a pMBQL (pipeline) query, and make sure the final stage is an `:mbql` one."
   [query]
   (let [query (pipeline query)]
     (cond-> query
-      (= (:lib/type (query-stage query -1)) :mbql.stage/native)
+      (native-stage? query -1)
       (update :stages conj {:lib/type :mbql.stage/mbql}))))
 
 (defn join-strings-with-conjunction
@@ -541,18 +548,18 @@
         stage (query-stage query stage-number)
         new-summary? (not (or (seq (:aggregation stage)) (seq (:breakout stage))))
         new-query (update-query-stage
-                    query stage-number
-                    update location
-                    (fn [summary-clauses]
-                      (conj (vec summary-clauses) (lib.common/->op-arg a-summary-clause))))]
+                   query stage-number
+                   update location
+                   (fn [summary-clauses]
+                     (conj (vec summary-clauses) (lib.common/->op-arg a-summary-clause))))]
     (if new-summary?
       (-> new-query
           (update-query-stage
-            stage-number
-            (fn [stage]
-              (-> stage
-                  (dissoc :order-by :fields)
-                  (m/update-existing :joins (fn [joins] (mapv #(dissoc % :fields) joins))))))
+           stage-number
+           (fn [stage]
+             (-> stage
+                 (dissoc :order-by :fields)
+                 (m/update-existing :joins (fn [joins] (mapv #(dissoc % :fields) joins))))))
           ;; subvec holds onto references, so create a new vector
           (update :stages (comp #(into [] %) subvec) 0 (inc (canonical-stage-index query stage-number))))
       new-query)))

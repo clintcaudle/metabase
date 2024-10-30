@@ -83,6 +83,10 @@ export function leftSidebar() {
   return cy.findByTestId("sidebar-left");
 }
 
+export function sidesheet() {
+  return cy.findByTestId("sidesheet");
+}
+
 export function navigationSidebar() {
   return cy.findByTestId("main-navbar-root");
 }
@@ -103,6 +107,10 @@ export function closeNavigationSidebar() {
 
 export function browseDatabases() {
   return navigationSidebar().findByLabelText("Browse databases");
+}
+
+export function notificationList() {
+  return cy.findByRole("list", { name: "undo-list" });
 }
 
 /**
@@ -189,6 +197,12 @@ export const questionInfoButton = () => {
   return cy.findByTestId("qb-header-info-button");
 };
 
+/** Opens the question info sidesheet */
+export const openQuestionInfoSidesheet = () => {
+  questionInfoButton().click();
+  return sidesheet();
+};
+
 export const undo = () => {
   cy.findByTestId("toast-undo").findByText("Undo").click();
 };
@@ -262,6 +276,10 @@ export function tableInteractive() {
   return cy.findByTestId("TableInteractive-root");
 }
 
+export function tableInteractiveBody() {
+  return cy.get("#main-data-grid");
+}
+
 export function tableHeaderClick(headerString) {
   tableInteractive().within(() => {
     cy.findByTextEnsureVisible(headerString).trigger("mousedown");
@@ -269,6 +287,28 @@ export function tableHeaderClick(headerString) {
 
   tableInteractive().within(() => {
     cy.findByTextEnsureVisible(headerString).trigger("mouseup");
+  });
+}
+
+export function assertTableData({ columns, firstRows = [] }) {
+  tableInteractive()
+    .findAllByTestId("header-cell")
+    .should("have.length", columns.length);
+
+  columns.forEach((column, index) => {
+    tableInteractive()
+      .findAllByTestId("header-cell")
+      .eq(index)
+      .should("have.text", column);
+  });
+
+  firstRows.forEach((row, rowIndex) => {
+    row.forEach((cell, cellIndex) => {
+      tableInteractiveBody()
+        .findAllByTestId("cell-data")
+        .eq(columns.length * rowIndex + cellIndex)
+        .should("have.text", cell);
+    });
   });
 }
 
@@ -305,4 +345,14 @@ export function removeMultiAutocompleteValue(index, filter) {
   return multiAutocompleteValue(index, filter)
     .findByRole("button", { hidden: true })
     .click();
+}
+
+export function repeatAssertion(assertFn, timeout = 4000, interval = 400) {
+  if (timeout <= 0) {
+    return;
+  }
+  assertFn();
+
+  cy.wait(interval);
+  repeatAssertion(assertFn, timeout - interval, interval);
 }

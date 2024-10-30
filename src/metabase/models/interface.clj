@@ -5,6 +5,7 @@
    [cheshire.generate :as json.generate]
    [clojure.core.memoize :as memoize]
    [clojure.spec.alpha :as s]
+   [clojure.string :as str]
    [clojure.walk :as walk]
    [malli.core :as mc]
    [malli.error :as me]
@@ -251,6 +252,44 @@
   {:in  json-in
    :out json-out-without-keywordization})
 
+(mu/defn assert-enum
+  "Assert that a value is one of the values in `enum`."
+  [enum :- [:set :any]
+   value]
+  (when-not (contains? enum value)
+    (throw (ex-info (format "Invalid value %s. Must be one of %s" value (str/join ", " enum)) {:status-code 400
+                                                                                               :value       value}))))
+
+(mu/defn assert-namespaced
+  "Assert that a value is a namespaced keyword under `qualified-ns`."
+  [qualified-ns :- string?
+   value]
+  (when-not (= qualified-ns (-> value keyword namespace))
+    (throw (ex-info (format "Must be a namespaced keyword under :%s, got: %s" qualified-ns value) {:status-code 400
+                                                                                                   :value       value}))))
+
+(defn transform-validator
+  "Given a transform, returns a transform that call `assert-fn` on the \"out\" value.
+
+  E.g: A keyword transfomer that throw an error if the value is not namespaced
+    (transform-validator
+      transform-keyword (fn [x]
+      (when-not (-> x namespace some?)
+        (throw (ex-info \"Value is not namespaced\")))))"
+  [tf assert-fn]
+  (-> tf
+      ;; deserialization
+      (update :out (fn [f]
+                     (fn [x]
+                       (let [out (f x)]
+                         (assert-fn out)
+                         out))))
+      ;; serialization
+      (update :in (fn [f]
+                    (fn [x]
+                      (assert-fn x)
+                      (f x))))))
+
 (def encrypted-json-in
   "Serialize encrypted json."
   (comp encryption/maybe-encrypt json-in))
@@ -371,7 +410,6 @@
     (u/prog1 (mbql.normalize/normalize-fragment [:query] definition)
       (validate-legacy-metric-segment-definition <>))))
 
-
 (def transform-legacy-metric-segment-definition
   "Transform for inner queries like those in Metric definitions."
   {:in  (comp json-in normalize-legacy-metric-segment-definition)
@@ -416,7 +454,7 @@
   []
   (classloader/require 'metabase.driver.sql.query-processor)
   (let [db-type ((requiring-resolve 'metabase.db/db-type))]
-   ((resolve 'metabase.driver.sql.query-processor/current-datetime-honeysql-form) db-type)))
+    ((resolve 'metabase.driver.sql.query-processor/current-datetime-honeysql-form) db-type)))
 
 (defn- add-created-at-timestamp [obj & _]
   (cond-> obj
@@ -429,7 +467,6 @@
                                               (:updated_at obj))]
     (cond-> obj
       (not changes-already-include-updated-at?) (assoc :updated_at (now)))))
-
 
 (t2/define-before-insert :hook/timestamped?
   [instance]

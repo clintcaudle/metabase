@@ -24,7 +24,8 @@
 (defn- present [card]
   (-> card
       (select-keys [:id :description :collection_id :name :entity_id :archived :collection_position
-                    :display :collection_preview :dataset_query :last_used_at :errors :collection])
+                    :display :collection_preview :dataset_query :last_used_at :errors :collection
+                    :creator])
       (update :collection (fn present-collection [collection]
                             {:id (:id collection)
                              :name (:name collection)
@@ -48,13 +49,19 @@
                                                 [[:not= nil [:max :coll.name]] :is_child_collection]]
                               "created_by"     [:u.first_name :u.last_name :u.email]
                               "last_edited_at" [:c.updated_at])
-        order-by-clause     (condp = sort-column
-                              "collection" [[:is_child_collection sort-dir-kw]
-                                            [[:max :coll.name] sort-dir-kw]]
-                              "created_by" [[[:coalesce [:|| :u.first_name " " :u.last_name]
-                                              :u.first_name :u.last_name :u.email]
-                                             sort-dir-kw]]
-                              [(into sorting-selects [sort-dir-kw])])
+        order-by-clause     (concat
+                             (condp = sort-column
+                               "collection" [[:is_child_collection sort-dir-kw]
+                                             [[:max :coll.name] sort-dir-kw]]
+                               "created_by" [[[:coalesce [:|| :u.first_name " " :u.last_name]
+                                               :u.first_name :u.last_name :u.email]
+                                              sort-dir-kw]]
+                               [(into sorting-selects [sort-dir-kw])])
+                             ;; fallbacks to ensure deterministic sorting:
+                             ;; - sort by card name,
+                             ;; - if even that's the same, sort by the ID
+                             [[:c.name sort-dir-kw]
+                              [:c.id sort-dir-kw]])
         card-query          (query-analysis/cards-with-reference-errors
                              (m/assoc-some
                               ;; TODO this table has a lot of fields... we should whittle down to only the ones we need.
@@ -78,6 +85,19 @@
     {:data (map (comp present add-errors) (t2/hydrate cards [:collection :effective_ancestors] :creator))
      :total (t2/count :model/Card (dissoc card-query :limit :offset))}))
 
+(defn- invalid-cards [sort_column sort_direction collection_id]
+  (let [collection (if (nil? collection_id)
+                     collection/root-collection
+                     (t2/select-one :model/Collection :id collection_id))
+        collection-ids (conj (collection/descendant-ids collection) collection_id)]
+    (merge (cards-with-reference-errors {:sort-column (or sort_column default-sort-column)
+                                         :sort-direction (or sort_direction default-sort-direction)
+                                         :collection-ids (set collection-ids)
+                                         :limit mw.offset-paging/*limit*
+                                         :offset mw.offset-paging/*offset*})
+           {:limit mw.offset-paging/*limit*
+            :offset mw.offset-paging/*offset*})))
+
 (api/defendpoint GET "/invalid-cards"
   "List of cards that have an invalid reference in their query. Shape of each card is standard, with the addition of an
   `errors` key. Supports pagination (`offset` and `limit`), so it returns something in the shape:
@@ -92,17 +112,7 @@
   {sort_column    [:maybe (into [:enum] valid-sort-columns)]
    sort_direction [:maybe (into [:enum] valid-sort-directions)]
    collection_id  [:maybe ms/PositiveInt]}
-  (let [collection (if (nil? collection_id)
-                     collection/root-collection
-                     (t2/select-one :model/Collection :id collection_id))
-        collection-ids (conj (collection/descendant-ids collection) collection_id)]
-    (merge (cards-with-reference-errors {:sort-column (or sort_column default-sort-column)
-                                         :sort-direction (or sort_direction default-sort-direction)
-                                         :collection-ids (set collection-ids)
-                                         :limit mw.offset-paging/*limit*
-                                         :offset mw.offset-paging/*offset*})
-           {:limit mw.offset-paging/*limit*
-            :offset mw.offset-paging/*offset*})))
+  (invalid-cards sort_column sort_direction collection_id))
 
 (defn +check-setting
   "Middleware that gates this API behind the associated feature flag"

@@ -1,16 +1,19 @@
 import { ORDERS_COUNT_QUESTION_ID } from "e2e/support/cypress_sample_instance_data";
 import {
-  describeEE,
-  restore,
-  visitQuestion,
-  openQuestionActions,
-  questionInfoButton,
-  setTokenFeatures,
-  popover,
-  openCommandPalette,
-  commandPalette,
   closeCommandPalette,
+  commandPalette,
   commandPaletteSearch,
+  createModerationReview,
+  describeEE,
+  getPartialPremiumFeatureError,
+  openCommandPalette,
+  openQuestionActions,
+  popover,
+  questionInfoButton,
+  restore,
+  setTokenFeatures,
+  sidesheet,
+  visitQuestion,
 } from "e2e/support/helpers";
 
 describeEE("scenarios > premium > content verification", () => {
@@ -32,8 +35,8 @@ describeEE("scenarios > premium > content verification", () => {
           moderated_item_type: "card",
         },
       }).then(({ body, status, statusText }) => {
-        expect(body).to.eq(
-          "Content verification is a paid feature not currently available to your instance. Please upgrade to use it. Learn more at metabase.com/upgrade/",
+        expect(body).to.deep.include(
+          getPartialPremiumFeatureError("Content verification"),
         );
         expect(status).to.eq(402);
         expect(statusText).to.eq("Payment Required");
@@ -79,12 +82,12 @@ describeEE("scenarios > premium > content verification", () => {
 
         // 2. Question's history
         questionInfoButton().click();
-        cy.findByTestId("sidebar-right").within(() => {
-          cy.findByText("History");
-          cy.findAllByText("You verified this")
-            .should("have.length", 2)
-            .and("be.visible");
+        sidesheet().within(() => {
+          cy.findByText(/You verified this/);
+          cy.findByRole("tab", { name: "History" }).click();
+          cy.findByText("You verified this");
         });
+        cy.findByLabelText("Close").click();
 
         // 3. Recently viewed list
         openCommandPalette();
@@ -118,11 +121,12 @@ describeEE("scenarios > premium > content verification", () => {
 
         // 2. Question's history
         questionInfoButton().click();
-        cy.findByTestId("sidebar-right").within(() => {
-          cy.findByText("History");
+        sidesheet().within(() => {
+          cy.findByRole("tab", { name: "History" }).click();
           cy.findByText("You removed verification");
           cy.findByText("You verified this"); // Implicit assertion - there can be only one :)
         });
+        cy.findByLabelText("Close").click();
 
         // 3. Recently viewed list
         openCommandPalette();
@@ -151,7 +155,7 @@ describeEE("scenarios > premium > content verification", () => {
 
     describe("non-admin user", () => {
       beforeEach(() => {
-        cy.createModerationReview({
+        createModerationReview({
           status: "verified",
           moderated_item_type: "card",
           moderated_item_id: ORDERS_COUNT_QUESTION_ID,
@@ -175,9 +179,12 @@ describeEE("scenarios > premium > content verification", () => {
           .and("not.contain", "Remove verification");
 
         questionInfoButton().click();
-        cy.findByTestId("sidebar-right")
-          .findAllByText("A moderator verified this")
-          .should("have.length", 2);
+        sidesheet().within(() => {
+          cy.findAllByText(/A moderator verified this/); // overview tab
+          cy.findByRole("tab", { name: "History" }).click();
+          cy.findAllByText("A moderator verified this"); // history tab
+        });
+        cy.findByLabelText("Close").click();
 
         commandPaletteSearch("orders");
         cy.log("Verified content should show up higher in search results");
@@ -200,7 +207,7 @@ describeEE("scenarios > premium > content verification", () => {
   context("token expired or removed", () => {
     beforeEach(() => {
       setTokenFeatures("all");
-      cy.createModerationReview({
+      createModerationReview({
         status: "verified",
         moderated_item_type: "card",
         moderated_item_id: ORDERS_COUNT_QUESTION_ID,
@@ -218,10 +225,12 @@ describeEE("scenarios > premium > content verification", () => {
       });
 
       questionInfoButton().click();
-      cy.findByTestId("sidebar-right").within(() => {
+      sidesheet().within(() => {
+        cy.findByRole("tab", { name: "History" }).click();
         cy.contains(/created this./);
         cy.contains(/verified this/).should("not.exist");
       });
+      cy.findByLabelText("Close").click();
 
       commandPaletteSearch("orders");
       cy.log(

@@ -18,6 +18,7 @@ import type {
   TimelineEvent,
   TimelineEventId,
   TransformedSeries,
+  VisualizationDisplay,
   VisualizationSettings,
 } from "metabase-types/api";
 
@@ -30,8 +31,6 @@ export type ColorGetter = (colorName: string) => string;
 
 export interface RenderingContext {
   getColor: ColorGetter;
-  formatValue: Formatter;
-
   measureText: TextWidthMeasurer;
   measureTextHeight: TextHeightMeasurer;
   fontFamily: string;
@@ -67,14 +66,19 @@ export type OnChangeCardAndRunOpts = {
 
 export type OnChangeCardAndRun = (opts: OnChangeCardAndRunOpts) => void;
 
+export type ColumnSettings = OptionsType & {
+  "pivot_table.column_show_totals"?: boolean;
+  [key: string]: unknown;
+};
+
 export type ComputedVisualizationSettings = VisualizationSettings & {
-  column?: (col: RemappingHydratedDatasetColumn) => Record<string, unknown>;
+  column?: (col: RemappingHydratedDatasetColumn) => ColumnSettings;
 };
 
 export interface StaticVisualizationProps {
   rawSeries: RawSeries;
-  dashcardSettings: VisualizationSettings;
   renderingContext: RenderingContext;
+  isStorybook?: boolean;
 }
 
 export interface VisualizationProps {
@@ -85,6 +89,7 @@ export interface VisualizationProps {
   metadata: Metadata;
   rawSeries: RawSeries;
   settings: ComputedVisualizationSettings;
+  hiddenSeries?: Set<string>;
   headerIcon: IconProps;
   errorIcon: IconName;
   actionButtons: ReactNode;
@@ -96,9 +101,11 @@ export interface VisualizationProps {
   showTitle: boolean;
   isDashboard: boolean;
   isEditing: boolean;
+  isNightMode: boolean;
   isSettings: boolean;
   showAllLegendItems?: boolean;
   hovered?: HoveredObject;
+  clicked?: ClickObject;
   className?: string;
   timelineEvents?: TimelineEvent[];
   selectedTimelineEventIds?: TimelineEventId[];
@@ -130,6 +137,7 @@ export interface VisualizationProps {
   "graph.metrics"?: string[];
 
   canRemoveSeries?: (seriesIndex: number) => boolean;
+  canToggleSeriesVisibility?: boolean;
   onRemoveSeries?: (event: React.MouseEvent, seriesIndex: number) => void;
   onUpdateWarnings?: any;
 }
@@ -174,6 +182,7 @@ export type VisualizationSettingDefinition<TValue, TProps = void> = {
     vizSettings: VisualizationSettings,
     onChange: (value: TValue) => void,
     extra: unknown,
+    onChangeSettings: (value: Record<string, any>) => void,
   ) => TProps;
   readDependencies?: string[];
   writeDependencies?: string[];
@@ -202,7 +211,7 @@ export type VisualizationDefinition = {
   name?: string;
   noun?: string;
   uiName: string;
-  identifier: string;
+  identifier: VisualizationDisplay;
   aliases?: string[];
   iconName: IconName;
 
@@ -225,8 +234,7 @@ export type VisualizationDefinition = {
   placeHolderSeries?: Series;
 
   transformSeries?: (series: Series) => TransformedSeries;
-  // TODO: remove dependency on metabase-lib
-  isSensible: (data: DatasetData, query?: Query) => boolean;
+  isSensible: (data: DatasetData) => boolean;
   // checkRenderable throws an error if a visualization is not renderable
   checkRenderable: (
     series: Series,
