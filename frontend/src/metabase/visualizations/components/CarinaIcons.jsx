@@ -10,7 +10,7 @@ export const markerIcons = {
   }),
   1: L.icon({
     //"ODL"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/null.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
@@ -24,7 +24,7 @@ export const markerIcons = {
   }),
   3: L.icon({
     //"Prepay"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/null.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
@@ -38,7 +38,7 @@ export const markerIcons = {
   }),
   5: L.icon({
     //"CIU"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/null.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
@@ -52,7 +52,7 @@ export const markerIcons = {
   }),
   7: L.icon({
     //"CPG"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/cpg.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
@@ -66,63 +66,97 @@ export const markerIcons = {
   }),
   9: L.icon({
     //"WISE3"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/wise.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
   }),
   10: L.icon({
-    //"CAP"
-    iconUrl: "app/assets/img/carina/capacitor.png",
+    iconUrl: "app/assets/img/carina/transformer.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
   }),
   11: L.icon({
-    //"CIRCB"
-    iconUrl: "app/assets/img/carina/circuit-breaker.png",
+    iconUrl: "app/assets/img/carina/switch.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
   }),
   12: L.icon({
-    //"FUSE"
-    iconUrl: "app/assets/img/carina/fuse.png",
+    iconUrl: "app/assets/img/carina/recloser.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
   }),
   13: L.icon({
-    //SECTIONALIZER"
     iconUrl: "app/assets/img/carina/sectionalizer.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
   }),
   14: L.icon({
-    // "SPRECLOSER":
     iconUrl: "app/assets/img/carina/single-phase-recloser.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
   }),
   15: L.icon({
-    //"TPRECLOSER"
     iconUrl: "app/assets/img/carina/triple-phase-recloser.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
   }),
   16: L.icon({
-    //"THRESPRECLOSER"
     iconUrl: "app/assets/img/carina/three-single-phase-recloser.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
   }),
   17: L.icon({
-    // "TWOSPRECLOSER"
     iconUrl: "app/assets/img/carina/two-single-phase-recloser.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  18: L.icon({
+    iconUrl: "app/assets/img/carina/light.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  19: L.icon({
+    iconUrl: "app/assets/img/carina/service-location.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  20: L.icon({
+    iconUrl: "app/assets/img/carina/down-guy.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  21: L.icon({
+    iconUrl: "app/assets/img/carina/primary-oh-line-section.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  22: L.icon({
+    iconUrl: "app/assets/img/carina/secondary-oh-line-section.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  23: L.icon({
+    iconUrl: "app/assets/img/carina/location.png",
+    iconSize: [28, 32],
+    iconAnchor: [15, 24],
+    popupAnchor: [0, -13],
+  }),
+  24: L.icon({
+    iconUrl: "app/assets/img/carina/pole.png",
     iconSize: [28, 32],
     iconAnchor: [15, 24],
     popupAnchor: [0, -13],
