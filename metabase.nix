@@ -6,7 +6,7 @@
       jdk11
       clojure
       git-credential-manager
-      postgresql
+      ( postgresql.withPackages (p: [ p.postgis ]) )
     ];
 
     # buildPhase = ''
