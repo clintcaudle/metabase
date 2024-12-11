@@ -84,16 +84,18 @@ export function saveDashboard({
   waitMs = 1,
   awaitRequest = true,
 } = {}) {
-  cy.intercept("PUT", "/api/dashboard/*").as("saveDashboardCards");
+  cy.intercept("PUT", "/api/dashboard/*").as(
+    "saveDashboard-saveDashboardCards",
+  );
+  cy.intercept("GET", "/api/dashboard/*").as("saveDashboard-getDashboard");
   cy.button(buttonLabel).click();
 
   if (awaitRequest) {
-    cy.wait("@saveDashboardCards").then(() => {
-      cy.findByText(editBarText).should("not.exist");
-    });
-  } else {
-    cy.findByText(editBarText).should("not.exist");
+    cy.wait("@saveDashboard-saveDashboardCards");
+    cy.wait("@saveDashboard-getDashboard");
   }
+
+  cy.findByText(editBarText).should("not.exist");
   cy.wait(waitMs); // this is stupid but necessary to due to the dashboard resizing and detaching elements
 }
 
@@ -208,8 +210,20 @@ export function addHeadingWhileEditing(
   cy.findByPlaceholderText("Heading").type(string, options);
 }
 
+export function openAddQuestionMenu(
+  option?: "Existing Question" | "New Question" | "New SQL query",
+) {
+  dashboardHeader().findByLabelText("Add questions").click();
+  if (option) {
+    popover().findByText(option).click();
+  }
+}
+
 export function openQuestionsSidebar() {
-  cy.findByTestId("dashboard-header").findByLabelText("Add questions").click();
+  openAddQuestionMenu();
+  menu().within(() => {
+    cy.findByText(/Existing Question/).click();
+  });
 }
 
 export function createNewTab() {
@@ -309,8 +323,12 @@ export const closeDashboardSettingsSidebar = () => {
   sidesheet().findByLabelText("Close").click();
 };
 
-export function openDashboardMenu() {
+export function openDashboardMenu(option?: string) {
   dashboardHeader().findByLabelText("Move, trash, and more…").click();
+
+  if (option) {
+    popover().findByText(option).click();
+  }
 }
 
 export const dashboardHeader = () => {

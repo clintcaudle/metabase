@@ -13,7 +13,7 @@ import { StringFilterValuePicker } from "../../FilterValuePicker";
 import { FilterOperatorPicker } from "../FilterOperatorPicker";
 import { FilterPickerFooter } from "../FilterPickerFooter";
 import { FilterPickerHeader } from "../FilterPickerHeader";
-import { MAX_WIDTH, MIN_WIDTH } from "../constants";
+import { WIDTH } from "../constants";
 import type { FilterPickerWidgetProps } from "../types";
 
 export function StringFilterPicker({
@@ -49,7 +49,7 @@ export function StringFilterPicker({
     filter,
   });
 
-  const handleOperatorChange = (newOperator: Lib.StringFilterOperatorName) => {
+  const handleOperatorChange = (newOperator: Lib.StringFilterOperator) => {
     setOperator(newOperator);
     setValues(getDefaultValues(newOperator, values));
   };
@@ -66,8 +66,7 @@ export function StringFilterPicker({
   return (
     <Box
       component="form"
-      miw={MIN_WIDTH}
-      maw={MAX_WIDTH}
+      w={WIDTH}
       data-testid="string-filter-picker"
       onSubmit={handleSubmit}
     >
@@ -93,8 +92,8 @@ export function StringFilterPicker({
         <FilterPickerFooter isNew={isNew} canSubmit={isValid}>
           {type === "partial" && (
             <CaseSensitiveOption
-              value={options["case-sensitive"] ?? false}
-              onChange={newValue => setOptions({ "case-sensitive": newValue })}
+              value={options.caseSensitive ?? false}
+              onChange={newValue => setOptions({ caseSensitive: newValue })}
             />
           )}
         </FilterPickerFooter>

@@ -17,12 +17,14 @@ type ValidateEvent<
     Record<Exclude<keyof T, keyof SimpleEventSchema>, never>,
 > = T;
 
-type OnboardingCSVUploadClickedEvent = ValidateEvent<{
-  event: "data_add_via_csv_clicked";
+type CSVUploadClickedEvent = ValidateEvent<{
+  event: "csv_upload_clicked";
+  triggered_from: "left-nav";
 }>;
 
-type OnboardingDatabaseUploadClickedEvent = ValidateEvent<{
-  event: "data_add_via_db_clicked";
+export type DatabaseAddClickedEvent = ValidateEvent<{
+  event: "database_add_clicked";
+  triggered_from: "left-nav" | "db-list";
 }>;
 
 type OnboardingChecklistOpenedEvent = ValidateEvent<{
@@ -52,11 +54,29 @@ export type NewIFrameCardCreatedEvent = ValidateEvent<{
   target_id: number | null;
 }>;
 
+export type MoveToTrashEvent = ValidateEvent<{
+  event: "moved-to-trash";
+  target_id: number | null;
+  triggered_from: "collection" | "detail_page" | "cleanup_modal";
+  duration_ms: number | null;
+  result: "success" | "failure";
+  event_detail:
+    | "question"
+    | "model"
+    | "metric"
+    | "dashboard"
+    | "collection"
+    | "dataset"
+    | "indexed-entity"
+    | "snippet";
+}>;
+
 export type SimpleEvent =
+  | CSVUploadClickedEvent
+  | DatabaseAddClickedEvent
   | NewIFrameCardCreatedEvent
   | NewsletterToggleClickedEvent
-  | OnboardingCSVUploadClickedEvent
-  | OnboardingDatabaseUploadClickedEvent
   | OnboardingChecklistOpenedEvent
   | OnboardingChecklistItemExpandedEvent
-  | OnboardingChecklistItemCTAClickedEvent;
+  | OnboardingChecklistItemCTAClickedEvent
+  | MoveToTrashEvent;

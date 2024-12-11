@@ -174,9 +174,7 @@ See [Deleting and restoring items](../exploration-and-organization/delete-and-re
 
 ## Verifying a model
 
-{% include plans-blockquote.html feature="Model verification" %}
-
-Just like with a question, admins can verify models. Verifying a model will give it a check mark to let others know an admin vetted the model. If anyone makes any changes to the model, the check mark will disappear. An admin will have to verify the question again to restore the check mark.
+See [content verification](../exploration-and-organization/content-verification.md).
 
 ## Model persistence
 
@@ -188,8 +186,8 @@ See [Model persistence](./model-persistence.md)
 - [Troubleshooting models][troubleshooting-models].
 
 [column-type]: ./field-types.md
-[cte]: https://www.metabase.com/learn/sql-questions/sql-cte
-[measures-dimensions]: https://www.metabase.com/learn/databases/dimensions-and-measures
+[cte]: https://www.metabase.com/learn/grow-your-data-skills/learn-sql/working-with-sql/sql-cte
+[measures-dimensions]: https://www.metabase.com/learn/grow-your-data-skills/data-fundamentals/dimensions-and-measures
 [question]: ../questions/start.md
-[learn-models]: https://www.metabase.com/learn/getting-started/models
+[learn-models]: https://www.metabase.com/learn/metabase-basics/getting-started/models
 [troubleshooting-models]: ../troubleshooting-guide/models.md

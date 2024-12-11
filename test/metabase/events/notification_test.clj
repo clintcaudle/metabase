@@ -37,7 +37,7 @@
             sent-notis (atom [])]
         (testing "publishing event will send all the actively subscribed notifciations"
           (mt/with-dynamic-redefs
-            [notification/*send-notification!*      (fn [notification] (swap! sent-notis conj notification))
+            [notification/send-notification!      (fn [notification] (swap! sent-notis conj notification))
              events.notification/supported-topics #{:event/test-notification}]
             (events/publish-event! topic {::hi true})
             (is (=? [[(:id n-1) {:event_info {::hi true}}]
@@ -59,7 +59,7 @@
          nil)
         (testing "publish an event that is not supported for notifications will not send any notifications"
           (mt/with-dynamic-redefs
-            [notification/*send-notification!*      (fn [notification] (swap! sent-notis conj notification))
+            [notification/send-notification!      (fn [notification] (swap! sent-notis conj notification))
              events.notification/supported-topics #{}]
             (events/publish-event! :event/unsupported-topic {::hi true})
             (is (empty? @sent-notis))))))))
@@ -124,8 +124,8 @@
         (events/publish-event! :event/testing {})
         (testing "each notification should have a task history, in which each channel-send will have a task history"
           (is (= {"notification-trigger" 1
-                  "notification-send"      (+ 1 1) ;; 2 notifications, each send to 2 channels
-                  "channel-send"           (+ 2 2)}
+                  "notification-send"    2 ; 2 notifications, each send to 2 channels
+                  "channel-send"         4}
                  (as-> (t2/select :model/TaskHistory :task [:in ["notification-send" "channel-send" "notification-trigger"]]) th
                    (group-by :task th)
                    (update-vals th count)))))))))

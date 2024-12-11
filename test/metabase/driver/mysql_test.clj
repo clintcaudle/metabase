@@ -1,6 +1,7 @@
 (ns ^:mb/once metabase.driver.mysql-test
   (:require
    [clojure.java.jdbc :as jdbc]
+   [clojure.set :as set]
    [clojure.string :as str]
    [clojure.test :refer :all]
    [honey.sql :as sql]
@@ -76,6 +77,22 @@
             (is (= [[1 nil]]
                    (mt/rows
                     (mt/run-mbql-query exciting-moments-in-history))))))))))
+
+(deftest multiple-schema-test
+  (testing "Make sure that we filter databases (schema) with :db or :dbname (#50072)"
+    (mt/test-driver :mysql
+      (drop-if-exists-and-create-db! "dbone")
+      (drop-if-exists-and-create-db! "dbtwo")
+      (doseq [dbname ["dbone" "dbtwo"]
+              :let [details (tx/dbdef->connection-details :mysql :db {:database-name dbname})
+                    spec    (sql-jdbc.conn/connection-details->spec :mysql details)]]
+        (jdbc/execute! spec [(format "CREATE TABLE same_table_name (%s_a integer, %s_b integer, %s_c integer);" dbname dbname dbname)]))
+      (doseq [details [(tx/dbdef->connection-details :mysql :db {:database-name "dbone"})
+                       (set/rename-keys (tx/dbdef->connection-details :mysql :db {:database-name "dbone"}) {:db :dbname})]]
+        (t2.with-temp/with-temp [Database database {:engine "mysql", :details details}]
+          (sync/sync-database! database)
+          (is (= #{"dbone_a" "dbone_b" "dbone_c"}
+                 (into #{} (map :name) (driver/describe-fields :mysql database)))))))))
 
 (deftest date-test
   ;; make sure stuff at least compiles. Even if the result probably isn't as concise as it could be.
@@ -522,11 +539,10 @@
             (sync/sync-table! table)
             (let [field (t2/select-one Field :table_id (u/id table) :name "json_bit → 1234")
                   compile-res (qp.compile/compile
-                               {:database (u/the-id (mt/db))
-                                :type     :query
-                                :query    {:source-table (u/the-id table)
-                                           :aggregation  [[:count]]
-                                           :breakout     [[:field (u/the-id field) nil]]}})]
+                               (mt/mbql-query nil
+                                 {:source-table (u/the-id table)
+                                  :aggregation  [[:count]]
+                                  :breakout     [[:field (u/the-id field) nil]]}))]
               (is (= ["SELECT"
                       "  CONVERT(JSON_EXTRACT(`json`.`json_bit`, ?), DECIMAL) AS `json_bit → 1234`,"
                       "  COUNT(*) AS `count`"
@@ -734,11 +750,11 @@
         (let [details          (tx/dbdef->connection-details :mysql :db {:database-name "table_privileges_test"})
               spec             (sql-jdbc.conn/connection-details->spec :mysql details)
               get-privileges   (fn []
-                                 (let [new-connection-details (cond-> (assoc details
-                                                                             :user "table_privileges_test_user",
-                                                                             :password "password"
-                                                                             :ssl true
-                                                                             :additional-options "trustServerCertificate=true"))]
+                                 (let [new-connection-details (assoc details
+                                                                     :user "table_privileges_test_user",
+                                                                     :password "password"
+                                                                     :ssl true
+                                                                     :additional-options "trustServerCertificate=true")]
                                    (sql-jdbc.conn/with-connection-spec-for-testing-connection
                                     [spec [:mysql new-connection-details]]
                                      (with-redefs [sql-jdbc.conn/db->pooled-connection-spec (fn [_] spec)]

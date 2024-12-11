@@ -159,8 +159,8 @@
   (if (is-alert? notification)
     (mi/current-user-has-full-permissions? :read notification)
     (or api/*is-superuser?*
-        (or (current-user-is-creator? notification)
-            (current-user-is-recipient? notification)))))
+        (current-user-is-creator? notification)
+        (current-user-is-recipient? notification))))
 
 ;; Non-admins should be able to create subscriptions, and update subscriptions that they created, but not edit anyone
 ;; else's subscriptions (except for unsubscribing themselves, which uses a custom API).
@@ -186,6 +186,7 @@
     [:include_csv                        ms/BooleanValue]
     [:include_xls                        ms/BooleanValue]
     [:format_rows       {:optional true} [:maybe ms/BooleanValue]]
+    [:pivot_results     {:optional true} [:maybe ms/BooleanValue]]
     [:dashboard_card_id {:optional true} [:maybe ms/PositiveInt]]]
    (deferred-tru "value must be a map with the keys `{0}`, `{1}`, and `{2}`." "include_csv" "include_xls" "dashboard_card_id")))
 

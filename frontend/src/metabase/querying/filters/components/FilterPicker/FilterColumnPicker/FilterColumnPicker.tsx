@@ -15,12 +15,17 @@ import type { ColumnListItem, SegmentListItem } from "../types";
 import { StyledAccordionList } from "./FilterColumnPicker.styled";
 
 export interface FilterColumnPickerProps {
+  className?: string;
   query: Lib.Query;
   stageIndex: number;
   checkItemIsSelected: (item: ColumnListItem | SegmentListItem) => boolean;
   onColumnSelect: (column: Lib.ColumnMetadata) => void;
   onSegmentSelect: (segment: Lib.SegmentMetadata) => void;
   onExpressionSelect: () => void;
+
+  withCustomExpression?: boolean;
+  withColumnGroupIcon?: boolean;
+  withColumnItemIcon?: boolean;
 }
 
 type Section = {
@@ -50,12 +55,16 @@ export const isSegmentListItem = (
  * Filter ColumnOrSegmentOrCustomExpressionPicker was too long of a name
  */
 export function FilterColumnPicker({
+  className,
   query,
   stageIndex,
   checkItemIsSelected,
   onColumnSelect,
   onSegmentSelect,
   onExpressionSelect,
+  withCustomExpression = true,
+  withColumnGroupIcon = true,
+  withColumnItemIcon = true,
 }: FilterColumnPickerProps) {
   const sections = useMemo(() => {
     const columns = Lib.filterableColumns(query, stageIndex);
@@ -82,13 +91,16 @@ export function FilterColumnPicker({
 
       return {
         name: groupInfo.displayName,
-        icon: getColumnGroupIcon(groupInfo),
+        icon: withColumnGroupIcon ? getColumnGroupIcon(groupInfo) : null,
         items: [...segmentItems, ...columnItems],
       };
     });
 
-    return [...sections, CUSTOM_EXPRESSION_SECTION];
-  }, [query, stageIndex]);
+    return [
+      ...sections,
+      ...(withCustomExpression ? [CUSTOM_EXPRESSION_SECTION] : []),
+    ];
+  }, [query, stageIndex, withColumnGroupIcon, withCustomExpression]);
 
   const handleSectionChange = (section: Section) => {
     if (section.key === "custom-expression") {
@@ -107,6 +119,7 @@ export function FilterColumnPicker({
   return (
     <DelayGroup>
       <StyledAccordionList
+        className={className}
         sections={sections}
         onChange={handleSelect}
         onChangeSection={handleSectionChange}
@@ -114,7 +127,9 @@ export function FilterColumnPicker({
         renderItemWrapper={renderItemWrapper}
         renderItemName={renderItemName}
         renderItemDescription={omitItemDescription}
-        renderItemIcon={renderItemIcon}
+        renderItemIcon={(item: ColumnListItem | SegmentListItem) =>
+          withColumnItemIcon ? renderItemIcon(item) : null
+        }
         // disable scrollbars inside the list
         style={{ overflow: "visible" }}
         maxHeight={Infinity}

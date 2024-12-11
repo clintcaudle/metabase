@@ -94,20 +94,37 @@
 (defn matches-time?
   "Matches a local time string."
   [input]
-  (re-matches local-time-regex input))
+  (boolean (re-matches local-time-regex input)))
 
 (defn matches-date?
   "Matches a local date string."
   [input]
-  (re-matches local-date-regex input))
+  (boolean (re-matches local-date-regex input)))
 
 (defn matches-date-time?
   "Matches a local AND offset date time string."
   [input]
-  (re-matches (re-pattern (str date-time-part (optional offset-part))) input))
+  (boolean (re-matches (re-pattern (str date-time-part (optional offset-part))) input)))
 
 (defn drop-trailing-time-zone
   "Strips off a trailing +0500, -0430, or Z from a time string."
   [time-str]
   (or (second (re-matches (re-pattern (str "(.*?)" (optional offset-part) \$)) time-str))
       time-str))
+
+(def ^:const month-keywords
+  "Mapping of human-friendly keywords to literal month numbers.
+
+  1 = January."
+  {:jan 1
+   :feb 2
+   :mar 3
+   :apr 4
+   :may 5
+   :jun 6
+   :jul 7
+   :aug 8
+   :sep 9
+   :oct 10
+   :nov 11
+   :dec 12})

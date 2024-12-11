@@ -40,6 +40,11 @@ export function entityPickerModalLevel(level) {
   return cy.findByTestId(`item-picker-level-${level}`);
 }
 
+/**
+ *
+ * @param {number} level
+ * @param {string} name
+ */
 export function entityPickerModalItem(level, name) {
   return entityPickerModalLevel(level).findByText(name).parents("button");
 }
@@ -69,6 +74,10 @@ export function tabsShouldBe(selected, tabs) {
 
 export function collectionOnTheGoModal() {
   return cy.findByTestId("create-collection-on-the-go");
+}
+
+export function dashboardOnTheGoModal() {
+  return cy.findByTestId("create-dashboard-on-the-go");
 }
 
 export function sidebar() {
@@ -173,8 +182,12 @@ export function toggleFilterWidgetValues(
   });
 }
 
-export const openQuestionActions = () => {
+export const openQuestionActions = action => {
   cy.findByTestId("qb-header-action-panel").icon("ellipsis").click();
+
+  if (action) {
+    popover().findByText(action).click();
+  }
 };
 
 export const collectionTable = () => {

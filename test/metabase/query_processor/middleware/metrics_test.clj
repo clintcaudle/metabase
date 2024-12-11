@@ -59,8 +59,13 @@
               (lib.tu/mock-metadata-provider
                {:cards [metric]}))])))
 
-(def adjust
-  (comp #'metrics/adjust #'fetch-source-query/resolve-source-cards))
+(defn- adjust
+  [query]
+  (-> query
+      (assoc-in [:info :pivot/original-query] query)
+      (#'fetch-source-query/resolve-source-cards)
+      (#'metrics/adjust)
+      (dissoc :info)))
 
 (defn- check-prometheus-metrics!
   [& {expected-metrics-count  :metabase-query-processor/metrics-adjust
@@ -121,7 +126,7 @@
     (check-prometheus-metrics!
      :metabase-query-processor/metrics-adjust 1
      :metabase-query-processor/metrics-adjust-errors 1
-     :metric-and-mp (mock-metric (-> (lib/query meta/metadata-provider (meta/table-metadata :products))))
+     :metric-and-mp (mock-metric (lib/query meta/metadata-provider (meta/table-metadata :products)))
      :query-fn (fn [mp metric]
                  (-> (lib/query mp (meta/table-metadata :products))
                      (lib/aggregate (lib/+ (lib.options/ensure-uuid
@@ -728,10 +733,10 @@
 (deftest ^:parallel metric-with-explicit-join-test
   (let [mp (lib.metadata.jvm/application-database-metadata-provider (mt/id))
         metric-query (-> (lib/query mp (lib.metadata/table mp (mt/id :orders)))
-                         (lib/join (-> (lib/join-clause (lib.metadata/table mp (mt/id :people))
-                                                        [(lib/=
-                                                          (lib.metadata/field mp (mt/id :orders :user_id))
-                                                          (lib.metadata/field mp (mt/id :people :id)))])))
+                         (lib/join (lib/join-clause (lib.metadata/table mp (mt/id :people))
+                                                    [(lib/=
+                                                      (lib.metadata/field mp (mt/id :orders :user_id))
+                                                      (lib.metadata/field mp (mt/id :people :id)))]))
                          (lib/aggregate (lib/sum (lib.metadata/field mp (mt/id :orders :total))))
                          (lib/breakout (lib.metadata/field mp (mt/id :orders :created_at))))]
     (mt/with-temp [:model/Card metric {:dataset_query (lib.convert/->legacy-MBQL metric-query)

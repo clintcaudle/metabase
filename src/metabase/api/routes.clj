@@ -1,4 +1,5 @@
 (ns metabase.api.routes
+  #_{:clj-kondo/ignore [:deprecated-namespace]}
   (:require
    [compojure.core :refer [GET]]
    [compojure.route :as route]
@@ -10,6 +11,7 @@
    [metabase.api.bookmark :as api.bookmark]
    [metabase.api.cache :as api.cache]
    [metabase.api.card :as api.card]
+   [metabase.api.cards :as api.cards]
    [metabase.api.channel :as api.channel]
    [metabase.api.cloud-migration :as api.cloud-migration]
    [metabase.api.collection :as api.collection]
@@ -37,7 +39,7 @@
    [metabase.api.pulse.unsubscribe :as api.pulse.unsubscribe]
    [metabase.api.revision :as api.revision]
    [metabase.api.routes.common
-    :refer [+auth +message-only-exceptions +public-exceptions]]
+    :refer [+auth +message-only-exceptions +public-exceptions +static-apikey]]
    [metabase.api.search :as api.search]
    [metabase.api.segment :as api.segment]
    [metabase.api.session :as api.session]
@@ -108,6 +110,7 @@
   (context "/automagic-dashboards" [] (+auth api.magic/routes))
   (context "/bookmark"             [] (+auth api.bookmark/routes))
   (context "/card"                 [] (+auth api.card/routes))
+  (context "/cards"                [] (+auth api.cards/routes))
   (context "/cloud-migration"      [] (+auth api.cloud-migration/routes))
   (context "/collection"           [] (+auth api.collection/routes))
   (context "/channel"              [] (+auth api.channel/routes))
@@ -124,7 +127,7 @@
   (context "/metabot"              [] (+auth api.metabot/routes))
   (context "/model-index"          [] (+auth api.model-index/routes))
   (context "/native-query-snippet" [] (+auth api.native-query-snippet/routes))
-  (context "/notify"               [] (+auth api.notify/routes))
+  (context "/notify"               [] (+static-apikey api.notify/routes))
   (context "/permissions"          [] (+auth api.permissions/routes))
   (context "/persist"              [] (+auth api.persist/routes))
   (context "/premium-features"     [] (+auth api.premium-features/routes))

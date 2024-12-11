@@ -1,6 +1,5 @@
 (ns metabase.async.streaming-response
   (:require
-   [cheshire.core :as json]
    [clojure.core.async :as a]
    [clojure.walk :as walk]
    [compojure.response]
@@ -8,6 +7,7 @@
    [metabase.async.util :as async.u]
    [metabase.server.protocols :as server.protocols]
    [metabase.util :as u]
+   [metabase.util.json :as json]
    [metabase.util.log :as log]
    [potemkin.types :as p.types]
    [pretty.core :as pretty]
@@ -68,7 +68,7 @@
                         obj)
                       (dissoc :export-format))]
           (with-open [writer (BufferedWriter. (OutputStreamWriter. os StandardCharsets/UTF_8))]
-            (json/generate-stream obj writer)))
+            (json/encode-to obj writer {})))
         (catch EofException _)
         (catch Throwable e
           (log/error e "Error writing error to output stream" obj))))))
@@ -226,7 +226,13 @@
     (try
       (.setStatus response (or status 202))
       (let [gzip?   (should-gzip-response? request-map)
-            headers (cond-> (assoc (merge headers (:headers response-map)) "Content-Type" content-type)
+            headers (cond-> (assoc (merge headers (:headers response-map))
+                                   "Content-Type" content-type
+                                   ;; Very important: connections which serve streaming responses SHOULD NOT be reused
+                                   ;; by the client because of `start-async-cancel-loop!`. The latter tries to read a
+                                   ;; byte from the input stream at some interval, and that may/will cause corruption
+                                   ;; of the subsequent requests that come through the reused connection (see #46071).
+                                   "Connection" "close")
                       gzip? (assoc "Content-Encoding" "gzip"))]
         (#'servlet/set-headers response headers)
         (let [output-stream-delay (output-stream-delay gzip? response)

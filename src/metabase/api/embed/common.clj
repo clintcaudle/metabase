@@ -1,6 +1,5 @@
 (ns metabase.api.embed.common
   (:require
-   [cheshire.core :as json]
    [clojure.set :as set]
    [clojure.string :as str]
    [malli.core :as mc]
@@ -15,15 +14,15 @@
    [metabase.eid-translation :as eid-translation]
    [metabase.models.card :as card]
    [metabase.models.params :as params]
-   [metabase.models.setting :as setting :refer [defsetting]]
-   [metabase.pulse.core :as pulse]
+   [metabase.models.setting :refer [defsetting]]
+   [metabase.notification.payload.core :as notification.payload]
    [metabase.query-processor.card :as qp.card]
    [metabase.query-processor.middleware.constraints :as qp.constraints]
    [metabase.util :as u]
    [metabase.util.embed :as embed]
    [metabase.util.i18n
-    :as i18n
     :refer [deferred-tru tru]]
+   [metabase.util.json :as json]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms]
@@ -134,7 +133,7 @@
   [query-params]
   (or (try
         (when-let [parameters (:parameters query-params)]
-          (json/parse-string parameters keyword))
+          (json/decode+kw parameters))
         (catch Throwable _
           nil))
       query-params))
@@ -236,7 +235,7 @@
   make these parameters visible at all to the frontend."
   [dashboard token-params]
   (let [params             (:parameters dashboard)
-        dashcards      (:dashcards dashboard)
+        dashcards          (:dashcards dashboard)
         params-with-values (reduce
                             (fn [acc param]
                               (if-let [value (get token-params (keyword (:slug param)))]
@@ -249,7 +248,7 @@
            (map
             (fn [card]
               (if (-> card :visualization_settings :virtual_card)
-                (pulse/process-virtual-dashcard card params-with-values)
+                (notification.payload/process-virtual-dashcard card params-with-values)
                 card))
             dashcards))))
 

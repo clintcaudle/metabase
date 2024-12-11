@@ -3,7 +3,6 @@
    column metadata, and visualization-settings are known. These functions can be used for uniform rendering of all
    artifacts such as generated CSV or image files that need consistent formatting across the board."
   (:require
-   [cheshire.core :as json]
    [clojure.pprint :refer [cl-format]]
    [clojure.string :as str]
    [hiccup.util]
@@ -13,6 +12,7 @@
    [metabase.query-processor.streaming.common :as common]
    [metabase.types :as types]
    [metabase.util.currency :as currency]
+   [metabase.util.json :as json]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms]
    [metabase.util.ui-logic :as ui-logic]
@@ -20,7 +20,6 @@
    [potemkin.types :as p.types])
   (:import
    (java.math RoundingMode)
-   (java.net URL)
    (java.text DecimalFormat DecimalFormatSymbols)))
 
 (set! *warn-on-reflection* true)
@@ -30,15 +29,8 @@
 
 (p/import-vars
  [datetime
-  format-temporal-str
+  make-temporal-str-formatter
   temporal-string?])
-
-(def RenderedPulseCard
-  "Schema used for functions that operate on pulse card contents and their attachments"
-  [:map
-   [:attachments [:maybe [:map-of :string (ms/InstanceOfClass URL)]]]
-   [:content     [:sequential :any]]
-   [:render/text {:optional true} [:maybe :string]]])
 
 (p.types/defrecord+ NumericWrapper [^String num-str ^Number num-value]
   hiccup.util/ToString
@@ -283,7 +275,7 @@
      ;; for numbers, return a format function that has already computed the differences.
      ;; todo: do the same for temporal strings
      (and apply-formatting? (types/temporal-field? col))
-     #(datetime/format-temporal-str timezone-id % col visualization-settings)
+     (datetime/make-temporal-str-formatter timezone-id col visualization-settings)
 
      (and apply-formatting? (isa? (:semantic_type col) :type/Coordinate))
      (partial format-geographic-coordinates (:semantic_type col))
@@ -296,7 +288,7 @@
 
      (or (isa? (:semantic_type col) :type/SerializedJSON)
          (isa? ((some-fn :effective_type :base_type) col) :type/Dictionary))
-     (partial dictionary-formatter)
+     dictionary-formatter
 
      :else
      (if apply-formatting? str identity))))

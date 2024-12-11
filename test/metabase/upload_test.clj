@@ -220,7 +220,12 @@
                 "Luke Skywalker, 172, -19"
                 "Darth Vader, 202, -41.9"
                 ;; comma, but blank column
-                "Sebulba, 112,"]))))))
+                "Sebulba, 112,"]))))
+    (testing "Longer text is text"
+      (is (= {:text text-type}
+             (detect-schema-with-csv-rows
+              ["Text"
+               (apply str (repeat 30 "some_text "))]))))))
 
 (deftest ^:parallel detect-schema-dates-test
   (mt/test-drivers (mt/normal-drivers-with-feature :uploads)
@@ -758,7 +763,7 @@
       (with-mysql-local-infile-on-and-off
         (let [length-limit (driver/table-name-length-limit driver/*driver*)
               ;; Ensure the name is unique as table names can collide when using redshift
-              long-name    (->> "abc" str cycle (take (inc length-limit)) shuffle (apply str))
+              long-name    (->> "abc" cycle (take (inc length-limit)) shuffle (apply str))
               short-name   (subs long-name 0 (- length-limit (count "_yyyyMMddHHmmss")))
               table-name   (u/upper-case-en (@#'upload/unique-table-name driver/*driver* long-name))]
           (is (pos? length-limit) "driver/table-name-length-limit has been set")
@@ -1514,19 +1519,20 @@
       (testing (action-testing-str action)
         (with-uploads-enabled!
           (testing "Append should fail only if there are missing columns in the CSV file"
-            (doseq [[csv-rows error-message]
-                    {[""]
-                     (trim-lines "The CSV file is missing columns that are in the table:
+            (let [long-text (apply str (repeat 30 "some_text "))] ; more than 256 chars
+              (doseq [[csv-rows error-message]
+                      {[""]
+                       (trim-lines "The CSV file is missing columns that are in the table:
                               - id
                               - name")
 
-                    ;; Extra columns are fine, as long as none are missing.
-                     ["_mb_row_id,id,extra 1, extra 2,name"]
-                     nil
-                     ["extra 1, extra 2"]
-                     ;; TODO note that the order of the fields is reversed
-                     ;; It would be better if they were alphabetical, or matched the order in the database / file.
-                     (trim-lines "The CSV file is missing columns that are in the table:
+                       ;; Extra columns are fine, as long as none are missing.
+                       ["_mb_row_id,id,extra 1, extra 2,name"]
+                       nil
+                       ["extra 1, extra 2"]
+                       ;; TODO note that the order of the fields is reversed
+                       ;; It would be better if they were alphabetical, or matched the order in the database / file.
+                       (trim-lines "The CSV file is missing columns that are in the table:
                               - id
                               - name
 
@@ -1534,41 +1540,41 @@
                               - extra_2
                               - extra_1")
 
-                     ["_mb_row_id,id, extra 2"]
-                     (if (auto-pk-column?)
-                       (trim-lines "The CSV file is missing columns that are in the table:
+                       ["_mb_row_id,id, extra 2"]
+                       (if (auto-pk-column?)
+                         (trim-lines "The CSV file is missing columns that are in the table:
                                    - name
 
                                    There are new columns in the CSV file that are not in the table:
                                    - extra_2")
-                       (trim-lines "The CSV file is missing columns that are in the table:
+                         (trim-lines "The CSV file is missing columns that are in the table:
                                   - name
 
                                   There are new columns in the CSV file that are not in the table:
                                   - extra_2
                                   - _mb_row_id"))}]
-              (with-upload-table!
-                [table (create-upload-table!
-                        {:col->upload-type (ordered-map/ordered-map
-                                            :id int-type
-                                            :name vchar-type)
-                         :rows             [[1, "some_text"]]})]
+                (with-upload-table!
+                  [table (create-upload-table!
+                          {:col->upload-type (ordered-map/ordered-map
+                                              :id int-type
+                                              :name text-type)
+                           :rows             [[1 long-text]]})]
 
-                (let [file (csv-file-with csv-rows)]
-                  (when error-message
-                    (is (= {:message error-message
-                            :data    {:status-code 422}}
-                           (catch-ex-info (update-csv! action {:file file :table-id (:id table)}))))
-                    (testing "Check the data was not uploaded into the table"
-                      (is (= [[1 "some_text"]]
-                             (rows-for-table table)))))
+                  (let [file (csv-file-with csv-rows)]
+                    (when error-message
+                      (is (= {:message error-message
+                              :data    {:status-code 422}}
+                             (catch-ex-info (update-csv! action {:file file :table-id (:id table)}))))
+                      (testing "Check the data was not uploaded into the table"
+                        (is (= [[1 long-text]]
+                               (rows-for-table table)))))
 
-                  (when-not error-message
-                    (testing "Check the data was uploaded into the table"
-                     ;; No exception is thrown - but there were also no rows in the table to check
-                      (update-csv! action {:file file :table-id (:id table)})))
+                    (when-not error-message
+                      (testing "Check the data was uploaded into the table"
+                        ;; No exception is thrown - but there were also no rows in the table to check
+                        (update-csv! action {:file file :table-id (:id table)})))
 
-                  (io/delete-file file))))))))))
+                    (io/delete-file file)))))))))))
 
 (deftest update-common-types-test
   (mt/test-drivers (mt/normal-drivers-with-feature :uploads)
@@ -1817,11 +1823,15 @@
       (testing (action-testing-str action)
         (mt/with-premium-features #{:audit-app}
           (with-upload-table! [table (create-upload-table!)]
-            (let [csv-rows ["name" "Luke Skywalker"]
-                  file     (csv-file-with csv-rows)]
+            (let [csv-rows   ["name" "Luke Skywalker"]
+                  file       (csv-file-with csv-rows)
+                  event-type (case action
+                               ::upload/append  :upload-append
+                               ::upload/replace :upload-replace)]
+
               (update-csv! action {:file file, :table-id (:id table)})
 
-              (is (=? {:topic    :upload-append
+              (is (=? {:topic    event-type
                        :user_id  (:id (mt/fetch-user :crowberto))
                        :model    "Table"
                        :model_id (:id table)
@@ -1833,7 +1843,7 @@
                                                 :generated-columns 0
                                                 :size-mb           1.811981201171875E-5
                                                 :upload-seconds    pos?}}}
-                      (last-audit-event :upload-append)))
+                      (last-audit-event event-type)))
 
               (io/delete-file file))))))))
 
@@ -2349,9 +2359,9 @@
     (mt/test-drivers (mt/normal-drivers-with-feature :uploads)
       (with-mysql-local-infile-on-and-off
         (let [long-string (str (str/join (repeat 1000 "really_")) "long")
-              header      (str (str "a_" long-string ",")
-                               (str "b_" long-string ",")
-                               (str "b_" long-string "_with_a"))]
+              header      (str "a_" long-string ","
+                               "b_" long-string ","
+                               "b_" long-string "_with_a")]
           (with-upload-table!
             [table (create-from-csv-and-sync-with-defaults!
                     :file (csv-file-with [header
@@ -2374,8 +2384,8 @@
     (mt/test-drivers (mt/normal-drivers-with-feature :uploads)
       (with-mysql-local-infile-on-and-off
         (let [long-string  (str (str/join (repeat 1000 "really_")) "long")
-              header       (str (str "a_" long-string ",")
-                                (str "b_" long-string))
+              header       (str "a_" long-string ","
+                                "b_" long-string)
               original-row "a,b"
               appended-row "A,B"]
           (with-upload-table!
@@ -2424,9 +2434,9 @@
     (mt/test-drivers (mt/normal-drivers-with-feature :uploads)
       (with-mysql-local-infile-on-and-off
         (let [long-string  (str (str/join (repeat 1000 "really_")) "long")
-              header       (str (str "a_" long-string ",")
-                                (str "b_" long-string ",")
-                                (str "b_" long-string "_with_a"))
+              header       (str "a_" long-string ","
+                                "b_" long-string ","
+                                "b_" long-string "_with_a")
               original-row "a,b1,b2"
               appended-row "A,B1,B2"]
           (with-upload-table!

@@ -13,7 +13,7 @@ import {
   waitForLoaderToBeRemoved,
   within,
 } from "__support__/ui";
-import { createMockJwtConfig } from "embedding-sdk/test/mocks/config";
+import { createMockAuthProviderUriConfig } from "embedding-sdk/test/mocks/config";
 import type { Card } from "metabase-types/api";
 import {
   createMockCard,
@@ -70,10 +70,10 @@ const VISUALIZATION_TYPES: Record<
 };
 
 const setup = ({
-  showVisualizationSelector = false,
+  withChartTypeSelector = false,
   isValidCard = true,
   card = createMockCard(),
-  parameterValues,
+  initialSqlParameters,
 }: Partial<StaticQuestionProps> & {
   card?: Card;
   isValidCard?: boolean;
@@ -89,14 +89,14 @@ const setup = ({
   return renderWithProviders(
     <StaticQuestion
       questionId={TEST_QUESTION_ID}
-      showVisualizationSelector={showVisualizationSelector}
-      parameterValues={parameterValues}
+      withChartTypeSelector={withChartTypeSelector}
+      initialSqlParameters={initialSqlParameters}
     />,
     {
       mode: "sdk",
       sdkProviderProps: {
-        config: createMockJwtConfig({
-          jwtProviderUri: "http://TEST_URI/sso/metabase",
+        authConfig: createMockAuthProviderUriConfig({
+          authProviderUri: "http://TEST_URI/sso/metabase",
         }),
       },
     },
@@ -125,26 +125,25 @@ describe("StaticQuestion", () => {
   it("should render an error if a question isn't found", async () => {
     setup({ isValidCard: false });
     await waitForLoaderToBeRemoved();
-    expect(screen.getByText("Error")).toBeInTheDocument();
     expect(
       screen.getByText("You don't have permissions to do that."),
     ).toBeInTheDocument();
   });
 
-  it("should render a visualization selector if showVisualizationSelector is true", async () => {
-    setup({ showVisualizationSelector: true });
+  it("should render a visualization selector if withChartTypeSelector is true", async () => {
+    setup({ withChartTypeSelector: true });
     await waitForLoaderToBeRemoved();
     expect(screen.getByTestId("chart-type-settings")).toBeInTheDocument();
   });
 
-  it("should not render a visualization selector if showVisualizationSelector is false", async () => {
+  it("should not render a visualization selector if withChartTypeSelector is false", async () => {
     setup();
     await waitForLoaderToBeRemoved();
     expect(screen.queryByTestId("chart-type-settings")).not.toBeInTheDocument();
   });
 
   it("should change the visualization if a different visualization is selected", async () => {
-    setup({ showVisualizationSelector: true });
+    setup({ withChartTypeSelector: true });
     await waitForLoaderToBeRemoved();
     expect(screen.getByTestId("chart-type-settings")).toBeInTheDocument();
 
@@ -161,7 +160,7 @@ describe("StaticQuestion", () => {
 
   it("should query with the parameters in a parameterized question", async () => {
     const card = createMockCard({ parameters: [TEST_PARAM] });
-    setup({ card, parameterValues: { product_id: 1024 } });
+    setup({ card, initialSqlParameters: { product_id: 1024 } });
 
     await waitForLoaderToBeRemoved();
 

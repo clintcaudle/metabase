@@ -20,19 +20,17 @@ import { ExpressionWidgetHeader } from "metabase/query_builder/components/expres
 import { getQuestion } from "metabase/query_builder/selectors";
 import { trackColumnCompareViaShortcut } from "metabase/querying/analytics";
 import { getMetadata } from "metabase/selectors/metadata";
-import { Box, Flex, Icon } from "metabase/ui";
+import { Box, Flex, Icon, Text } from "metabase/ui";
 import * as Lib from "metabase-lib";
 
 import { QueryColumnPicker } from "../QueryColumnPicker";
 
 import {
-  ColumnPickerContainer,
   ColumnPickerHeaderContainer,
-  ColumnPickerHeaderTitle,
   ColumnPickerHeaderTitleContainer,
 } from "./AggregationPicker.styled";
 
-interface AggregationPickerProps {
+export interface AggregationPickerProps {
   className?: string;
   query: Lib.Query;
   stageIndex: number;
@@ -43,6 +41,7 @@ interface AggregationPickerProps {
   allowTemporalComparisons?: boolean;
   onClose?: () => void;
   onQueryChange: (query: Lib.Query) => void;
+  onBack?: () => void;
 }
 
 type OperatorListItem = Lib.AggregationOperatorDisplayInfo & {
@@ -79,6 +78,7 @@ export function AggregationPicker({
   allowTemporalComparisons = false,
   onClose,
   onQueryChange,
+  onBack,
 }: AggregationPickerProps) {
   const question = useSelector(getQuestion);
   const metadata = useSelector(getMetadata);
@@ -217,7 +217,8 @@ export function AggregationPicker({
 
   const handleResetOperator = useCallback(() => {
     setOperator(null);
-  }, []);
+    onBack?.();
+  }, [onBack]);
 
   const handleColumnSelect = useCallback(
     (column: Lib.ColumnMetadata) => {
@@ -329,9 +330,11 @@ export function AggregationPicker({
     const columns = Lib.aggregationOperatorColumns(operator);
     const columnGroups = Lib.groupColumns(columns);
     return (
-      <ColumnPickerContainer
+      <Box
         className={className}
+        mih="18.75rem"
         data-testid="aggregation-column-picker"
+        c="summarize"
       >
         <ColumnPickerHeader onClick={handleResetOperator}>
           {operatorInfo.displayName}
@@ -346,12 +349,12 @@ export function AggregationPicker({
           onSelect={handleColumnSelect}
           onClose={onClose}
         />
-      </ColumnPickerContainer>
+      </Box>
     );
   }
 
   return (
-    <Box className={className} c="summarize">
+    <Box className={className} c="summarize" data-testid="aggregation-picker">
       <AccordionList
         sections={sections}
         onChange={handleChange}
@@ -382,7 +385,9 @@ function ColumnPickerHeader({
     <ColumnPickerHeaderContainer>
       <ColumnPickerHeaderTitleContainer onClick={onClick} aria-label={t`Back`}>
         <Icon name="chevronleft" size={18} />
-        <ColumnPickerHeaderTitle>{children}</ColumnPickerHeaderTitle>
+        <Text fz="lg" fw="bold" lh="normal" c="inherit">
+          {children}
+        </Text>
       </ColumnPickerHeaderTitleContainer>
     </ColumnPickerHeaderContainer>
   );
@@ -419,7 +424,7 @@ function renderItemIcon(item: ListItem) {
       >
         <span aria-label={t`More info`}>
           <PopoverDefaultIcon name="empty" size={18} />
-          <PopoverHoverTarget name="info_filled" hasDescription size={18} />
+          <PopoverHoverTarget name="info_filled" size={18} />
         </span>
       </Popover>
     </Flex>
