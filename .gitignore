@@ -117,3 +117,4 @@ modules/drivers/*/.lsp/*
 /db/
 /.dev_postgres/
 !/.dev_postgres/data/tmp
+/.swc/
