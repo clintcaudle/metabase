@@ -1,6 +1,5 @@
 (ns metabase.query-processor.streaming
   (:require
-   [metabase.async.streaming-response :as streaming-response]
    [metabase.legacy-mbql.util :as mbql.u]
    [metabase.lib.schema.common :as lib.schema.common]
    [metabase.models.visualization-settings :as mb.viz]
@@ -10,13 +9,14 @@
    [metabase.query-processor.streaming.interface :as qp.si]
    [metabase.query-processor.streaming.json :as qp.json]
    [metabase.query-processor.streaming.xlsx :as qp.xlsx]
+   [metabase.server.streaming-response :as streaming-response]
    [metabase.util :as u]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu])
   (:import
    (clojure.core.async.impl.channels ManyToManyChannel)
    (java.io OutputStream)
-   (metabase.async.streaming_response StreamingResponse)
+   (metabase.server.streaming_response StreamingResponse)
    (org.eclipse.jetty.io EofException)))
 
 (set! *warn-on-reflection* true)
@@ -193,6 +193,13 @@
                    (= (:status result) :failed))
            (streaming-response/write-error! os result export-format)))))))
 
+(defn transforming-query-response
+  "Decorate the streaming rff to transform the top-level payload."
+  [rff f]
+  (fn [metadata]
+    (let [rf (rff metadata)]
+      (completing rf (comp f rf)))))
+
 (defmacro streaming-response
   "Return results of processing a query as a streaming response. This response implements the appropriate Ring/Compojure
   protocols, so return or `respond` with it directly. `export-format` is one of `:api` (for normal JSON API
@@ -200,7 +207,7 @@
 
   Typical example:
 
-    (api/defendpoint-schema GET \"/whatever\" []
+    (api.macros/defendpoint :get \"/whatever\" []
       (qp.streaming/streaming-response [rff :json]
         (qp/process-query (qp/userland-query-with-default-constraints query) rff)))
 
@@ -209,9 +216,3 @@
   {:style/indent 1}
   [[map-binding export-format filename-prefix] & body]
   `(-streaming-response ~export-format ~filename-prefix (^:once fn* [~map-binding] ~@body)))
-
-(defn export-formats
-  "Set of valid streaming response formats. Currently, `:json`, `:csv`, `:xlsx`, and `:api` (normal JSON API results
-  with extra metadata), but other types may be available if plugins are installed. (The interface is extensible.)"
-  []
-  (set (keys (methods qp.si/stream-options))))

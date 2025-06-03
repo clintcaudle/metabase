@@ -6,10 +6,7 @@ import {
   setupPropertiesEndpoints,
 } from "__support__/server-mocks";
 import { waitForLoaderToBeRemoved } from "__support__/ui";
-import {
-  MetabaseProvider,
-  defineMetabaseAuthConfig,
-} from "embedding-sdk/components/public";
+import { MetabaseProvider } from "embedding-sdk/components/public";
 import {
   createMockSettings,
   createMockTokenFeatures,
@@ -19,19 +16,10 @@ import {
 
 import { getEmbeddingSdkVersion } from "../config";
 
-// TODO: extract this common setup to a shared util
-const METABASE_INSTANCE_URL = "path:";
-const AUTH_PROVIDER_URL = "http://auth-provider/metabase-sso";
+import { createMockSdkConfig } from "./mocks/config";
+import { setupMockJwtEndpoints } from "./mocks/sso";
 
-const defaultAuthConfig = defineMetabaseAuthConfig({
-  metabaseInstanceUrl: METABASE_INSTANCE_URL,
-  authProviderUri: AUTH_PROVIDER_URL,
-  fetchRequestToken: () =>
-    Promise.resolve({
-      id: "123",
-      exp: Number.MAX_SAFE_INTEGER,
-    }),
-});
+const defaultAuthConfig = createMockSdkConfig();
 
 jest.mock("../config", () => ({
   getEmbeddingSdkVersion: jest.fn(),
@@ -45,6 +33,8 @@ const setup = async ({
   mbVersion: string;
 }) => {
   (getEmbeddingSdkVersion as jest.Mock).mockReturnValue(sdkVersion);
+
+  setupMockJwtEndpoints();
   setupPropertiesEndpoints(
     createMockSettings({
       "token-features": createMockTokenFeatures({
@@ -66,7 +56,7 @@ const setup = async ({
 let consoleWarnSpy: jest.SpyInstance;
 
 const getWarnMessages = (): string[] =>
-  consoleWarnSpy.mock.calls.map(callArguments => callArguments.join(" "));
+  consoleWarnSpy.mock.calls.map((callArguments) => callArguments.join(" "));
 
 describe("SDK auth errors", () => {
   beforeEach(() => {
@@ -85,7 +75,7 @@ describe("SDK auth errors", () => {
       await setup({ sdkVersion: "0.52.10", mbVersion: "v1.55.0" });
 
       expect(
-        getWarnMessages().filter(message =>
+        getWarnMessages().filter((message) =>
           message.includes(
             "SDK version 0.52.10 is not compatible with MB version v1.55.0, this might cause issues.",
           ),
@@ -97,7 +87,7 @@ describe("SDK auth errors", () => {
       await setup({ sdkVersion: "0.55.10", mbVersion: "v1.55.1" });
 
       expect(
-        getWarnMessages().filter(message =>
+        getWarnMessages().filter((message) =>
           message.includes("is not compatible"),
         ),
       ).toHaveLength(0);
@@ -107,7 +97,7 @@ describe("SDK auth errors", () => {
       await setup({ sdkVersion: "unknown", mbVersion: "v1.55.1" });
 
       expect(
-        getWarnMessages().filter(message =>
+        getWarnMessages().filter((message) =>
           message.includes("is not compatible"),
         ),
       ).toHaveLength(0);

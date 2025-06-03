@@ -1,16 +1,16 @@
 (ns ^:mb/driver-tests metabase.driver.druid.sync-test
   (:require
    [clojure.test :refer :all]
-   [malli.core :as mc]
    [malli.error :as me]
    [metabase.driver :as driver]
    [metabase.driver.druid.client :as druid.client]
    [metabase.driver.druid.sync :as druid.sync]
-   [metabase.models.secret :as secret]
+   [metabase.secrets.models.secret :as secret]
    [metabase.sync.sync-metadata.dbms-version :as sync-dbms-ver]
    [metabase.test :as mt]
    [metabase.timeseries-query-processor-test.util :as tqpt]
    [metabase.util :as u]
+   [metabase.util.malli.registry :as mr]
    [toucan2.core :as t2]))
 
 (deftest ^:parallel sync-test
@@ -42,7 +42,7 @@
   (t2/select-one-fn :dbms_version :model/Database :id (u/the-id db-or-id)))
 
 (defn- check-dbms-version [dbms-version]
-  (me/humanize (mc/validate sync-dbms-ver/DBMSVersion dbms-version)))
+  (me/humanize (mr/explain sync-dbms-ver/DBMSVersion dbms-version)))
 
 (deftest dbms-version-test
   (mt/test-driver :druid
@@ -74,10 +74,10 @@
                                            :auth-username    "admin"
                                            :auth-token-value "password1")]
          ;; Following ensures that auth parameters are passed to GET during version sync if present.
-          (with-redefs [secret/value->string (constantly "password1")
+          (with-redefs [secret/value-as-string (constantly "password1")
                         druid.client/GET (fn [_url & params] (vreset! get-args (apply hash-map params)) nil)]
            ;; Just fill in the params with internally modified `dbms-version`.
             (druid.sync/dbms-version db-with-auth-details)
-            (is (= true        (:auth-enabled     @get-args)))
+            (is (true?        (:auth-enabled     @get-args)))
             (is (= "admin"     (:auth-username    @get-args)))
             (is (= "password1" (:auth-token-value @get-args)))))))))

@@ -39,7 +39,7 @@ const setCurrentState = createAction(SET_CURRENT_STATE);
 export const POP_STATE = "metabase/qb/POP_STATE";
 export const popState = createThunkAction(
   POP_STATE,
-  location => async (dispatch, getState) => {
+  (location) => async (dispatch, getState) => {
     dispatch(cancelQuery());
 
     const zoomedObjectId = getZoomedObjectId(getState());
@@ -61,7 +61,6 @@ export const popState = createThunkAction(
     const card = getCard(getState());
     if (location.state && location.state.card) {
       if (!equals(card, location.state.card)) {
-        const shouldUpdateUrl = location.state.card.type === "model";
         const isEmptyQuery = !location.state.card.dataset_query.database;
 
         if (isEmptyQuery) {
@@ -71,7 +70,7 @@ export const popState = createThunkAction(
           await dispatch(initializeQB(location, {}));
         } else {
           await dispatch(
-            setCardAndRun(location.state.card, { shouldUpdateUrl }),
+            setCardAndRun(location.state.card, { shouldUpdateUrl: false }),
           );
           await dispatch(setCurrentState(location.state));
           await dispatch(resetUIControls());
@@ -79,14 +78,21 @@ export const popState = createThunkAction(
       }
     }
 
-    const { queryBuilderMode: queryBuilderModeFromURL, ...uiControls } =
-      getQueryBuilderModeFromLocation(location);
+    const {
+      queryBuilderMode: queryBuilderModeFromURL,
+      datasetEditorTab: datasetEditorTabFromURL,
+      ...uiControls
+    } = getQueryBuilderModeFromLocation(location);
 
-    if (getQueryBuilderMode(getState()) !== queryBuilderModeFromURL) {
+    if (
+      getQueryBuilderMode(getState()) !== queryBuilderModeFromURL ||
+      getDatasetEditorTab(getState()) !== datasetEditorTabFromURL
+    ) {
       await dispatch(
         setQueryBuilderMode(queryBuilderModeFromURL, {
+          datasetEditorTab: datasetEditorTabFromURL,
           ...uiControls,
-          shouldUpdateUrl: queryBuilderModeFromURL === "dataset",
+          shouldUpdateUrl: false,
         }),
       );
     }
@@ -149,13 +155,14 @@ export const updateUrl = createThunkAction(
         }
       }
 
+      const originalQuestion = getOriginalQuestion(getState());
+      const isAdHocModelOrMetric = isAdHocModelOrMetricQuestion(
+        question,
+        originalQuestion,
+      );
+
       if (dirty == null) {
-        const originalQuestion = getOriginalQuestion(getState());
         const uiControls = getUiControls(getState());
-        const isAdHocModelOrMetric = isAdHocModelOrMetricQuestion(
-          question,
-          originalQuestion,
-        );
         dirty =
           !originalQuestion ||
           (!isAdHocModelOrMetric &&
@@ -177,8 +184,9 @@ export const updateUrl = createThunkAction(
         datasetEditorTab = getDatasetEditorTab(getState());
       }
 
+      const card = isAdHocModelOrMetric ? getCard(getState()) : question.card();
       const newState = {
-        card: question._doNotCallSerializableCard(),
+        card,
         cardId: question.id(),
         objectId,
       };

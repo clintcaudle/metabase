@@ -6,7 +6,9 @@ title: Impersonation access
 
 {% include plans-blockquote.html feature="Impersonation access" %}
 
-> For now, impersonation access is only available for PostgreSQL, Redshift, and Snowflake.
+> For now, impersonation access is only available for MySQL, PostgreSQL, Redshift, Snowflake, and SQL Server. If you want to switch database _connections_ based on who is logged in, check out [Database routing](./database-routing.md).
+
+> If you're using views in PostgresSQL, the row-level security policies on views will only work on Postgres versions 15 and higher.
 
 This page covers the [View data](./data.md#view-data-permissions) permission level called Impersonation.
 
@@ -62,7 +64,7 @@ So if a person is in two groups with different permissions for the same database
 - Red group with impersonated access that limits what they can see.
 - Blue group with View data set to "Can view" and Create queries set to "Query builder and native".
 
-Red group's more permissive access would override the impersonated access.
+Blue group's more permissive access would override the impersonated access.
 
 ## Further reading
 

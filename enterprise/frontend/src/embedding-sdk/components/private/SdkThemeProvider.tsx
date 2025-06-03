@@ -3,10 +3,8 @@ import { useMemo } from "react";
 
 import type { MetabaseTheme } from "embedding-sdk";
 import { DEFAULT_FONT } from "embedding-sdk/config";
-import {
-  getEmbeddingThemeOverride,
-  setGlobalEmbeddingColors,
-} from "embedding-sdk/lib/theme";
+import { getEmbeddingThemeOverride } from "embedding-sdk/lib/theme";
+import { setGlobalEmbeddingColors } from "metabase/embedding-sdk/theme/embedding-color-palette";
 import { useSelector } from "metabase/lib/redux";
 import { getSettings } from "metabase/selectors/settings";
 import { getFont } from "metabase/styled-components/selectors";
@@ -21,14 +19,14 @@ interface Props {
 
 export const SdkThemeProvider = ({ theme, children }: Props) => {
   const font = useSelector(getFont);
-  const appColors = useSelector(state =>
+  const appColors = useSelector((state) =>
     getApplicationColors(getSettings(state)),
   );
 
   const themeOverride = useMemo(() => {
     // !! Mutate the global colors object to apply the new colors.
     // This must be done before ThemeProvider calls getThemeOverrides.
-    setGlobalEmbeddingColors(theme?.colors, appColors);
+    setGlobalEmbeddingColors(theme?.colors, appColors ?? {});
 
     return getEmbeddingThemeOverride(theme || {}, font);
   }, [appColors, theme, font]);
@@ -47,5 +45,10 @@ function GlobalSdkCssVariables() {
   // the default is needed for when the sdk can't connect to the instance and get the default from there
   const font = useSelector(getFont) ?? DEFAULT_FONT;
 
-  return <Global styles={getMetabaseSdkCssVariables(theme, font)} />;
+  const styles = useMemo(
+    () => getMetabaseSdkCssVariables(theme, font),
+    [theme, font],
+  );
+
+  return <Global styles={styles} />;
 }

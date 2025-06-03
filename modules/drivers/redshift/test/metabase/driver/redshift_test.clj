@@ -7,12 +7,13 @@
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
    [metabase.driver.sql-jdbc.sync.describe-database :as sql-jdbc.describe-database]
+   [metabase.driver.sql-jdbc.sync.interface :as sql-jdbc.sync]
    [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.plugins.jdbc-proxy :as jdbc-proxy]
-   [metabase.public-settings :as public-settings]
    [metabase.query-processor :as qp]
-   [metabase.sync :as sync]
+   [metabase.sync.core :as sync]
    [metabase.sync.util :as sync-util]
+   [metabase.system.core :as system]
    [metabase.test :as mt]
    [metabase.test.data.interface :as tx]
    [metabase.test.data.redshift :as redshift.tx]
@@ -21,8 +22,7 @@
    [metabase.util :as u]
    [metabase.util.honey-sql-2 :as h2x]
    [metabase.util.log :as log]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp])
+   [toucan2.core :as t2])
   (:import
    (metabase.plugins.jdbc_proxy ProxyDriver)))
 
@@ -86,7 +86,7 @@
                                  "LIMIT"
                                  "  2000"]]
                        (-> line
-                           (str/replace #"\Q{{site-uuid}}\E" (public-settings/site-uuid))
+                           (str/replace #"\Q{{site-uuid}}\E" (system/site-uuid))
                            (str/replace #"\Q{{schema}}\E" (redshift.tx/unique-session-schema))))]
         (is (= expected
                (sql->lines
@@ -250,7 +250,7 @@
     :redshift
     (testing "Late-binding view with with data types that cause a JDBC error can still be synced successfully (#21215)"
       (let [db-details (tx/dbdef->connection-details :redshift nil nil)]
-        (t2.with-temp/with-temp [:model/Database database {:engine :redshift, :details db-details}]
+        (mt/with-temp [:model/Database database {:engine :redshift, :details db-details}]
           (let [view-nm      (tx/db-qualified-table-name (:name database) "lbv")
                 qual-view-nm (format "\"%s\".\"%s\"" (redshift.tx/unique-session-schema) view-nm)]
             (execute!
@@ -496,3 +496,38 @@
                               :target [:variable [:template-tag "date"]]
                               :value  "2024-07-02"}]
                 :middleware {:format-rows? false}})))))))
+
+(deftest ^:parallel dont-query-pg-enum-test
+  (testing "Make sure redshift doesn't try to grab postgres enums. (#56992)"
+    (mt/test-driver
+      :redshift
+      (is (= 1
+             (->> (mt/native-query {:query "SELECT usename FROM pg_user limit 1;"})
+                  qp/process-query
+                  mt/rows
+                  count))))))
+
+(deftest database-type->base-type-external-table-types-test
+  (doseq [[database-type exp-base-type] [["tinyint" :type/Integer]
+                                         ["smallint" :type/Integer]
+                                         ["mediumint" :type/Integer]
+                                         [:mediumint :type/Integer]
+                                         [:MEDIUMINT :type/Integer]
+                                         ["tinytext" :type/Text]
+                                         ["mediumtext" :type/Text]
+                                         ["longtext" :type/Text]
+                                         ["varchar(100)" :type/Text]
+                                         ["varchar(100)" :type/Text]
+                                         ["int(11) unsigned" :type/Integer]
+                                         ["int(10)" :type/Integer]
+                                         ["tinyint(1)" :type/Integer]
+                                         ["BIGINTEGER" :type/BigInteger]
+                                         ["double(10,20)" :type/Float]
+                                         ["float(10)" :type/Float]
+                                         ["datetime" :type/DateTime]
+                                         ["year" :type/Integer]
+                                         ;; nonsense
+                                         ["fadlsjfldskajfl" nil]]]
+    (testing (format "database-type %s" (pr-str database-type))
+      (is (= exp-base-type
+             (sql-jdbc.sync/database-type->base-type :redshift database-type))))))

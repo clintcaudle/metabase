@@ -13,7 +13,7 @@ Questions in Metabase are queries, their results, and their visualization. Quest
 
 ## Creating a new question
 
-You can create a new question from scratch, or build off of an existing question. To create a question from scratch, you can click on **+ New** and select how you want to query your data: either with the graphical query builder, or the SQL/native editor.
+You can create a new question from scratch, or build off of an existing question. To create a question from scratch, you can click on **+ New** and select how you want to query your data: either with the graphical query builder, or the SQL/native editor:
 
 ### Query builder
 
@@ -93,7 +93,7 @@ Click the **bookmark** icon to pin a question to your Metabase sidebar. See [Boo
 
 ## Turning a question into a model
 
-You can turn a question into a model to let others know that the results make a good starting point for new questions. See [models](../data-modeling/models.md).
+You can turn a question saved to a collection into a model to let others know that the results make a good starting point for new questions. (You can't turn a question saved to a _dashboard_ into a model; you'll first need to move the question to a collection). See [models](../data-modeling/models.md).
 
 ## Caching question results
 

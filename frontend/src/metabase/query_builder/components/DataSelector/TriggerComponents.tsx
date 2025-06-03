@@ -66,7 +66,7 @@ export function FieldTrigger({
     return <Text>{t`Select...`}</Text>;
   }
   const hasMultipleSchemas =
-    _.uniq(database?.tables ?? [], t => t.schema_name).length > 1;
+    _.uniq(database?.tables ?? [], (t) => t.schema_name).length > 1;
 
   return (
     <div>
@@ -89,7 +89,7 @@ export function DatabaseTrigger({ database }: { database: Database }) {
     </span>
   ) : (
     <span
-      className={cx(CS.textMedium, CS.noDecoration)}
+      className={cx(CS.textMedium, CS.noDecoration, CS.textNoWrap)}
     >{t`Select a database`}</span>
   );
 }

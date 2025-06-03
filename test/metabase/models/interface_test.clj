@@ -9,8 +9,7 @@
    [metabase.util.encryption :as encryption]
    [metabase.util.encryption-test :as encryption-test]
    [metabase.util.json :as json]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp])
+   [toucan2.core :as t2])
   (:import (com.fasterxml.jackson.core JsonParseException)))
 
 ;; let's make sure the `transform-metabase-query`/`transform-metric-segment-definition`/`transform-parameters-list`
@@ -40,26 +39,6 @@
   (is (= {}
          ((:out mi/transform-metabase-query) "{}"))))
 
-(deftest ^:parallel normalize-metric-segment-definition-test
-  (testing "Legacy Metric/Segment definitions should get normalized"
-    (is (= {:filter [:= [:field 1 nil] [:field 2 {:temporal-unit :month}]]}
-           ((:out mi/transform-legacy-metric-segment-definition)
-            (json/encode
-             {:filter [:= [:field-id 1] [:datetime-field [:field-id 2] :month]]}))))))
-
-(deftest ^:parallel dont-explode-on-way-out-from-db-test
-  (testing "`metric-segment-definition`s should avoid explosions coming out of the DB..."
-    (is (= nil
-           ((:out mi/transform-legacy-metric-segment-definition)
-            (json/encode
-             {:filter 1000}))))
-
-    (testing "...but should still throw them coming in"
-      (is (thrown?
-           Exception
-           ((:in mi/transform-legacy-metric-segment-definition)
-            {:filter 1000}))))))
-
 (deftest handle-errors-gracefully-test
   (testing (str "Cheat and override the `normalization-tokens` function to always throw an Exception so we can make "
                 "sure the Toucan type fn handles the error gracefully")
@@ -79,7 +58,7 @@
 
 (deftest timestamped-property-test
   (testing "Make sure updated_at gets updated for timestamped models"
-    (t2.with-temp/with-temp [:model/Table table {:updated_at #t "2023-02-02T01:00:00"}]
+    (mt/with-temp [:model/Table table {:updated_at #t "2023-02-02T01:00:00"}]
       (let [updated-at (:updated_at table)
             new-name   (u/qualified-name ::a-new-name)]
         (is (= 1
@@ -91,7 +70,7 @@
 
 (deftest timestamped-property-do-not-stomp-on-explicit-values-test
   (testing "The :timestamped property should not stomp on :created_at/:updated_at if they are explicitly specified"
-    (t2.with-temp/with-temp [:model/Field field]
+    (mt/with-temp [:model/Field field]
       (testing "Nothing specified: use now() for both"
         (is (=? {:created_at java.time.temporal.Temporal
                  :updated_at java.time.temporal.Temporal}
@@ -99,15 +78,31 @@
     (let [t                  #t "2022-10-13T19:21:00Z"
           expected-timestamp (t/offset-date-time "2022-10-13T19:21:00Z")]
       (testing "Explicitly specify :created_at"
-        (t2.with-temp/with-temp [:model/Field field {:created_at t}]
+        (mt/with-temp [:model/Field field {:created_at t}]
           (is (=? {:created_at expected-timestamp
                    :updated_at java.time.temporal.Temporal}
                   field))))
       (testing "Explicitly specify :updated_at"
-        (t2.with-temp/with-temp [:model/Field field {:updated_at t}]
+        (mt/with-temp [:model/Field field {:updated_at t}]
           (is (=? {:created_at java.time.temporal.Temporal
                    :updated_at expected-timestamp}
                   field)))))))
+
+(defmethod mi/non-timestamped-fields :test-model/updated-at-tester [_]
+  #{:non_timestamped :other})
+
+(deftest timestamped-property-skips-non-timestamped-fields-test
+  (testing "Does not add a timestamp if it only includes non-timestamped fields"
+    (let [instance (-> (t2/instance :test-model/updated-at-tester {:non_timestamped nil})
+                       (assoc :non_timestamped 1))]
+      (is (= {:non_timestamped 1}
+             (#'mi/add-updated-at-timestamp instance)))))
+  (testing "Adds a timestamp if it includes other fields"
+    (let [instance (-> (t2/instance :test-model/updated-at-tester {:non_timestamped nil :included nil})
+                       (assoc :non_timestamped 1)
+                       (assoc :included 2))]
+      (is (= {:non_timestamped 1 :included 2 :updated_at (mi/now)}
+             (#'mi/add-updated-at-timestamp instance))))))
 
 (deftest ^:parallel upgrade-to-v2-viz-settings-test
   (let [migrate #(select-keys (#'mi/migrate-viz-settings %)
@@ -215,3 +210,17 @@
             :series_settings {:expression {:line.interpolate "step-after", :line.style "dotted"}}
             :graph.dimensions ["CREATED_AT"]}
            (mi/normalize-visualization-settings viz-settings)))))
+
+(deftest json-in-with-eliding
+  (is (= "{}" (#'mi/json-in-with-eliding {})))
+  (is (= (json/encode {:a "short"}) (#'mi/json-in-with-eliding {:a "short"})))
+  (is (= (json/encode {:a (str (apply str (repeat 247 "b")) "...")}) (#'mi/json-in-with-eliding {:a (apply str (repeat 500 "b"))})))
+  (is (= (json/encode {"ex-data" {"toucan2/context-trace" [["execute SQL with class com.mchange.v2.c3p0.impl.NewProxyConnection",
+                                                            {"toucan2.jdbc.query/sql-args" (str (apply str (repeat 247 "b")) "...")}]]}})
+         (#'mi/json-in-with-eliding {"ex-data" {"toucan2/context-trace" [["execute SQL with class com.mchange.v2.c3p0.impl.NewProxyConnection",
+                                                                          {"toucan2.jdbc.query/sql-args" (apply str (repeat 500 "b"))}]]}})))
+
+  (is (= (json/encode {:a (repeat 50 "x")}) (#'mi/json-in-with-eliding {:a (repeat 500 "x")})))
+
+  (testing "A passed string is not elided"
+    (is (= (apply str (repeat 1000 "a")) (#'mi/json-in-with-eliding (apply str (repeat 1000 "a")))))))

@@ -37,7 +37,7 @@
   [driver database-or-table-or-field-name]
   (let [name' ((get-method ddl.i/format-name :sql-jdbc) driver (str/replace database-or-table-or-field-name #"-" "_"))]
     (if (= name' "test_data")
-      "v2_test_data"
+      "v3_test_data"
       name')))
 
 (defmethod tx/dbdef->connection-details :athena
@@ -46,6 +46,7 @@
    :access_key                    (tx/db-test-env-var-or-throw :athena :access-key)
    :secret_key                    (tx/db-test-env-var-or-throw :athena :secret-key)
    :s3_staging_dir                (tx/db-test-env-var-or-throw :athena :s3-staging-dir)
+   :catalog                       "AwsDataCatalog"
    :workgroup                     "primary"
    ;; HACK -- this is here so the Athena driver sync code only syncs the database in question -- see documentation
    ;; for [[metabase.driver.athena/fast-active-tables]] for more information.
@@ -220,7 +221,7 @@
    (server-connection-spec)
    nil
    (fn [^java.sql.Connection conn]
-     (let [dbs (into #{} (map :database_name) (jdbc/query {:connection conn} ["SHOW DATABASES;"]))]
+     (let [dbs (into #{} (map :_col0) (jdbc/query {:connection conn} ["SHOW DATABASES;"]))]
        (log/infof "The following Athena databases have already been created: %s" (pr-str (sort dbs)))
        dbs))))
 

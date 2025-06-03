@@ -1,3 +1,4 @@
+import { useHotkeys } from "@mantine/hooks";
 import { useMemo, useState } from "react";
 import { useMount } from "react-use";
 import { t } from "ttag";
@@ -6,6 +7,7 @@ import { isInstanceAnalyticsCollection } from "metabase/collections/utils";
 import {
   Sidesheet,
   SidesheetCard,
+  SidesheetCardTitle,
   SidesheetTabPanelContainer,
 } from "metabase/common/components/Sidesheet";
 import { InsightsTabOrLink } from "metabase/common/components/Sidesheet/components/InsightsTabOrLink";
@@ -19,10 +21,12 @@ import * as Urls from "metabase/lib/urls";
 import { PLUGIN_MODERATION } from "metabase/plugins";
 import { onCloseQuestionInfo } from "metabase/query_builder/actions";
 import { QuestionActivityTimeline } from "metabase/query_builder/components/QuestionActivityTimeline";
-import { Box, Stack, Tabs, Title } from "metabase/ui";
+import { Flex, Icon, Stack, Tabs } from "metabase/ui";
 import type Question from "metabase-lib/v1/Question";
 
 import { QuestionDetails } from "./QuestionDetails";
+import { QuestionRelationshipsTab } from "./components/QuestionRelationshipsTab";
+import { SidesheetCardWithFields } from "./components/SidesheetCardWithFields";
 
 interface QuestionInfoSidebarProps {
   question: Question;
@@ -50,6 +54,8 @@ export const QuestionInfoSidebar = ({
   const dispatch = useDispatch();
   const handleClose = () => dispatch(onCloseQuestionInfo());
 
+  useHotkeys([["]", handleClose]]);
+
   const [isOpen, setIsOpen] = useState(false);
 
   useMount(() => {
@@ -75,17 +81,24 @@ export const QuestionInfoSidebar = ({
         <Tabs.List mx="xl">
           <Tabs.Tab value="overview">{t`Overview`}</Tabs.Tab>
           {!isIAQuestion && <Tabs.Tab value="history">{t`History`}</Tabs.Tab>}
+          <Tabs.Tab value="relationships">{t`Relationships`}</Tabs.Tab>
+          {question.type() === "model" && !question.isArchived() && (
+            <Link to={Urls.modelDetail(question.card())}>
+              <Flex gap="xs" className={SidesheetStyles.TabSibling}>
+                <Icon name="external" />
+                {t`Actions`}
+              </Flex>
+            </Link>
+          )}
           <InsightsTabOrLink question={question} />
         </Tabs.List>
 
         <SidesheetTabPanelContainer>
           <Tabs.Panel value="overview">
-            <Stack spacing="lg">
+            <Stack gap="lg">
               <SidesheetCard pb="md">
-                <Stack spacing="sm">
-                  <Title lh={1} size="sm" color="text-light" pb={0}>
-                    {t`Description`}
-                  </Title>
+                <Stack gap="sm">
+                  <SidesheetCardTitle>{t`Description`}</SidesheetCardTitle>
                   <SidesheetEditableDescription
                     description={description}
                     onChange={handleSave}
@@ -94,22 +107,17 @@ export const QuestionInfoSidebar = ({
                   <PLUGIN_MODERATION.ModerationReviewTextForQuestion
                     question={question}
                   />
-                  {question.type() === "model" && !question.isArchived() && (
-                    <Box
-                      component={Link}
-                      variant="brand"
-                      to={Urls.modelDetail(question.card())}
-                      pt="xs"
-                      pb="sm"
-                    >{t`See more about this model`}</Box>
-                  )}
                 </Stack>
               </SidesheetCard>
               <SidesheetCard>
                 <QuestionDetails question={question} />
               </SidesheetCard>
+              <SidesheetCardWithFields question={question} />
               <EntityIdCard entityId={question._card.entity_id} />
             </Stack>
+          </Tabs.Panel>
+          <Tabs.Panel value="relationships">
+            <QuestionRelationshipsTab question={question} />
           </Tabs.Panel>
           <Tabs.Panel value="history">
             <SidesheetCard>

@@ -5,8 +5,9 @@ import type {
   MoveDestination,
   OnMoveWithSourceAndDestination,
 } from "metabase/collections/types";
+import type { CollectionPickerItem } from "metabase/common/components/CollectionPicker";
 import { useCollectionQuery } from "metabase/common/hooks";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
 import { MoveModal } from "metabase/containers/MoveModal";
 import Collections from "metabase/entities/collections";
 import { useDispatch } from "metabase/lib/redux";
@@ -32,6 +33,9 @@ const MoveCollectionModalView = ({
     [collection, onMove, onClose],
   );
 
+  const recentsAndSearchFilter = (item: CollectionPickerItem) =>
+    item.model === "collection" && item.id === collection.parent_id;
+
   return (
     <MoveModal
       title={t`Move "${collection.name}"?`}
@@ -39,6 +43,7 @@ const MoveCollectionModalView = ({
       movingCollectionId={collection.id}
       onMove={handleMove}
       onClose={onClose}
+      recentAndSearchFilter={recentsAndSearchFilter}
     />
   );
 };

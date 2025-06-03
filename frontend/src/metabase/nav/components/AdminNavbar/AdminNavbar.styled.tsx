@@ -1,3 +1,4 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
 import Link from "metabase/core/components/Link";
@@ -26,6 +27,7 @@ export const AdminNavbarItems = styled.ul`
   display: flex;
   flex-grow: 0;
   min-width: 0;
+  gap: 4px;
 `;
 
 export const MobileHide = styled.div`

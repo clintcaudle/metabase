@@ -2,8 +2,11 @@ import { match } from "ts-pattern";
 
 import { hiddenLabels, nonUserFacingLabels } from "./constants";
 import { getMilestoneIssues, hasBeenReleased } from "./github";
+import { issueNumberRegex } from "./linked-issues";
+import { githubReleaseTemplate, websiteChangelogTemplate } from "./release-notes-templates";
 import type { Issue, ReleaseProps } from "./types";
 import {
+  getDotXVersion,
   getEnterpriseVersion,
   getGenericVersion,
   getOSSVersion,
@@ -12,45 +15,6 @@ import {
   isValidVersionString,
 } from "./version-helpers";
 
-const releaseTemplate = `## Upgrading
-
-> Before you upgrade, back up your Metabase application database!
-
-Check out our [upgrading instructions](https://metabase.com/docs/latest/operations-guide/upgrading-metabase).
-
-[Get the most out of Metabase](https://www.metabase.com/pricing?utm_source=github&utm_medium=release-notes&utm_campaign=plan-comparison). Learn more about advanced features, managed cloud, and first-class support.
-
-## Metabase Open Source
-
-Docker image: {{oss-docker-tag}}
-JAR download: {{oss-download-url}}
-
-## Metabase Enterprise
-
-Docker image: {{ee-docker-tag}}
-JAR download: {{ee-download-url}}
-
-## Changelog
-
-### Enhancements
-
-{{enhancements}}
-
-### Bug fixes
-
-{{bug-fixes}}
-
-### Already Fixed
-
-Issues confirmed to have been fixed in a previous release.
-
-{{already-fixed}}
-
-### Under the Hood
-
-{{under-the-hood}}
-
-`;
 
 const hasLabel = (issue: Issue, label: string) => {
   if (typeof issue.labels === "string") {
@@ -79,17 +43,21 @@ const formatIssue = (issue: Issue) =>
   `- ${issue.title.trim()} (#${issue.number})`;
 
 export const getDockerTag = (version: string) => {
+  const dotXVersion = getDotXVersion(version);
+
   const imagePath = `${process.env.DOCKERHUB_OWNER}/${
     process.env.DOCKERHUB_REPO
   }${isEnterpriseVersion(version) ? "-enterprise" : ""}`;
 
-  return `[\`${imagePath}:${version}\`](https://hub.docker.com/r/${imagePath}/tags)`;
+  return `[\`${imagePath}:${dotXVersion}\`](https://hub.docker.com/r/${imagePath}/tags)`;
 };
 
 export const getDownloadUrl = (version: string) => {
+  const dotXVersion = getDotXVersion(version);
+
   return `https://${process.env.AWS_S3_DOWNLOADS_BUCKET}/${
     isEnterpriseVersion(version) ? "enterprise/" : ""
-  }${version}/metabase.jar`;
+  }${dotXVersion}/metabase.jar`;
 };
 
 export const getReleaseTitle = (version: string) => {
@@ -213,16 +181,19 @@ export const categorizeIssues = (issues: Issue[]) => {
 export const generateReleaseNotes = ({
   version,
   issues,
+  template,
 }: {
   version: string;
   issues: Issue[];
+  template: string;
 }) => {
   const issuesByType = categorizeIssues(issues);
 
   const ossVersion = getOSSVersion(version);
   const eeVersion = getEnterpriseVersion(version);
 
-  return releaseTemplate
+  return template
+    .replace("{{version}}", getGenericVersion(version))
     .replace(
       "{{enhancements}}",
       formatIssues(issuesByType.enhancements),
@@ -249,25 +220,52 @@ export async function publishRelease({
   version,
   owner,
   repo,
+  issues,
   github,
-}: ReleaseProps & { oss_checksum: string, ee_checksum: string }) {
+}: ReleaseProps & { oss_checksum: string, ee_checksum: string, issues: Issue[] }) {
   if (!isValidVersionString(version)) {
     throw new Error(`Invalid version string: ${version}`);
   }
-
-  const issues = await getMilestoneIssues({ version, github, owner, repo });
-
   const payload = {
     owner,
     repo,
     tag_name: getOSSVersion(version),
     name: getReleaseTitle(version),
-    body: generateReleaseNotes({ version, issues }),
+    body: generateReleaseNotes({
+      version,
+      issues,
+      template: githubReleaseTemplate,
+    }),
     draft: true,
     prerelease: isPreReleaseVersion(version), // this api arg has never worked, but maybe it will someday! 🤞
   };
 
   return github.rest.repos.createRelease(payload);
+}
+
+const issueLink = (issueNumber: string) => `https://github.com/metabase/metabase/issues/${issueNumber}`;
+
+export function markdownIssueLinks(text: string) {
+  return text?.replaceAll(issueNumberRegex, (_, issueNumber) => {
+    return `([#${issueNumber}](${issueLink(issueNumber)}))`;
+  }) ?? text ?? '';
+}
+
+export function getWebsiteChangelog({
+  version,
+  issues,
+}: { version: string; issues: Issue[]; }) {
+  if (!isValidVersionString(version)) {
+    throw new Error(`Invalid version string: ${version}`);
+  }
+
+  const notes = generateReleaseNotes({
+    version,
+    issues,
+    template: websiteChangelogTemplate,
+  });
+
+  return markdownIssueLinks(notes);
 }
 
 export async function getChangelog({
@@ -295,6 +293,7 @@ export async function getChangelog({
   });
 
   return generateReleaseNotes({
+    template: githubReleaseTemplate,
     version,
     issues,
   });

@@ -49,12 +49,12 @@ describe("metabase/parameters/utils/formatting", () => {
       {
         type: "date/range",
         value: "2018-01-01T12:30:00~2018-01-10",
-        expected: "January 1, 2018 12:30 PM - January 10, 2018",
+        expected: "January 1, 2018 12:30 PM - January 10, 2018 12:00 AM",
       },
       {
         type: "date/range",
         value: "2018-01-01~2018-01-10T08:15:00",
-        expected: "January 1, 2018 - January 10, 2018 08:15 AM",
+        expected: "January 1, 2018 12:00 AM - January 10, 2018 08:15 AM",
       },
       {
         type: "date/range",
@@ -79,7 +79,7 @@ describe("metabase/parameters/utils/formatting", () => {
       {
         type: "date/relative",
         value: "past30days",
-        expected: "Previous 30 Days",
+        expected: "Previous 30 days",
       },
       {
         type: "date/month-year",
@@ -89,7 +89,7 @@ describe("metabase/parameters/utils/formatting", () => {
       {
         type: "date/month-year",
         value: "thisweek",
-        expected: "This Week",
+        expected: "This week",
       },
       {
         type: "date/month-year",
@@ -99,7 +99,7 @@ describe("metabase/parameters/utils/formatting", () => {
       {
         type: "date/month-year",
         value: "past1weeks",
-        expected: "Previous Week",
+        expected: "Previous week",
       },
       {
         type: "date/month-year",

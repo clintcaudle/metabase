@@ -2,8 +2,8 @@
   "This namespace contains functions for work with mongo specific database and database details."
   (:require
    [metabase.lib.metadata.protocols :as lib.metadata.protocols]
-   [metabase.models.secret :as secret]
    [metabase.query-processor.store :as qp.store]
+   [metabase.secrets.core :as secret]
    [metabase.util.i18n :refer [tru]])
   (:import
    (com.mongodb ConnectionString)))
@@ -27,11 +27,8 @@
 (defn- update-ssl-db-details
   [db-details]
   (-> db-details
-      (assoc :client-ssl-key (secret/get-secret-string db-details "client-ssl-key"))
-      (dissoc :client-ssl-key-creator-id
-              :client-ssl-key-created-at
-              :client-ssl-key-id
-              :client-ssl-key-source)))
+      (secret/clean-secret-properties-from-details :mongo)
+      (assoc :client-ssl-key (secret/value-as-string :mongo db-details "client-ssl-key"))))
 
 (defn details-normalized
   "Gets db-details for `database`. Details are then validated and ssl related keys are updated."

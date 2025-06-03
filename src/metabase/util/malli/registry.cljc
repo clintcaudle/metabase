@@ -1,13 +1,30 @@
 (ns metabase.util.malli.registry
   (:refer-clojure :exclude [declare def])
   (:require
-   #?@(:clj ([malli.experimental.time :as malli.time]))
+   #?@(:clj ([malli.experimental.time :as malli.time]
+             [net.cgrand.macrovich :as macros]))
    [malli.core :as mc]
    [malli.registry]
    [malli.util :as mut])
   #?(:cljs (:require-macros [metabase.util.malli.registry])))
 
 (defonce ^:private cache (atom {}))
+
+(defn- schema-cache-key
+  "Make schemas that aren't `=` to identical ones e.g.
+
+    [:re #\"\\d{4}\"]
+
+  work correctly as cache keys instead of creating new entries every time the code is evaluated."
+  [x]
+  (if (and (vector? x)
+           (= (first x) :re))
+    (into (empty x)
+          (map (fn [child]
+                 (cond-> child
+                   (instance? #?(:clj java.util.regex.Pattern :cljs js/RegExp) child) str)))
+          x)
+    x))
 
 (defn cached
   "Get a cached value for `k` + `schema`. Cache is cleared whenever a schema is (re)defined
@@ -17,16 +34,25 @@
   You generally shouldn't use this outside of this namespace unless you have a really good reason to do so! Make sure
   you used namespaced keys if you are using it elsewhere."
   [k schema value-thunk]
-  (or (get (get @cache k) schema) ; get-in is terribly inefficient
-      (let [v (value-thunk)]
-        (swap! cache assoc-in [k schema] v)
-        v)))
+  (let [schema-key (schema-cache-key schema)]
+    (or (get (get @cache k) schema-key)     ; get-in is terribly inefficient
+        (let [v (value-thunk)]
+          (swap! cache assoc-in [k schema-key] v)
+          v))))
 
 (defn validator
   "Fetch a cached [[mc/validator]] for `schema`, creating one if needed. The cache is flushed whenever the registry
   changes."
   [schema]
-  (cached :validator schema #(mc/validator schema)))
+  (letfn [(make-validator []
+            (try
+              #_{:clj-kondo/ignore [:discouraged-var]}
+              (mc/validator schema)
+              (catch #?(:clj Throwable :cljs :default) e
+                (throw (ex-info (str "Error making validator for " (pr-str schema) ":" (ex-message e))
+                                {:schema schema}
+                                e)))))]
+    (cached :validator schema make-validator)))
 
 (defn validate
   "[[mc/validate]], but uses a cached validator from [[validator]]."
@@ -38,14 +64,19 @@
   changes."
   [schema]
   (letfn [(make-explainer []
-            #_{:clj-kondo/ignore [:discouraged-var]}
-            (let [validator* (mc/validator schema)
-                  explainer* (mc/explainer schema)]
-              ;; for valid values, it's significantly faster to just call the validator. Let's optimize for the 99.9%
-              ;; of calls whose values are valid.
-              (fn schema-explainer [value]
-                (when-not (validator* value)
-                  (explainer* value)))))]
+            (try
+              #_{:clj-kondo/ignore [:discouraged-var]}
+              (let [validator* (mc/validator schema)
+                    explainer* (mc/explainer schema)]
+                ;; for valid values, it's significantly faster to just call the validator. Let's optimize for the 99.9%
+                ;; of calls whose values are valid.
+                (fn schema-explainer [value]
+                  (when-not (validator* value)
+                    (explainer* value))))
+              (catch #?(:clj Throwable :cljs :default) e
+                (throw (ex-info (str "Error making explainer for " (pr-str schema) ":" (ex-message e))
+                                {:schema schema}
+                                e)))))]
     (cached :explainer schema make-explainer)))
 
 (defn explain
@@ -69,6 +100,11 @@
   (reset! cache {})
   nil)
 
+(defn registered-schema
+  "Get the schema registered for `k`, if any."
+  [k]
+  (get @registry* k))
+
 (defn schema
   "Get the Malli schema for `type` from the registry."
   [type]
@@ -84,7 +120,7 @@
     (and (vector? schema)
          (map? (second schema)))
     (let [[tag opts & args] schema]
-      (into [tag (assoc opts :description docstring)] args))
+      (into [tag (merge {:description docstring} opts)] args))
 
     (vector? schema)
     (let [[tag & args] schema]
@@ -99,8 +135,12 @@
      ([type schema]
       `(register! ~type ~schema))
      ([type docstring schema]
+      (assert (string? docstring))
       `(metabase.util.malli.registry/def ~type
-         (-with-doc ~schema ~docstring)))))
+         ~(macros/case
+           :clj `(-with-doc ~schema ~docstring)
+           ;; Ignore docstring for CLJS.
+           :cljs schema)))))
 
 (defn- deref-all-preserving-properties
   "Like [[mc/deref-all]] but preserves properties attached to a `:ref` by wrapping the result in `:schema`."

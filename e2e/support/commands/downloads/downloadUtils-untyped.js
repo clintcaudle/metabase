@@ -1,8 +1,7 @@
 const fs = require("fs");
-
 const path = require("path");
 
-const removeDirectory = path => {
+const removeDirectory = (path) => {
   try {
     if (fs.existsSync(path)) {
       fs.rmdirSync(path, { maxRetries: 10, recursive: true });
@@ -18,7 +17,7 @@ const removeDirectory = path => {
 const deleteDownloadsFolder = () =>
   cy.task("removeDirectory", Cypress.config("downloadsFolder"));
 
-const isFileExist = path => fs.existsSync(path);
+const isFileExist = (path) => fs.existsSync(path);
 
 const findFiles = ({ path, fileName }) => {
   if (!fs.existsSync(path)) {
@@ -27,10 +26,10 @@ const findFiles = ({ path, fileName }) => {
 
   return fs
     .readdirSync(path)
-    .filter(file => file.includes(fileName) && isDownloaded(file));
+    .filter((file) => file.includes(fileName) && isDownloaded(file));
 };
 
-const isDownloaded = file => !file.endsWith(".crdownload");
+const isDownloaded = (file) => !file.endsWith(".crdownload");
 
 // slightly modified version of cy-verify-download
 // https://github.com/elaichenkov/cy-verify-downloads/blob/master/src/index.js
@@ -53,7 +52,7 @@ const verifyDownload = (fileName, options) => {
 
   let retries = Math.floor(timeout / interval);
 
-  const checkFile = result => {
+  const checkFile = (result) => {
     if (result) {
       return result;
     }
@@ -75,19 +74,21 @@ const verifyDownload = (fileName, options) => {
     if (contains) {
       result = cy
         .task("findFiles", { path: downloadsFolder, fileName })
-        .then(files => {
-          if (files !== null) {
-            if (files.length > 1) {
-              cy.log(
-                `**WARNING!** More than one file found for the **'${fileName}'** pattern: [${files}] - the first one **[${files[0]}]** will be used`,
-              );
-            }
+        .then((files) => {
+          if (!files || files.length === 0) {
+            return false;
+          }
 
-            return cy.task(
-              "isFileExist",
-              path.join(downloadsFolder, files[0] ?? ""),
+          if (files.length > 1) {
+            cy.log(
+              `**WARNING!** More than one file found for the **'${fileName}'** pattern: [${files}] - the first one **[${files[0]}]** will be used`,
             );
           }
+
+          return cy.task(
+            "isFileExist",
+            path.join(downloadsFolder, files[0] ?? ""),
+          );
         });
     } else {
       result = cy.task("isFileExist", downloadFileName);
@@ -96,7 +97,7 @@ const verifyDownload = (fileName, options) => {
     return result.then(checkFile);
   };
 
-  return resolveValue().then(isExist => {
+  return resolveValue().then((isExist) => {
     expect(isExist, `The ${fileName} file has been downloaded successfully`).to
       .be.true;
   });

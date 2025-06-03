@@ -5,9 +5,9 @@
    [clojure.test :refer :all]
    [java-time.api :as t]
    [metabase.actions.error :as actions.error]
-   [metabase.config :as config]
-   [metabase.core :as mbc]
-   [metabase.db :as mdb]
+   [metabase.app-db.core :as mdb]
+   [metabase.config.core :as config]
+   [metabase.core.core :as mbc]
    [metabase.driver :as driver]
    [metabase.driver.h2 :as h2]
    [metabase.driver.h2.actions :as h2.actions]
@@ -19,8 +19,7 @@
    [metabase.test :as mt]
    [metabase.util :as u]
    [metabase.util.honey-sql-2 :as h2x]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [toucan2.core :as t2]))
 
 (set! *warn-on-reflection* true)
 
@@ -113,7 +112,7 @@
 
 (deftest disallow-admin-accounts-test
   (testing "Check that we're not allowed to run SQL against an H2 database with a non-admin account"
-    (t2.with-temp/with-temp [:model/Database db {:name "Fake-H2-DB", :engine "h2", :details {:db "mem:fake-h2-db"}}]
+    (mt/with-temp [:model/Database db {:name "Fake-H2-DB", :engine "h2", :details {:db "mem:fake-h2-db"}}]
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"Running SQL queries against H2 databases using the default \(admin\) database user is forbidden\.$"
@@ -209,8 +208,19 @@
                       "ORDER BY ATTEMPTS.DATE ASC")
                  (some-> (qp.compile/compile query) :query pretty-sql))))))))
 
+(deftest ^:parallel do-not-cast-to-date-binned-by-week-to-datetime
+  (mt/test-driver :h2
+    (testing "Don't cast date binned by week"
+      (mt/dataset attempted-murders
+        (let [query (mt/mbql-query attempts
+                      {:aggregation [[:count]]
+                       :breakout    [!week.date]})
+              compiled (some-> (qp.compile/compile query) :query pretty-sql)]
+          (is (not (re-find #"CAST\([^)]+\s+AS\s+datetime\)" compiled))))))))
+
 (deftest ^:parallel check-action-commands-test
   (mt/test-driver :h2
+    #_{:clj-kondo/ignore [:equals-true]}
     (are [query] (= true (#'h2/every-command-allowed-for-actions? (#'h2/classify-query (u/the-id (mt/db)) query)))
       "select 1"
       "update venues set name = 'bill'"
@@ -262,10 +272,10 @@
 (deftest ^:parallel check-read-only-test
   (testing "read only statements should pass"
     (are [query] (nil?
-                  (#'h2/check-read-only-statements
-                   {:database (u/the-id (mt/db))
-                    :engine :h2
-                    :native {:query query}}))
+                  (mt/with-metadata-provider (mt/id)
+                    (#'h2/check-read-only-statements
+                     {:engine :h2
+                      :native {:query query}})))
       "select * from orders"
       "select 1; select 2;"
       "explain select * from orders"
@@ -274,16 +284,18 @@
       "table orders"
       "call 1 + 1"
       ;; Note this passes the check, but will fail on execution
-      "update venues set name = 'bill'; some query that can't be parsed;"))
+      "update venues set name = 'bill'; some query that can't be parsed;")))
+
+(deftest ^:parallel check-read-only-test-2
   (testing "not read only statements should fail"
     (are [query] (thrown?
                   clojure.lang.ExceptionInfo
                   #"Only SELECT statements are allowed in a native query."
-                  (#'h2/check-read-only-statements
-                   {:database (u/the-id (mt/db))
-                    :engine :h2
-                    :native {:query query}}))
-      "update venues set name = 'bill'"
+                  (mt/with-metadata-provider (mt/id)
+                    (#'h2/check-read-only-statements
+                     {:engine :h2
+                      :native {:query query}}))
+                  "update venues set name = 'bill'")
       "insert into venues (name) values ('bill')"
       "delete venues"
       "select 1; update venues set name = 'bill'; delete venues;"
@@ -305,7 +317,11 @@
             (is (=? {:message "Error executing Action: DDL commands are not allowed to be used with H2."}
                     (mt/user-http-request :crowberto
                                           :post 500
-                                          (format "action/%s/execute" action-id)))))))
+                                          (format "action/%s/execute" action-id))))))))))
+
+(deftest disallowed-commands-in-action-test-2
+  (mt/test-driver :h2
+    (mt/with-actions-test-data-and-actions-enabled
       (testing "Should be able to execute query actions with allowed commands"
         (let [sql "update categories set name = 'stomp' where id = 1; update categories set name = 'stomp' where id = 2;"]
           (mt/with-actions [{:keys [action-id]} {:type :query
@@ -344,7 +360,7 @@
             (t2/delete! :model/Database :is_audit true)
             (when original-audit-db (mbc/ensure-audit-db-installed!))))))))
 
-;; API tests are in [[metabase.api.action-test]]
+;; API tests are in [[metabase.actions.api-test]]
 (deftest ^:parallel actions-maybe-parse-sql-error-test
   (testing "violate not null constraint"
     (is (= {:type    :metabase.actions.error/violate-not-null-constraint

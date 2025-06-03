@@ -4,7 +4,8 @@
    [clojure.test :refer :all]
    [java-time.api :as t]
    [metabase-enterprise.cache.config :as cache.config]
-   [metabase.task.persist-refresh :as task.persist-refresh]
+   [metabase.events.core :as events]
+   [metabase.model-persistence.task.persist-refresh :as task.persist-refresh]
    [metabase.test :as mt]
    [metabase.util :as u]
    [toucan2.core :as t2]))
@@ -99,11 +100,13 @@
                                            {:order-by [[:id :desc]]})))
               (testing "Deletes backing tables of models that have state='off'"
                 (let [unpersisted-ids (atom #{})
-                      test-refresher  (reify task.persist-refresh/Refresher
-                                        (unpersist! [_ _database persisted-info]
-                                          (swap! unpersisted-ids conj (:id persisted-info))))
                       deleted?        (fn [{id :id}]
-                                        (not (t2/exists? :model/PersistedInfo :id id)))]
+                                        (not (t2/exists? :model/PersistedInfo :id id)))
+                      test-refresher
+                      #_{:clj-kondo/ignore [:missing-protocol-method]}
+                      (reify task.persist-refresh/Refresher
+                        (unpersist! [_ _database persisted-info]
+                          (swap! unpersisted-ids conj (:id persisted-info))))]
                   (#'task.persist-refresh/prune-all-deletable! test-refresher)
                   (is (set/subset? (set [(:id pdeletable) (:id poff)])
                                    @unpersisted-ids))
@@ -183,3 +186,14 @@
                             (t2/select-one :model/TaskHistory
                                            :task "unpersist-tables"
                                            {:order-by [[:id :desc]]}))))))))))
+
+(deftest event-test
+  (testing "In EE, new models are not persisted by default"
+    (mt/with-premium-features #{:cache-granular-controls}
+      (mt/with-temporary-setting-values [persisted-models-enabled true]
+        (mt/with-temp [:model/Database db {:settings {:persist-models-enabled true}}
+                       :model/Card     card {:database_id (u/the-id db)}]
+          (events/publish-event! :event/card-create {:object card :user-id (mt/user->id :rasta)})
+          (is (zero? (count (t2/select :model/PersistedInfo :card_id (u/the-id card)))))
+          (events/publish-event! :event/card-create {:object (assoc card :type :model) :user-id (mt/user->id :rasta)})
+          (is (= "off" (:state (t2/select-one :model/PersistedInfo :card_id (u/the-id card))))))))))

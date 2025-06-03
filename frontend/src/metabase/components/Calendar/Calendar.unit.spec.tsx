@@ -3,8 +3,7 @@ import mockDate from "mockdate";
 import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
 
 import { render, screen } from "__support__/ui";
-import { updateMomentStartOfWeek } from "metabase/lib/i18n";
-import MetabaseSettings from "metabase/lib/settings";
+import { updateStartOfWeek } from "metabase/lib/i18n";
 
 import type { CalendarProps } from "./Calendar";
 import Calendar from "./Calendar";
@@ -50,7 +49,7 @@ describe("Calendar", () => {
     expect(
       screen
         .getAllByTestId("calendar-day-name")
-        .map(dayEl => dayEl.textContent),
+        .map((dayEl) => dayEl.textContent),
     ).toEqual(["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]);
   });
 
@@ -59,13 +58,11 @@ describe("Calendar", () => {
       jest.useFakeTimers();
       jest.setSystemTime(new Date("2023-03-23T08:00:00"));
 
-      MetabaseSettings.set("start-of-week", "wednesday");
-      updateMomentStartOfWeek();
+      updateStartOfWeek("wednesday");
     });
 
     afterEach(() => {
-      MetabaseSettings.set("start-of-week", "sunday"); // rollback to default
-      updateMomentStartOfWeek();
+      updateStartOfWeek("sunday");
 
       jest.useRealTimers();
     });
@@ -76,7 +73,7 @@ describe("Calendar", () => {
       expect(
         screen
           .getAllByTestId("calendar-day-name")
-          .map(dayEl => dayEl.textContent),
+          .map((dayEl) => dayEl.textContent),
       ).toEqual(["We", "Th", "Fr", "Sa", "Su", "Mo", "Tu"]);
 
       // check that listed dates are correct and start with proper day-of-week

@@ -1,4 +1,4 @@
-import { revisionApi } from "metabase/api";
+import { revisionApi, useListRevisionsQuery } from "metabase/api";
 import { createEntity, entityCompatibleQuery } from "metabase/lib/entities";
 
 import Dashboards from "./dashboards";
@@ -11,16 +11,19 @@ const REVERT = "metabase/entities/revisions/REVERT_REVISION";
  */
 const Revisions = createEntity({
   name: "revisions",
+  rtk: {
+    useListQuery: useListRevisionsQuery,
+  },
   api: {
     list: ({ model_type, model_id }, dispatch) =>
       entityCompatibleQuery(
         { entity: model_type, id: model_id },
         dispatch,
-        revisionApi.endpoints.listRevision,
+        revisionApi.endpoints.listRevisions,
       )
         // add model_type and model_id to each object since they are required for revert
-        .then(revisions =>
-          revisions.map(revision => ({
+        .then((revisions) =>
+          revisions.map((revision) => ({
             model_type,
             model_id,
             ...revision,
@@ -34,7 +37,7 @@ const Revisions = createEntity({
 
   objectActions: {
     // use thunk since we don't actually want to dispatch an action
-    revert: revision => async dispatch => {
+    revert: (revision) => async (dispatch) => {
       await entityCompatibleQuery(
         {
           entity: revision.model_type,

@@ -1,4 +1,3 @@
-import { fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 
@@ -10,8 +9,8 @@ import {
 } from "__support__/server-mocks";
 import { createMockEntitiesState } from "__support__/store";
 import {
+  fireEvent,
   mockGetBoundingClientRect,
-  mockScrollBy,
   renderWithProviders,
   screen,
   waitFor,
@@ -185,7 +184,7 @@ function setup({
     const strategy = Lib.displayInfo(query, 0, Lib.joinStrategy(join));
     const fields = Lib.joinFields(join);
 
-    const conditions = Lib.joinConditions(join).map(condition => {
+    const conditions = Lib.joinConditions(join).map((condition) => {
       const { operator, lhsColumn, rhsColumn } = Lib.joinConditionParts(
         query,
         step.stageIndex,
@@ -212,7 +211,6 @@ function setup({
 
 describe("Notebook Editor > Join Step", () => {
   beforeAll(() => {
-    mockScrollBy();
     mockGetBoundingClientRect();
   });
 
@@ -238,13 +236,14 @@ describe("Notebook Editor > Join Step", () => {
     await userEvent.click(
       within(screen.getByLabelText("Right table")).getByRole("button"),
     );
-    const modal = await screen.findByTestId("entity-picker-modal");
 
     await waitForLoaderToBeRemoved();
 
-    expect(within(modal).getByText("Products")).toBeInTheDocument();
-    expect(within(modal).getByText("People")).toBeInTheDocument();
-    expect(within(modal).getByText("Reviews")).toBeInTheDocument();
+    const modal = await screen.findByTestId("entity-picker-modal");
+
+    expect(await within(modal).findByText("Products")).toBeInTheDocument();
+    expect(await within(modal).findByText("People")).toBeInTheDocument();
+    expect(await within(modal).findByText("Reviews")).toBeInTheDocument();
   });
 
   it("should not allow picking a right table from another database", async () => {
@@ -253,9 +252,10 @@ describe("Notebook Editor > Join Step", () => {
     await userEvent.click(
       within(screen.getByLabelText("Right table")).getByRole("button"),
     );
-    const modal = await screen.findByTestId("entity-picker-modal");
 
     await waitForLoaderToBeRemoved();
+
+    const modal = await screen.findByTestId("entity-picker-modal");
 
     expect(
       within(modal).queryByText(ANOTHER_DATABASE.name),
@@ -288,17 +288,18 @@ describe("Notebook Editor > Join Step", () => {
     await userEvent.click(
       within(screen.getByLabelText("Right table")).getByRole("button"),
     );
-    const modal = await screen.findByTestId("entity-picker-modal");
 
     await waitForLoaderToBeRemoved();
 
-    expect(within(modal).getByText("Recents")).toBeInTheDocument();
+    const modal = await screen.findByTestId("entity-picker-modal");
+
+    expect(await within(modal).findByText("Recents")).toBeInTheDocument();
     expect(
-      within(modal).getByRole("tab", { name: /Recents/i }),
+      await within(modal).findByRole("tab", { name: /Recents/i }),
     ).toHaveAttribute("aria-selected", "true");
 
     expect(within(modal).queryByText(QUESTION.name)).not.toBeInTheDocument();
-    expect(within(modal).getByText(MODEL.name)).toBeInTheDocument();
+    expect(await within(modal).findByText(MODEL.name)).toBeInTheDocument();
   });
 
   it("should open the LHS column picker after right table is selected and the RHS picker after it", async () => {
@@ -688,13 +689,13 @@ describe("Notebook Editor > Join Step", () => {
       const { query, fields } = getRecentJoin();
       const columns = fields as Lib.ColumnMetadata[];
       const reviewer = columns.find(
-        column => Lib.displayInfo(query, 0, column).name === "REVIEWER",
+        (column) => Lib.displayInfo(query, 0, column).name === "REVIEWER",
       );
       const category = columns.find(
-        column => Lib.displayInfo(query, 0, column).name === "PRODUCT_ID",
+        (column) => Lib.displayInfo(query, 0, column).name === "PRODUCT_ID",
       );
       const price = columns.find(
-        column => Lib.displayInfo(query, 0, column).name === "CREATED_AT",
+        (column) => Lib.displayInfo(query, 0, column).name === "CREATED_AT",
       );
       expect(columns).not.toHaveLength(0);
       expect(reviewer).not.toBeUndefined();
@@ -711,7 +712,7 @@ describe("Notebook Editor > Join Step", () => {
       const joinColumnsPicker = await screen.findByTestId(
         "join-columns-picker",
       );
-      await userEvent.click(within(joinColumnsPicker).getByText("Select none"));
+      await userEvent.click(within(joinColumnsPicker).getByText("Select all"));
       expect(within(joinColumnsPicker).getByLabelText("ID")).not.toBeChecked();
       expect(within(joinColumnsPicker).getByLabelText("ID")).toBeEnabled();
       await userEvent.click(within(joinColumnsPicker).getByLabelText("ID"));
@@ -734,7 +735,7 @@ describe("Notebook Editor > Join Step", () => {
         "join-columns-picker",
       );
 
-      await userEvent.click(within(joinColumnsPicker).getByText("Select none"));
+      await userEvent.click(within(joinColumnsPicker).getByText("Select all"));
 
       await userEvent.click(screen.getByLabelText("Left column"));
       const lhsColumnPicker = await screen.findByTestId("lhs-column-picker");
@@ -771,13 +772,13 @@ describe("Notebook Editor > Join Step", () => {
       const { query, fields } = getRecentJoin();
       const columns = fields as Lib.ColumnMetadata[];
       const vendor = columns.find(
-        column => Lib.displayInfo(query, 0, column).name === "VENDOR",
+        (column) => Lib.displayInfo(query, 0, column).name === "VENDOR",
       );
       const category = columns.find(
-        column => Lib.displayInfo(query, 0, column).name === "CATEGORY",
+        (column) => Lib.displayInfo(query, 0, column).name === "CATEGORY",
       );
       const price = columns.find(
-        column => Lib.displayInfo(query, 0, column).name === "PRICE",
+        (column) => Lib.displayInfo(query, 0, column).name === "PRICE",
       );
       expect(columns).not.toHaveLength(0);
       expect(vendor).not.toBeUndefined();
@@ -792,7 +793,7 @@ describe("Notebook Editor > Join Step", () => {
 
       await userEvent.click(screen.getByLabelText("Pick columns"));
       const picker = await screen.findByTestId("join-columns-picker");
-      await userEvent.click(within(picker).getByText("Select none"));
+      await userEvent.click(within(picker).getByText("Select all"));
 
       const { fields } = getRecentJoin();
       expect(fields).toBe("none");
@@ -1184,7 +1185,7 @@ describe("Notebook Editor > Join Step", () => {
       await userEvent.hover(
         within(screen.getByLabelText("Right table")).getByText("Products"),
       );
-      expect(screen.getByRole("tooltip")).toHaveTextContent(
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
         `${METAKEY}+click to open in new tab`,
       );
     });

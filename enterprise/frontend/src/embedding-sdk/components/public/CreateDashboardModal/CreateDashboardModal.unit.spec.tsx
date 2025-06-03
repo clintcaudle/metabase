@@ -1,4 +1,3 @@
-import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
 
@@ -6,9 +5,10 @@ import {
   setupCollectionByIdEndpoint,
   setupDashboardCreateEndpoint,
 } from "__support__/server-mocks";
-import { renderWithProviders, screen } from "__support__/ui";
+import { screen, waitFor } from "__support__/ui";
 import { getNextId } from "__support__/utils";
-import { createMockAuthProviderUriConfig } from "embedding-sdk/test/mocks/config";
+import { renderWithSDKProviders } from "embedding-sdk/test/__support__/ui";
+import { createMockSdkConfig } from "embedding-sdk/test/mocks/config";
 import { ROOT_COLLECTION as ROOT } from "metabase/entities/collections";
 import {
   createMockCollection,
@@ -114,7 +114,7 @@ describe("CreateDashboardModal", () => {
 
     expect(screen.queryByText("New dashboard")).not.toBeInTheDocument();
 
-    rerender(<CreateDashboardModal isOpen />);
+    rerender(<CreateDashboardModal isOpen onCreate={jest.fn()} />);
 
     expect(screen.getByText("New dashboard")).toBeInTheDocument();
   });
@@ -123,13 +123,15 @@ describe("CreateDashboardModal", () => {
 function setup({ props }: { props?: Partial<CreateDashboardModalProps> } = {}) {
   setupCollectionByIdEndpoint({ collections: COLLECTIONS });
 
-  return renderWithProviders(<CreateDashboardModal {...props} />, {
-    mode: "sdk",
-    sdkProviderProps: {
-      authConfig: createMockAuthProviderUriConfig(),
+  return renderWithSDKProviders(
+    <CreateDashboardModal onCreate={jest.fn()} {...props} />,
+    {
+      sdkProviderProps: {
+        authConfig: createMockSdkConfig(),
+      },
+      storeInitialState: {
+        currentUser: CURRENT_USER,
+      },
     },
-    storeInitialState: {
-      currentUser: CURRENT_USER,
-    },
-  });
+  );
 }

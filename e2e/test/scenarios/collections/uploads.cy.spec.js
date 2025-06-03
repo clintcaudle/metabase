@@ -1,6 +1,7 @@
-import { H } from "e2e/support";
+const { H } = cy;
 import { USER_GROUPS, WRITABLE_DB_ID } from "e2e/support/cypress_data";
 import { FIRST_COLLECTION_ID } from "e2e/support/cypress_sample_instance_data";
+import { FIXTURE_PATH } from "e2e/support/helpers";
 
 const { NOSQL_GROUP, ALL_USERS_GROUP } = USER_GROUPS;
 
@@ -18,7 +19,7 @@ H.describeWithSnowplow(
       const testFile = H.VALID_CSV_FILES[0];
       const EMPTY_SCHEMA_NAME = "empty_uploads";
 
-      cy.intercept("PUT", "/api/setting").as("saveSettings");
+      cy.intercept("PUT", "/api/setting/*").as("saveSettings");
       cy.intercept("GET", "/api/database").as("databaseList");
 
       H.restore("postgres-writable");
@@ -42,11 +43,11 @@ H.describeWithSnowplow(
       cy.visit("/admin/settings/uploads");
 
       cy.findByLabelText("Upload Settings Form")
-        .findByText("Select a database")
+        .findByPlaceholderText("Select a database")
         .click();
       H.popover().findByText("Writable Postgres12").click();
       cy.findByLabelText("Upload Settings Form")
-        .findByText("Select a schema")
+        .findByPlaceholderText("Select a schema")
         .click();
 
       H.popover().findByText(EMPTY_SCHEMA_NAME).click();
@@ -61,13 +62,13 @@ H.describeWithSnowplow(
 
       const tableQuery = `SELECT * FROM information_schema.tables WHERE table_name LIKE '%${testFile.tableName}_%' ORDER BY table_name DESC LIMIT 1;`;
 
-      H.queryWritableDB(tableQuery, "postgres").then(result => {
+      H.queryWritableDB(tableQuery, "postgres").then((result) => {
         expect(result.rows.length).to.equal(1);
         const tableName = result.rows[0].table_name;
         H.queryWritableDB(
           `SELECT count(*) FROM ${EMPTY_SCHEMA_NAME}.${tableName};`,
           "postgres",
-        ).then(result => {
+        ).then((result) => {
           expect(Number(result.rows[0].count)).to.equal(testFile.rowCount);
         });
       });
@@ -76,7 +77,9 @@ H.describeWithSnowplow(
         "Ensure that table is visible in admin without refreshing (metabase#38041)",
       );
 
-      cy.findByTestId("app-bar").button(/gear/).click();
+      cy.findByTestId("app-bar")
+        .findByRole("button", { name: "Settings" })
+        .click();
       H.popover().findByText("Admin settings").click();
 
       cy.findByRole("link", { name: "Table Metadata" }).click();
@@ -93,7 +96,7 @@ H.describeWithSnowplow(
       });
     });
 
-    ["postgres", "mysql"].forEach(dialect => {
+    ["postgres", "mysql"].forEach((dialect) => {
       describe(`CSV Uploading (${dialect})`, () => {
         beforeEach(() => {
           H.restore(`${dialect}-writable`);
@@ -114,24 +117,24 @@ H.describeWithSnowplow(
           H.expectNoBadSnowplowEvents();
         });
 
-        H.VALID_CSV_FILES.forEach(testFile => {
+        H.VALID_CSV_FILES.forEach((testFile) => {
           it(`Can upload ${testFile.fileName} to a collection`, () => {
             uploadFileToCollection(testFile);
 
-            H.expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "csv_upload_successful",
             });
 
             const tableQuery = `SELECT * FROM information_schema.tables WHERE table_name LIKE '%${testFile.tableName}_%' ORDER BY table_name DESC LIMIT 1;`;
 
-            H.queryWritableDB(tableQuery, dialect).then(result => {
+            H.queryWritableDB(tableQuery, dialect).then((result) => {
               expect(result.rows.length).to.equal(1);
               const tableName =
                 result.rows[0].table_name ?? result.rows[0].TABLE_NAME;
               H.queryWritableDB(
                 `SELECT count(*) as count FROM ${tableName};`,
                 dialect,
-              ).then(result => {
+              ).then((result) => {
                 expect(Number(result.rows[0].count)).to.equal(
                   testFile.rowCount,
                 );
@@ -140,17 +143,17 @@ H.describeWithSnowplow(
           });
         });
 
-        H.INVALID_CSV_FILES.forEach(testFile => {
+        H.INVALID_CSV_FILES.forEach((testFile) => {
           it(`Cannot upload ${testFile.fileName} to a collection`, () => {
             uploadFileToCollection(testFile);
 
-            H.expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "csv_upload_failed",
             });
 
             const tableQuery = `SELECT * FROM information_schema.tables WHERE table_name LIKE '%${testFile.tableName}_%' ORDER BY table_name DESC LIMIT 1;`;
 
-            H.queryWritableDB(tableQuery, dialect).then(result => {
+            H.queryWritableDB(tableQuery, dialect).then((result) => {
               expect(result.rows.length).to.equal(0);
             });
           });
@@ -223,10 +226,46 @@ H.describeWithSnowplow(
         });
       });
     });
+
+    it("should allow you to choose a model to append to if there are multiple (metabase#53824)", () => {
+      H.restore("postgres-writable");
+      cy.signInAsAdmin();
+      H.enableTracking();
+
+      H.enableUploads("postgres");
+      H.headlessUpload(FIRST_COLLECTION_ID, H.VALID_CSV_FILES[0]);
+      H.headlessUpload(FIRST_COLLECTION_ID, H.VALID_CSV_FILES[1]);
+
+      H.visitCollection(FIRST_COLLECTION_ID);
+
+      cy.fixture(`${FIXTURE_PATH}/${H.VALID_CSV_FILES[2].fileName}`).then(
+        (file) => {
+          cy.get("#upload-input").selectFile(
+            {
+              contents: Cypress.Buffer.from(file),
+              fileName: H.VALID_CSV_FILES[2].fileName,
+              mimeType: "text/csv",
+            },
+            { force: true },
+          );
+        },
+      );
+
+      cy.findByRole("radio", { name: /Append to a model/ }).click();
+
+      cy.findByRole("textbox", { name: "Select a model" })
+        .should("contain.value", H.VALID_CSV_FILES[1].humanName)
+        .click();
+
+      H.popover().findByText(H.VALID_CSV_FILES[0].humanName).click();
+      cy.findByRole("textbox", { name: "Select a model" })
+        .should("have.value", H.VALID_CSV_FILES[0].humanName)
+        .click();
+    });
   },
 );
 
-describe("permissions", () => {
+describe("permissions", { tags: "@external" }, () => {
   it("should not show you upload buttons if you are a sandboxed user", () => {
     H.restore("postgres-12");
     cy.signInAsAdmin();
@@ -268,45 +307,41 @@ describe("permissions", () => {
     });
   });
 
-  it(
-    "should show you upload buttons if you have unrestricted access to the upload schema",
-    { tags: ["@external"] },
-    () => {
-      H.restore("postgres-12");
-      cy.signInAsAdmin();
+  it("should show you upload buttons if you have unrestricted access to the upload schema", () => {
+    H.restore("postgres-12");
+    cy.signInAsAdmin();
 
-      H.setTokenFeatures("all");
-      H.enableUploads("postgres");
+    H.setTokenFeatures("all");
+    H.enableUploads("postgres");
 
-      cy.updatePermissionsGraph({
-        [ALL_USERS_GROUP]: {
-          [WRITABLE_DB_ID]: {
-            "view-data": "blocked",
-          },
+    cy.updatePermissionsGraph({
+      [ALL_USERS_GROUP]: {
+        [WRITABLE_DB_ID]: {
+          "view-data": "blocked",
         },
-        [NOSQL_GROUP]: {
-          [WRITABLE_DB_ID]: {
-            "view-data": "unrestricted",
-            "create-queries": "query-builder",
-          },
+      },
+      [NOSQL_GROUP]: {
+        [WRITABLE_DB_ID]: {
+          "view-data": "unrestricted",
+          "create-queries": "query-builder",
         },
-      });
+      },
+    });
 
-      cy.updateCollectionGraph({
-        [NOSQL_GROUP]: { root: "write" },
-      });
+    cy.updateCollectionGraph({
+      [NOSQL_GROUP]: { root: "write" },
+    });
 
-      cy.signIn("nosql");
-      cy.visit("/collection/root");
-      cy.findByTestId("collection-menu").within(() => {
-        cy.findByLabelText("Upload data").should("exist");
-        cy.findByRole("img", { name: /upload/i }).should("exist");
-      });
-    },
-  );
+    cy.signIn("nosql");
+    cy.visit("/collection/root");
+    cy.findByTestId("collection-menu").within(() => {
+      cy.findByLabelText("Upload data").should("exist");
+      cy.findByRole("img", { name: /upload/i }).should("exist");
+    });
+  });
 });
 
-describe("Upload Table Cleanup/Management", () => {
+describe("Upload Table Cleanup/Management", { tags: "@external" }, () => {
   beforeEach(() => {
     cy.intercept("GET", "/api/ee/upload-management/tables").as(
       "getUploadTables",
@@ -347,6 +382,7 @@ describe("Upload Table Cleanup/Management", () => {
 
       // multiple delete
       cy.findAllByRole("checkbox").first().click();
+      // eslint-disable-next-line no-unsafe-element-filtering
       cy.findAllByRole("checkbox").last().click();
     });
 
@@ -363,14 +399,14 @@ describe("Upload Table Cleanup/Management", () => {
   });
 });
 
-function uploadFileToCollection(testFile) {
-  cy.get("@collectionId").then(collectionId =>
+function uploadFileToCollection(testFile, viewModel = true) {
+  cy.get("@collectionId").then((collectionId) =>
     cy.visit(`/collection/${collectionId}`),
   );
 
   H.uploadFile("#upload-input", "Uploads Collection", testFile);
 
-  if (testFile.valid) {
+  if (testFile.valid && viewModel) {
     cy.get("main").within(() => cy.findByText("Uploads Collection"));
 
     cy.findByTestId("collection-table").within(() => {
@@ -383,7 +419,7 @@ function uploadFileToCollection(testFile) {
     cy.wait("@dataset");
 
     cy.url().should("include", "/model/");
-    cy.findByTestId("TableInteractive-root");
+    H.tableInteractive();
   }
 }
 
@@ -407,7 +443,7 @@ function uploadToExisting({
 
   H.popover().findByText(uploadOptions[uploadMode]).click();
 
-  cy.fixture(`${H.FIXTURE_PATH}/${testFile.fileName}`).then(file => {
+  cy.fixture(`${H.FIXTURE_PATH}/${testFile.fileName}`).then((file) => {
     cy.get("#upload-file-input").selectFile(
       {
         contents: Cypress.Buffer.from(file),
@@ -425,6 +461,7 @@ function uploadToExisting({
 
     cy.wait(uploadEndpoints[uploadMode]);
 
+    // eslint-disable-next-line no-unsafe-element-filtering
     cy.findAllByRole("status")
       .last()
       .findByText(/Data (added|replaced)/i, {

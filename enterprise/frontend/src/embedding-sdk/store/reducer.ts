@@ -1,17 +1,18 @@
 import { createAction, createReducer } from "@reduxjs/toolkit";
 
-import type { MetabaseFetchRequestTokenFn } from "embedding-sdk";
-import type { SdkEventHandlersConfig } from "embedding-sdk/lib/events";
-import type { MetabasePluginsConfig } from "embedding-sdk/lib/plugins";
 import type {
+  MetabaseAuthConfig,
+  MetabaseFetchRequestTokenFn,
   SdkErrorComponent,
-  SdkState,
-  SdkStoreState,
-} from "embedding-sdk/store/types";
+} from "embedding-sdk";
+import type { SdkState, SdkStoreState } from "embedding-sdk/store/types";
+import type { SdkEventHandlersConfig } from "embedding-sdk/types/events";
+import type { MetabasePluginsConfig } from "embedding-sdk/types/plugins";
 import type { SdkUsageProblem } from "embedding-sdk/types/usage-problem";
 import { createAsyncThunk } from "metabase/lib/redux";
 
 import { initAuth, refreshTokenAsync } from "./auth";
+import { samlTokenStorage } from "./auth/saml-token-storage";
 import { getSessionTokenState } from "./selectors";
 
 const SET_METABASE_CLIENT_URL = "sdk/SET_METABASE_CLIENT_URL";
@@ -35,9 +36,15 @@ const GET_OR_REFRESH_SESSION = "sdk/token/GET_OR_REFRESH_SESSION";
 
 export const getOrRefreshSession = createAsyncThunk(
   GET_OR_REFRESH_SESSION,
-  async (url: string, { dispatch, getState }) => {
+  async (
+    authConfig: Pick<MetabaseAuthConfig, "metabaseInstanceUrl" | "authMethod">,
+    { dispatch, getState },
+  ) => {
+    // necessary to ensure that we don't use a popup every time the user
+    // refreshes the page
+    const storedAuthToken = samlTokenStorage.get();
     const state = getSessionTokenState(getState() as SdkStoreState);
-    const token = state?.token;
+    const token = storedAuthToken ?? state?.token;
 
     const isTokenValid = token && token.exp * 1000 >= Date.now();
 
@@ -45,7 +52,7 @@ export const getOrRefreshSession = createAsyncThunk(
       return token;
     }
 
-    return dispatch(refreshTokenAsync(url)).unwrap();
+    return dispatch(refreshTokenAsync(authConfig)).unwrap();
   },
 );
 
@@ -80,8 +87,8 @@ const initialState: SdkState = {
   fetchRefreshTokenFn: null,
 };
 
-export const sdk = createReducer(initialState, builder => {
-  builder.addCase(refreshTokenAsync.pending, state => {
+export const sdk = createReducer(initialState, (builder) => {
+  builder.addCase(refreshTokenAsync.pending, (state) => {
     state.token = { ...state.token, loading: true };
   });
 
@@ -98,11 +105,11 @@ export const sdk = createReducer(initialState, builder => {
     state.loginStatus = { status: "error", error };
   });
 
-  builder.addCase(initAuth.pending, state => {
+  builder.addCase(initAuth.pending, (state) => {
     state.loginStatus = { status: "loading" };
   });
 
-  builder.addCase(initAuth.fulfilled, state => {
+  builder.addCase(initAuth.fulfilled, (state) => {
     state.loginStatus = { status: "success" };
   });
 

@@ -5,19 +5,21 @@
    [clojure.set :as set]
    [clojure.test :refer :all]
    [clojure.walk :as walk]
-   [malli.core :as mc]
    [medley.core :as m]
-   [metabase.api.pivots :as api.pivots]
+   [metabase.lib-be.metadata.jvm :as lib.metadata.jvm]
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
-   [metabase.lib.metadata.jvm :as lib.metadata.jvm]
-   [metabase.models.data-permissions :as data-perms]
-   [metabase.models.permissions-group :as perms-group]
+   [metabase.lib.metadata.ident :as lib.metadata.ident]
+   [metabase.lib.test-metadata :as meta]
+   [metabase.permissions.models.data-permissions :as data-perms]
+   [metabase.permissions.models.permissions-group :as perms-group]
    [metabase.query-processor :as qp]
    [metabase.query-processor.pivot :as qp.pivot]
+   [metabase.query-processor.pivot.test-util :as api.pivots]
    [metabase.test :as mt]
    [metabase.test.data :as data]
-   [metabase.util :as u]))
+   [metabase.util :as u]
+   [metabase.util.malli.registry :as mr]))
 
 (set! *warn-on-reflection* true)
 
@@ -45,7 +47,7 @@
             [0 1]
             [0]
             []]
-           (#'qp.pivot/breakout-combinations 3 [0 1 2] [])))))
+           (#'qp.pivot/breakout-combinations 3 [0 1 2] [] true true)))))
 
 (deftest ^:parallel breakout-combinations-test-2
   (testing "Should return the combos that Paul specified in (#14329)"
@@ -65,7 +67,7 @@
              [3]
              ;; bottom right corner
              []])
-           (#'qp.pivot/breakout-combinations 4 [0 1 2] [3])))))
+           (#'qp.pivot/breakout-combinations 4 [0 1 2] [3] true true)))))
 
 (deftest ^:parallel breakout-combinations-test-3
   (testing "Should return the combos that Paul specified in (#14329)"
@@ -78,24 +80,39 @@
               [1]
               [0]
               []]
-             (#'qp.pivot/breakout-combinations 3 [] []))))))
+             (#'qp.pivot/breakout-combinations 3 [] [] true true))))))
+
+(deftest ^:parallel breakout-combinations-test-row-totals-disabled
+  (testing "Should return the correct combos when row totals are disabled but column totals are enabled"
+    (is (= [[0 1] [0]]
+           (#'qp.pivot/breakout-combinations 2 [1] [0] false true)))))
+
+(deftest ^:parallel breakout-combinations-test-col-totals-disabled
+  (testing "Should return the correct combos when column totals are disabled but row totals are enabled"
+    (is (= [[0 1] [1]]
+           (#'qp.pivot/breakout-combinations 2 [1] [0] true false)))))
+
+(deftest ^:parallel breakout-combinations-test-row-col-totals-disabled
+  (testing "Should return only the main query when both row and column totals are disabled"
+    (is (= [[0 1]]
+           (#'qp.pivot/breakout-combinations 2 [1] [0] false false)))))
 
 (deftest ^:parallel breakout-combinations-test-4
   (testing "The breakouts are sorted ascending."
     (is (= [[0 1 2] [1 2] [2] [0 1] [1] []]
-           (#'qp.pivot/breakout-combinations 3 [1 0] [2])))))
+           (#'qp.pivot/breakout-combinations 3 [1 0] [2] true true)))))
 
 (deftest ^:parallel validate-pivot-rows-cols-test
   (testing "Should throw an Exception if you pass in invalid pivot-rows"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
          #"Invalid pivot-rows: specified breakout at index 3, but we only have 3 breakouts"
-         (#'qp.pivot/breakout-combinations 3 [0 1 2 3] []))))
+         (#'qp.pivot/breakout-combinations 3 [0 1 2 3] [] true true))))
   (testing "Should throw an Exception if you pass in invalid pivot-cols"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
          #"Invalid pivot-cols: specified breakout at index 3, but we only have 3 breakouts"
-         (#'qp.pivot/breakout-combinations 3 [] [0 1 2 3])))))
+         (#'qp.pivot/breakout-combinations 3 [] [0 1 2 3] true true)))))
   ;; TODO -- we should require these columns to be distinct as well (I think?)
   ;; TODO -- require all numbers to be positive
   ;; TODO -- can you specify something in both pivot-rows and pivot-cols?
@@ -187,13 +204,16 @@
     (let [query         (api.pivots/pivot-query false)
           viz-settings  (:visualization_settings (api.pivots/pivot-card))
           pivot-options {:pivot-rows [1 0], :pivot-cols [2] :pivot-measures nil :column-sort-order {}}]
-      (is (= pivot-options
-             (#'qp.pivot/pivot-options query viz-settings)))
+      (let [actual-pivot-options (#'qp.pivot/pivot-options query viz-settings)]
+        (is (= (assoc pivot-options :show-row-totals true :show-column-totals true)
+               actual-pivot-options)))
       (are [num-breakouts expected] (= expected
                                        (#'qp.pivot/breakout-combinations
                                         num-breakouts
                                         (:pivot-rows pivot-options)
-                                        (:pivot-cols pivot-options)))
+                                        (:pivot-cols pivot-options)
+                                        true
+                                        true))
         3 [[0 1 2]   [1 2] [2] [0 1] [1] []]
         4 [[0 1 2 3] [1 2] [2] [0 1] [1] []]))))
 
@@ -209,10 +229,15 @@
                          {:rows    ["ID"]
                           :columns ["RATING"]}}
           pivot-options (#'qp.pivot/pivot-options query viz-settings)]
-      (is (= {:pivot-rows [], :pivot-cols [] :pivot-measures nil :column-sort-order {}}
+      (is (= {:pivot-rows [], :pivot-cols [] :pivot-measures nil :column-sort-order {},
+              :show-row-totals true, :show-column-totals true}
              pivot-options))
       (is (= [[0 1] [1] [0] []]
-             (#'qp.pivot/breakout-combinations 2 (:pivot-rows pivot-options) (:pivot-cols pivot-options)))))))
+             (#'qp.pivot/breakout-combinations 2
+                                               (:pivot-rows pivot-options)
+                                               (:pivot-cols pivot-options)
+                                               (:show-row-totals pivot-options)
+                                               (:show-column-totals pivot-options)))))))
 
 (deftest ^:parallel nested-question-pivot-options-test
   (testing "#35025"
@@ -236,12 +261,21 @@
                                {:rows    ["CATEGORY"]
                                 :columns ["CREATED_AT"]}}
                 pivot-options (#'qp.pivot/pivot-options query viz-settings)]
-            (is (= {:pivot-rows [0], :pivot-cols [1] :pivot-measures nil :column-sort-order {}}
+            (is (= {:pivot-rows [0], :pivot-cols [1] :pivot-measures nil :column-sort-order {},
+                    :show-row-totals true, :show-column-totals true}
                    pivot-options))
             (is (= [[0 1] [1] [0] []]
-                   (#'qp.pivot/breakout-combinations 2 (:pivot-rows pivot-options) (:pivot-cols pivot-options))))
+                   (#'qp.pivot/breakout-combinations 2
+                                                     (:pivot-rows pivot-options)
+                                                     (:pivot-cols pivot-options)
+                                                     (:show-row-totals pivot-options)
+                                                     (:show-column-totals pivot-options))))
             (is (=? {:status    :completed
-                     :row_count 156}
+                     :row_count 156
+                     :data {:cols [{:ident (get-in query [:query :breakout-idents 0])}
+                                   {:ident (get-in query [:query :breakout-idents 1])}
+                                   {:name  "pivot-grouping"}
+                                   {:ident (get-in query [:query :aggregation-idents 0])}]}}
                     (qp.pivot/run-pivot-query (assoc query :info {:visualization-settings viz-settings}))))))))))
 
 (deftest ^:parallel nested-question-pivot-aggregation-names-test
@@ -305,38 +339,39 @@
 
 (deftest nested-models-with-expressions-pivot-breakout-names-test
   (testing "#43993 again - breakouts on an expression from the inner model should pass"
-    (mt/with-temp [:model/Card model1 {:type :model
-                                       :dataset_query
-                                       (mt/mbql-query products
-                                         {:source-table $$products
-                                          :expressions  {"Rating Bucket" [:floor $products.rating]}})}
-                   :model/Card model2 {:type :model
-                                       :dataset_query
-                                       (mt/mbql-query orders
-                                         {:source-table $$orders
-                                          :joins        [{:source-table (str "card__" (u/the-id model1))
-                                                          :alias        "model A - Product"
-                                                          :fields       :all
-                                                          :condition    [:= $orders.product_id
-                                                                         [:field %products.id
-                                                                          {:join-alias "model A - Product"}]]}]})}]
-      (testing "Column aliasing works when joining an expression in an inner model"
-        (let [query        (mt/mbql-query
-                             orders {:source-table (str "card__" (u/the-id model2))
-                                     :aggregation  [[:sum [:field "SUBTOTAL" {:base-type :type/Number}]]]
-                                     :breakout     [[:field "Rating Bucket" {:base-type  :type/Number
-                                                                             :join-alias "model A - Product"}]]})
-              viz-settings {:pivot_table.column_split
-                            {:columns ["Rating Bucket"]}}]
-          (testing "for a regular query"
-            (is (=? {:status :completed}
-                    (qp/process-query query))))
-          (testing "and a pivot query"
-            (is (=? {:status    :completed
-                     :row_count 6}
-                    (-> query
-                        (assoc :info {:visualization-settings viz-settings})
-                        qp.pivot/run-pivot-query)))))))))
+    (binding [lib.metadata.ident/*enforce-idents-present* false]
+      (mt/with-temp [:model/Card model1 {:type :model
+                                         :dataset_query
+                                         (mt/mbql-query products
+                                           {:source-table $$products
+                                            :expressions  {"Rating Bucket" [:floor $products.rating]}})}
+                     :model/Card model2 {:type :model
+                                         :dataset_query
+                                         (mt/mbql-query orders
+                                           {:source-table $$orders
+                                            :joins        [{:source-table (str "card__" (u/the-id model1))
+                                                            :alias        "model A - Product"
+                                                            :fields       :all
+                                                            :condition    [:= $orders.product_id
+                                                                           [:field %products.id
+                                                                            {:join-alias "model A - Product"}]]}]})}]
+        (testing "Column aliasing works when joining an expression in an inner model"
+          (let [query        (mt/mbql-query
+                               orders {:source-table (str "card__" (u/the-id model2))
+                                       :aggregation  [[:sum [:field "SUBTOTAL" {:base-type :type/Number}]]]
+                                       :breakout     [[:field "Rating Bucket" {:base-type  :type/Number
+                                                                               :join-alias "model A - Product"}]]})
+                viz-settings {:pivot_table.column_split
+                              {:columns ["Rating Bucket"]}}]
+            (testing "for a regular query"
+              (is (=? {:status :completed}
+                      (qp/process-query query))))
+            (testing "and a pivot query"
+              (is (=? {:status    :completed
+                       :row_count 6}
+                      (-> query
+                          (assoc :info {:visualization-settings viz-settings})
+                          qp.pivot/run-pivot-query))))))))))
 
 (deftest ^:parallel dont-return-too-many-rows-test
   (testing "Make sure pivot queries don't return too many rows (#14329)"
@@ -405,7 +440,7 @@
         ;; check each row, but fail fast if the shapes are wrong.
         (is (=? {:status :success}
                 (reduce
-                 (let [validator (mc/validator Row)]
+                 (let [validator (mr/validator Row)]
                    (fn [_ row]
                      (testing (pr-str row)
                        (if (validator row)
@@ -430,6 +465,15 @@
              :row_count 137}
             (qp.pivot/run-pivot-query (api.pivots/parameters-query))))))
 
+(defn- clean-pivot-results [results]
+  (let [no-uuid #(cond-> (dissoc % :lib/source_uuid)
+                   (= (:name %) "pivot-grouping") (assoc :ident "test_dummy_pivot-grouping"))]
+    (-> results
+        (dissoc :running_time :started_at :json_query)
+        (m/dissoc-in [:data :results_metadata :checksum])
+        (m/dissoc-in [:data :native_form])
+        (update-in [:data :cols] #(mapv no-uuid %)))))
+
 (deftest ^:parallel pivots-should-not-return-expressions-test
   (mt/dataset test-data
     (let [query (assoc (mt/mbql-query orders
@@ -440,13 +484,9 @@
       (testing (str "Pivots should not return expression columns in the results if they are not explicitly included in "
                     "`:fields` (#14604)")
         (is (= (-> (qp.pivot/run-pivot-query query)
-                   (dissoc :running_time :started_at :json_query)
-                   (m/dissoc-in [:data :results_metadata :checksum])
-                   (m/dissoc-in [:data :native_form]))
+                   clean-pivot-results)
                (-> (qp.pivot/run-pivot-query (assoc-in query [:query :expressions] {"Don't include me pls" [:+ 1 1]}))
-                   (dissoc :running_time :started_at :json_query)
-                   (m/dissoc-in [:data :results_metadata :checksum])
-                   (m/dissoc-in [:data :native_form]))))))))
+                   clean-pivot-results)))))))
 
 (deftest ^:parallel pivots-should-not-return-expressions-test-2
   (mt/dataset test-data
@@ -693,3 +733,28 @@
              (splice [1 2 6] {1 2, 2 5})))
       (is (= [1 2 3 5 8]
              (splice [1 2 6] {1 2, 2 5, 3 2}))))))
+
+(deftest ^:parallel pivoting-same-name-breakouts-test
+  (testing "Column names are deduplicated, therefore same `:name` cols are not missing from the results (#52769)"
+    (let [mp meta/metadata-provider
+          query (as-> (lib/query mp (meta/table-metadata :orders)) $
+                  (lib/aggregate $ (lib/count))
+                  (lib/breakout $ (meta/field-metadata :orders :id))
+                  (lib/breakout $ (some (fn [{:keys [name lib/source] :as col}]
+                                          (when (and (= name "ID") (= source :source/implicitly-joinable))
+                                            col))
+                                        (lib/breakoutable-columns $))))
+          viz-settings {:column_settings {}
+                        :pivot_table.column_split {:rows ["ID" "ID_2"], :columns [], :values ["count"]}
+                        :pivot_table.collapsed_rows {:value [], :rows ["ID" "ID_2"]}
+                        :pivot.show_row_totals true
+                        :pivot.show_column_totals true
+                        :pivot_table.column_widths {:leftHeaderWidths [80 99]
+                                                    :totalLeftHeaderWidths 179
+                                                    :valueHeaderWidths {}}
+                        :table.column_formatting []
+                        :table.columns nil}]
+      ;; Without deduplication, :pivot-rows' value would be just [0].
+      (is (= {:pivot-rows [0 1], :pivot-cols nil, :pivot-measures [2],
+              :show-row-totals true, :show-column-totals true}
+             (#'qp.pivot/column-name-pivot-options query viz-settings))))))

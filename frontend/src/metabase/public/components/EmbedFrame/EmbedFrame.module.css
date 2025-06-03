@@ -19,10 +19,45 @@ body:where(:global(.mb-wrapper)) {
   border-color: var(--mb-color-border);
 }
 
+.EmbedFrame .DashCard .Card {
+  /* this is for proper transitions from the `transparent` value to other values if set */
+  border: 1px solid transparent;
+}
+
 .EmbedFrameHeader,
 .EmbedFrameFooter {
   color: var(--mb-color-text-primary);
   background-color: var(--mb-color-bg-dashboard);
+}
+
+.EmbedFrame,
+.EmbedFrame .DashCard .Card,
+.EmbedFrame .ContentContainer,
+.EmbedFrame .EmbedFrameHeader,
+.EmbedFrame .Separator,
+.EmbedFrame .ParameterFieldSet,
+.EmbedFrame .ParametersWidgetContainer,
+.EmbedFrame .EmbedFrameFooter,
+.EmbedFrame .LogoBadge {
+  transition: var(--transition-theme-change);
+}
+
+.ParameterPanel.AllowSticky {
+  position: sticky;
+  top: 0;
+  left: 0;
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  border-bottom-color: transparent;
+}
+
+.ParameterPanel.IsSticky {
+  background-color: color-mix(
+    in srgb,
+    var(--mb-color-bg-white),
+    var(--mb-color-bg-dashboard) 15%
+  );
+  border-bottom-color: var(--mb-color-border);
 }
 
 [data-metabase-theme="night"][data-metabase-theme="night"],
@@ -69,7 +104,7 @@ body:where(:global(.mb-wrapper)) {
   }
 
   .EmbedFrame .fullscreenNightText {
-    transition: color 1s linear;
+    transition: var(--transition-theme-change);
   }
 
   /* A temporary solution until we migrated all colors in visualization to use semantic colors
@@ -82,6 +117,15 @@ body:where(:global(.mb-wrapper)) {
   .EmbedFrame .DashCard .Card {
     background-color: var(--mb-color-bg-black);
     border: 1px solid var(--mb-color-border);
+  }
+
+  .ParameterPanel.IsSticky {
+    background-color: color-mix(
+      in srgb,
+      var(--mb-color-bg-black),
+      var(--mb-color-bg-dashboard) 15%
+    );
+    border-bottom-color: var(--mb-color-border);
   }
 }
 
@@ -105,5 +149,14 @@ body:where(:global(.mb-wrapper)) {
   .EmbedFrameHeader,
   .EmbedFrameFooter {
     background-color: transparent;
+  }
+
+  .ParameterPanel.IsSticky {
+    background-color: color-mix(
+      in srgb,
+      var(--mb-color-bg-white),
+      transparent 15%
+    );
+    border-bottom-color: transparent;
   }
 }

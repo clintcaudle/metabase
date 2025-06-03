@@ -5,7 +5,7 @@
    [malli.core :as mc]
    [malli.destructure :as md]
    [malli.error :as me]
-   [metabase.config :as config]
+   [metabase.config.core :as config]
    [metabase.util.i18n :as i18n]
    [metabase.util.log :as log]
    [metabase.util.malli.humanize :as mu.humanize]
@@ -106,7 +106,7 @@
                                           fn-tail
                                           (cons '&f fn-tail)))]
     (when (= parsed ::mc/invalid)
-      (let [error     (mc/explain SchematizedParams fn-tail)
+      (let [error     (mr/explain SchematizedParams fn-tail)
             humanized (mu.humanize/humanize error)]
         (throw (ex-info (format "Invalid function tail: %s" humanized)
                         {:fn-tail   fn-tail

@@ -10,23 +10,22 @@
    [metabase.driver.bigquery-cloud-sdk.query-processor-test.reconciliation-test-util
     :as bigquery.qp.reconciliation-tu]
    [metabase.driver.sql.query-processor :as sql.qp]
+   [metabase.lib-be.metadata.jvm :as lib.metadata.jvm]
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
-   [metabase.lib.metadata.jvm :as lib.metadata.jvm]
    [metabase.lib.test-metadata :as meta]
    [metabase.lib.test-util :as lib.tu]
    [metabase.query-processor :as qp]
    [metabase.query-processor.compile :as qp.compile]
    [metabase.query-processor.store :as qp.store]
    [metabase.query-processor.util.add-alias-info :as add]
-   [metabase.sync :as sync]
+   [metabase.sync.core :as sync]
    [metabase.test :as mt]
    [metabase.test.data.bigquery-cloud-sdk :as bigquery.tx]
    [metabase.test.util.timezone :as test.tz]
    [metabase.util :as u]
    [metabase.util.date-2 :as u.date]
-   [metabase.util.honey-sql-2 :as h2x]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [metabase.util.honey-sql-2 :as h2x]))
 
 (def ^:private test-db-name (bigquery.tx/test-dataset-id "test_data"))
 
@@ -57,34 +56,39 @@
   (mt/test-driver :bigquery-cloud-sdk
     (testing (str "make sure that BigQuery native queries maintain the column ordering specified in the SQL -- "
                   "post-processing ordering shouldn't apply (metabase#2821)")
-      (is (= [{:name         "venue_id"
-               :display_name "venue_id"
-               :source       :native
-               :base_type    :type/Integer
-               :effective_type :type/Integer
-               :field_ref    [:field "venue_id" {:base-type :type/Integer}]}
-              {:name         "user_id"
-               :display_name "user_id"
-               :source       :native
-               :base_type    :type/Integer
-               :effective_type :type/Integer
-               :field_ref    [:field "user_id" {:base-type :type/Integer}]}
-              {:name         "checkins_id"
-               :display_name "checkins_id"
-               :source       :native
-               :base_type    :type/Integer
-               :effective_type :type/Integer
-               :field_ref    [:field "checkins_id" {:base-type :type/Integer}]}]
-             (mt/cols
-              (qp/process-query
-               {:native   {:query (with-test-db-name
-                                    (str "SELECT `v4_test_data.checkins`.`venue_id` AS `venue_id`, "
-                                         "       `v4_test_data.checkins`.`user_id` AS `user_id`, "
-                                         "       `v4_test_data.checkins`.`id` AS `checkins_id` "
-                                         "FROM `v4_test_data.checkins` "
-                                         "LIMIT 2"))}
-                :type     :native
-                :database (mt/id)})))))))
+      (let [eid (u/generate-nano-id)]
+        (is (= [{:name         "venue_id"
+                 :display_name "venue_id"
+                 :ident        (lib/native-ident "venue_id" eid)
+                 :source       :native
+                 :base_type    :type/Integer
+                 :effective_type :type/Integer
+                 :field_ref    [:field "venue_id" {:base-type :type/Integer}]}
+                {:name         "user_id"
+                 :display_name "user_id"
+                 :ident        (lib/native-ident "user_id" eid)
+                 :source       :native
+                 :base_type    :type/Integer
+                 :effective_type :type/Integer
+                 :field_ref    [:field "user_id" {:base-type :type/Integer}]}
+                {:name         "checkins_id"
+                 :display_name "checkins_id"
+                 :ident        (lib/native-ident "checkins_id" eid)
+                 :source       :native
+                 :base_type    :type/Integer
+                 :effective_type :type/Integer
+                 :field_ref    [:field "checkins_id" {:base-type :type/Integer}]}]
+               (mt/cols
+                (qp/process-query
+                 {:native   {:query (with-test-db-name
+                                      (str "SELECT `v4_test_data.checkins`.`venue_id` AS `venue_id`, "
+                                           "       `v4_test_data.checkins`.`user_id` AS `user_id`, "
+                                           "       `v4_test_data.checkins`.`id` AS `checkins_id` "
+                                           "FROM `v4_test_data.checkins` "
+                                           "LIMIT 2"))}
+                  :type     :native
+                  :info     {:card-entity-id eid}
+                  :database (mt/id)}))))))))
 
 (deftest ^:parallel native-query-test-3
   (mt/test-driver :bigquery-cloud-sdk
@@ -203,9 +207,9 @@
         "A UTC date is returned, we should read/return it as UTC")
 
     (test.tz/with-system-timezone-id! "America/Chicago"
-      (t2.with-temp/with-temp [:model/Database db {:engine  :bigquery-cloud-sdk
-                                                   :details (assoc (:details (mt/db))
-                                                                   :use-jvm-timezone true)}]
+      (mt/with-temp [:model/Database db {:engine  :bigquery-cloud-sdk
+                                         :details (assoc (:details (mt/db))
+                                                         :use-jvm-timezone true)}]
         (is (= "2018-08-31T00:00:00-05:00"
                (native-timestamp-query db "2018-08-31 00:00:00-05" "America/Chicago"))
             (str "This test includes a `use-jvm-timezone` flag of true that will assume that the date coming from BigQuery "
@@ -213,9 +217,9 @@
                  "the correct date is compared"))))
 
     (test.tz/with-system-timezone-id! "Asia/Jakarta"
-      (t2.with-temp/with-temp [:model/Database db {:engine  :bigquery-cloud-sdk
-                                                   :details (assoc (:details (mt/db))
-                                                                   :use-jvm-timezone true)}]
+      (mt/with-temp [:model/Database db {:engine  :bigquery-cloud-sdk
+                                         :details (assoc (:details (mt/db))
+                                                         :use-jvm-timezone true)}]
         (is (= "2018-08-31T00:00:00+07:00"
                (native-timestamp-query db "2018-08-31 00:00:00+07" "Asia/Jakarta"))
             "Similar to the above test, but covers a positive offset")))))
@@ -729,7 +733,7 @@
 (deftest current-datetime-honeysql-form-test-2
   (mt/test-driver :bigquery-cloud-sdk
     (qp.store/with-metadata-provider (mt/id)
-      (testing (str "The object returned by `current-datetime-honeysql-form` should use the reporting timezone when set.")
+      (testing "The object returned by `current-datetime-honeysql-form` should use the reporting timezone when set."
         (doseq [timezone ["UTC" "US/Pacific"]]
           (mt/with-report-timezone-id! timezone
             (let [form (sql.qp/current-datetime-honeysql-form :bigquery-cloud-sdk)]

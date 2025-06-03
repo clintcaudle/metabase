@@ -1,9 +1,9 @@
+/* eslint-disable ttag/no-module-declaration -- see metabase#55045 */
 import { useMemo, useState } from "react";
 import { t } from "ttag";
 
 import { useListApiKeysQuery } from "metabase/api";
 import { ClientSortableTable } from "metabase/common/components/Table";
-import { useLocale } from "metabase/common/hooks/use-locale/use-locale";
 import { DelayedLoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper/DelayedLoadingAndErrorWrapper";
 import { Ellipsified } from "metabase/core/components/Ellipsified";
 import CS from "metabase/css/core/index.css";
@@ -11,8 +11,6 @@ import { formatDateTimeWithUnit } from "metabase/lib/formatting/date";
 import { Button, Group, Icon, Stack, Text, Title } from "metabase/ui";
 import { getThemeOverrides } from "metabase/ui/theme";
 import type { ApiKey } from "metabase-types/api";
-
-import { AuthTabs } from "../AuthTabs";
 
 import { CreateApiKeyModal } from "./CreateApiKeyModal";
 import { DeleteApiKeyModal } from "./DeleteApiKeyModal";
@@ -30,10 +28,10 @@ function EmptyTableWarning({ onCreate }: { onCreate: () => void }) {
       mt="xl"
       align="center"
       justify="center"
-      spacing="sm"
+      gap="sm"
       data-testid="empty-table-warning"
     >
-      <Title>{t`No API keys here yet`}</Title>
+      <Title order={2}>{t`No API keys here yet`}</Title>
       <Text color="text.1" mb="md">
         {t`You can create an API key to make API calls programatically.`}
       </Text>
@@ -67,7 +65,6 @@ function ApiKeysTable({
   error?: unknown;
 }) {
   const flatApiKeys = useMemo(() => apiKeys?.map(flattenApiKey), [apiKeys]);
-  const locale = useLocale();
 
   if (loading || error) {
     return <DelayedLoadingAndErrorWrapper loading={loading} error={error} />;
@@ -82,8 +79,7 @@ function ApiKeysTable({
       data-testid="api-keys-table"
       columns={columns}
       rows={flatApiKeys}
-      locale={locale}
-      rowRenderer={row => (
+      rowRenderer={(row) => (
         <ApiKeyRow
           apiKey={row}
           setActiveApiKey={setActiveApiKey}
@@ -116,7 +112,7 @@ const ApiKeyRow = ({
     <td>{apiKey.updated_by.common_name}</td>
     <td>{formatDateTimeWithUnit(apiKey.updated_at, "minute")}</td>
     <td>
-      <Group spacing="md" py="md">
+      <Group gap="md" py="md">
         <Icon
           name="pencil"
           className={CS.cursorPointer}
@@ -162,15 +158,14 @@ export const ManageApiKeys = () => {
         modal={modal}
         activeApiKey={activeApiKey}
       />
-      <AuthTabs activeKey="api-keys" />
-      <Stack pl="md" spacing="lg">
+      <Stack gap="lg">
         <Group
           align="start"
-          position="apart"
+          justify="space-between"
           data-testid="api-keys-settings-header"
         >
           <Stack>
-            <Title>{t`Manage API Keys`}</Title>
+            <Title order={2}>{t`Manage API Keys`}</Title>
             {!tableIsEmpty && (
               <Text color="text-medium">{t`Allow users to use the API keys to authenticate their API calls.`}</Text>
             )}

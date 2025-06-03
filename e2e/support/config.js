@@ -3,6 +3,8 @@ import path from "node:path";
 
 import installLogsPrinter from "cypress-terminal-report/src/installLogsPrinter";
 
+import * as ciTasks from "./ci_tasks";
+import { collectFailingTests } from "./collectFailedTests";
 import {
   removeDirectory,
   verifyDownloadTasks,
@@ -15,6 +17,7 @@ const createBundler = require("@bahmutov/cypress-esbuild-preprocessor"); // This
 const {
   NodeModulesPolyfillPlugin,
 } = require("@esbuild-plugins/node-modules-polyfill");
+const cypressSplit = require("cypress-split");
 
 const isEnterprise = process.env["MB_EDITION"] === "ee";
 const isCI = process.env["CYPRESS_CI"] === "true";
@@ -27,8 +30,6 @@ const isQaDatabase = process.env["QA_DB_ENABLED"] === "true";
 const sourceVersion = process.env["CROSS_VERSION_SOURCE"];
 const targetVersion = process.env["CROSS_VERSION_TARGET"];
 
-const feHealthcheckEnabled = process.env["CYPRESS_FE_HEALTHCHECK"] === "true";
-
 const isEmbeddingSdk = process.env.CYPRESS_IS_EMBEDDING_SDK === "true";
 
 // docs say that tsconfig paths should handle aliases, but they don't
@@ -36,7 +37,7 @@ const assetsResolverPlugin = {
   name: "assetsResolver",
   setup(build) {
     // Redirect all paths starting with "assets/" to "resources/"
-    build.onResolve({ filter: /^assets\// }, args => {
+    build.onResolve({ filter: /^assets\// }, (args) => {
       return {
         path: path.join(
           __dirname,
@@ -48,11 +49,26 @@ const assetsResolverPlugin = {
   },
 };
 
+// these are special and shouldn't be chunked out arbitrarily
+const specBlacklist = ["/embedding-sdk/", "/cross-version/"];
+
+function getSplittableSpecs(specs) {
+  return specs.filter((spec) => {
+    return !specBlacklist.some((blacklistedPath) =>
+      spec.includes(blacklistedPath),
+    );
+  });
+}
+
 const defaultConfig = {
   // This is the functionality of the old cypress-plugins.js file
   setupNodeEvents(on, config) {
     // `on` is used to hook into various events Cypress emits
     // `config` is the resolved Cypress config
+
+    // CLI grep can't handle commas in the name
+    // needed when we want to run only specific tests
+    config.env.grep ??= process.env.GREP;
 
     // cypress-terminal-report
     if (isCI) {
@@ -106,26 +122,10 @@ const defaultConfig = {
         return null; // tasks must have a return value
       },
       ...dbTasks,
+      ...ciTasks,
       ...verifyDownloadTasks,
       removeDirectory,
       signJwt,
-    });
-
-    // this is an official workaround to keep recordings of the failed specs only
-    // https://docs.cypress.io/guides/guides/screenshots-and-videos#Delete-videos-for-specs-without-failing-or-retried-tests
-    on("after:spec", (spec, results) => {
-      if (results && results.video) {
-        // Do we have failures for any retry attempts?
-        const failures = results.tests.some(test =>
-          test.attempts.some(attempt => attempt.state === "failed"),
-        );
-        if (!failures) {
-          // delete the video if the spec passed and no tests retried
-          if (fs.existsSync(results.video)) {
-            fs.unlinkSync(results.video);
-          }
-        }
-      }
     });
 
     /********************************************************************
@@ -146,15 +146,25 @@ const defaultConfig = {
     config.env.SNOWPLOW_MICRO_URL = snowplowMicroUrl;
     config.env.SOURCE_VERSION = sourceVersion;
     config.env.TARGET_VERSION = targetVersion;
-    // Set on local, development-mode runs only
-    config.env.feHealthcheck = {
-      enabled: feHealthcheckEnabled,
-      url: feHealthcheckEnabled
-        ? "http://localhost:8080/webpack-dev-server/"
-        : undefined,
-    };
 
     require("@cypress/grep/src/plugin")(config);
+
+    if (isCI) {
+      cypressSplit(on, config, getSplittableSpecs);
+      collectFailingTests(on, config);
+    }
+
+    // this is an official workaround to keep recordings of the failed specs only
+    // https://docs.cypress.io/guides/guides/screenshots-and-videos#Delete-videos-for-specs-without-failing-or-retried-tests
+    on("after:spec", (spec, results) => {
+      if (results && results.video) {
+        // Do we have test failures?
+        if (results && results.video && results.stats.failures === 0) {
+          // delete the video if the spec passed
+          fs.unlinkSync(results.video);
+        }
+      }
+    });
 
     return config;
   },
@@ -217,6 +227,7 @@ const mainConfig = {
 const snapshotsConfig = {
   ...defaultConfig,
   specPattern: "e2e/snapshot-creators/**/*.cy.snap.js",
+  video: false,
 };
 
 const crossVersionSourceConfig = {

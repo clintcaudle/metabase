@@ -1,29 +1,47 @@
+import { match } from "ts-pattern";
+
 import { optionsToHashParams } from "./embed";
 import type {
   CodeSampleParameters,
   EmbeddingDisplayOptions,
+  EmbeddingHashOptions,
   EmbeddingParametersValues,
 } from "./types";
 
 export function getIframeQueryWithoutDefaults(
   displayOptions: EmbeddingDisplayOptions,
 ) {
+  const hashOptions = transformEmbeddingDisplayToHashOptions(displayOptions);
+
   return optionsToHashParams(
-    removeDefaultValueParameters(displayOptions, {
+    removeDefaultValueParameters(hashOptions, {
       theme: "light",
-      hide_download_button: false,
       background: true,
     }),
   );
 }
+
+function transformEmbeddingDisplayToHashOptions(
+  displayOptions: EmbeddingDisplayOptions,
+): EmbeddingHashOptions {
+  const downloads = match(displayOptions.downloads)
+    .with(null, () => null) // do not include the "downloads" parameter at all, used for OSS.
+    .with({ pdf: true, results: false }, () => "pdf")
+    .with({ pdf: false, results: true }, () => "results")
+    .with({ pdf: false, results: false }, () => false)
+    .otherwise(() => true);
+
+  return { ...displayOptions, downloads };
+}
+
 function getIframeQuerySource(displayOptions: EmbeddingDisplayOptions) {
   return JSON.stringify(getIframeQueryWithoutDefaults(displayOptions));
 }
 
 function removeDefaultValueParameters(
-  options: EmbeddingDisplayOptions,
-  defaultValues: Partial<EmbeddingDisplayOptions>,
-): Partial<EmbeddingDisplayOptions> {
+  options: EmbeddingHashOptions,
+  defaultValues: Partial<EmbeddingHashOptions>,
+): Partial<EmbeddingHashOptions> {
   return Object.fromEntries(
     Object.entries(options).filter(
       ([key, value]) =>
@@ -48,19 +66,19 @@ export const node = {
   }: CodeSampleParameters) =>
     `// you will need to install via 'npm install jsonwebtoken' or in your package.json
 
-var jwt = require("jsonwebtoken");
+const jwt = require("jsonwebtoken");
 
-var METABASE_SITE_URL = ${JSON.stringify(siteUrl)};
-var METABASE_SECRET_KEY = ${JSON.stringify(secretKey)};
+const METABASE_SITE_URL = ${JSON.stringify(siteUrl)};
+const METABASE_SECRET_KEY = ${JSON.stringify(secretKey)};
 
-var payload = {
+const payload = {
   resource: { ${resourceType}: ${resourceId} },
   ${node.getParametersSource(params)}
   exp: Math.round(Date.now() / 1000) + (10 * 60) // 10 minute expiration
 };
-var token = jwt.sign(payload, METABASE_SECRET_KEY);
+const token = jwt.sign(payload, METABASE_SECRET_KEY);
 
-var iframeUrl = METABASE_SITE_URL + "/embed/${resourceType}/" + token +
+const iframeUrl = METABASE_SITE_URL + "/embed/${resourceType}/" + token +
   ${node.getIframeQuerySource(displayOptions)};`,
 };
 
@@ -97,8 +115,8 @@ payload = {
 }
 token = jwt.encode(payload, METABASE_SECRET_KEY, algorithm="HS256")
 
-iframeUrl = METABASE_SITE_URL + "/embed/${resourceType}/" + token +
-  ${python.getIframeQuerySource(displayOptions)}`,
+iframeUrl = METABASE_SITE_URL + "/embed/${resourceType}/" + token + ${python.getIframeQuerySource(displayOptions)}
+`,
 };
 
 export const ruby = {

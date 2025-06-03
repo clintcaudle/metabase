@@ -2,22 +2,22 @@
   "Tests for /api/timeline-event endpoints"
   (:require
    [clojure.test :refer :all]
-   [metabase.http-client :as client]
-   [metabase.request.core :as request]
+   [metabase.api.response :as api.response]
    [metabase.test :as mt]
+   [metabase.test.http-client :as client]
    [metabase.util :as u]
    [toucan2.core :as t2]))
 
 (set! *warn-on-reflection* true)
 
-(deftest auth-tests
+(deftest ^:parallel auth-tests
   (testing "Authentication"
-    (is (= (get request/response-unauthentic :body)
+    (is (= (get api.response/response-unauthentic :body)
            (client/client :get 401 "/timeline-event")))
-    (is (= (get request/response-unauthentic :body)
+    (is (= (get api.response/response-unauthentic :body)
            (client/client :get 401 "/timeline-event/1")))))
 
-(deftest get-timeline-event-test
+(deftest ^:parallel get-timeline-event-test
   (testing "GET /api/timeline-event/:id"
     (mt/with-temp [:model/Collection    collection {:name "Important Data"}
                    :model/Timeline      timeline   {:name          "Important Events"

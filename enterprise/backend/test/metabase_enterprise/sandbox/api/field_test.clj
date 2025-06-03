@@ -4,10 +4,9 @@
    [clojure.test :refer :all]
    [metabase-enterprise.sandbox.test-util :as mt.tu]
    [metabase-enterprise.test :as met]
-   [metabase.models.field-values :as field-values]
    [metabase.test :as mt]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [metabase.warehouse-schema.models.field-values :as field-values]
+   [toucan2.core :as t2]))
 
 (deftest fetch-field-test
   (testing "GET /api/field/:id"
@@ -85,7 +84,7 @@
                            (fetch-values :rasta :name))))
                   (testing "A User with a *different* sandbox should see their own values"
                     (let [password (mt/random-name)]
-                      (t2.with-temp/with-temp [:model/User another-user {:password password}]
+                      (mt/with-temp [:model/User another-user {:password password}]
                         (met/with-gtaps-for-user! another-user {:gtaps      {:venues
                                                                              {:remappings
                                                                               {:cat
@@ -104,6 +103,8 @@
 (deftest human-readable-values-test
   (testing "GET /api/field/:id/values should returns correct human readable mapping if exists"
     (mt/with-temp-copy-of-db
+      ;; Manually activate Field values since they are not created during sync (#53387)
+      (field-values/get-or-create-full-field-values! (t2/select-one :model/Field :id (mt/id :venues :price)))
       (let [field-id   (mt/id :venues :price)
             full-fv-id (t2/select-one-pk :model/FieldValues :field_id field-id :type :full)]
         (t2/update! :model/FieldValues full-fv-id
@@ -152,11 +153,11 @@
           (is (some? (:values (mt/user-http-request :rasta :get 200 (str "field/" (:id field) "/values")))))
           (is (= 1 (t2/count :model/FieldValues
                              :field_id (:id field)
-                             :type :sandbox)))))
+                             :type :advanced)))))
 
       (testing "Do different users has different sandbox FieldValues"
         (let [password (mt/random-name)]
-          (t2.with-temp/with-temp [:model/User another-user {:password password}]
+          (mt/with-temp [:model/User another-user {:password password}]
             (met/with-gtaps-for-user! another-user {:gtaps      {:venues
                                                                  {:remappings {:cat [:variable [:field (mt/id :venues :category_id) nil]]}
                                                                   :query      (mt.tu/restricted-column-query (mt/id))}}
@@ -165,7 +166,7 @@
               ;; create another one for the new user
               (is (= 2 (t2/count :model/FieldValues
                                  :field_id (:id field)
-                                 :type :sandbox)))))))
+                                 :type :advanced)))))))
 
       (testing "Do we invalidate the cache when full FieldValues change"
         (try
@@ -188,11 +189,11 @@
         (#'field-values/clear-advanced-field-values-for-field! field)
         ;; make sure we have a cache
         (mt/user-http-request :rasta :get 200 (str "field/" (:id field) "/values"))
-        (let [old-sandbox-fv-id (t2/select-one-pk :model/FieldValues :field_id (:id field) :type :sandbox)]
+        (let [old-sandbox-fv-id (t2/select-one-pk :model/FieldValues :field_id (:id field) :type :advanced)]
           (with-redefs [field-values/advanced-field-values-expired? (fn [fv]
                                                                       (= (:id fv) old-sandbox-fv-id))]
             (mt/user-http-request :rasta :get 200 (str "field/" (:id field) "/values"))
             ;; did the old one get deleted?
             (is (not (t2/exists? :model/FieldValues :id old-sandbox-fv-id)))
             ;; make sure we created a new one
-            (is (= 1 (t2/count :model/FieldValues :field_id (:id field) :type :sandbox)))))))))
+            (is (= 1 (t2/count :model/FieldValues :field_id (:id field) :type :advanced)))))))))

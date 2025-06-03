@@ -8,7 +8,6 @@ import {
 } from "metabase/api";
 import { getCollectionName } from "metabase/collections/utils";
 import { EllipsifiedCollectionPath } from "metabase/common/components/EllipsifiedPath/EllipsifiedCollectionPath";
-import { useLocale } from "metabase/common/hooks/use-locale/use-locale";
 import EntityItem from "metabase/components/EntityItem";
 import { SortableColumnHeader } from "metabase/components/ItemsTable/BaseItemsTable";
 import {
@@ -46,7 +45,7 @@ import {
   TableRow,
 } from "../components/BrowseTable.styled";
 
-import type { MetricResult } from "./types";
+import type { MetricResult, SortColumn } from "./types";
 import { getMetricDescription, sortMetrics } from "./utils";
 
 type MetricsTableProps = {
@@ -54,7 +53,7 @@ type MetricsTableProps = {
   skeleton?: boolean;
 };
 
-const DEFAULT_SORTING_OPTIONS: SortingOptions = {
+const DEFAULT_SORTING_OPTIONS: SortingOptions<SortColumn> = {
   sort_column: "name",
   sort_direction: SortDirection.Asc,
 };
@@ -89,12 +88,9 @@ export function MetricsTable({
   skeleton = false,
   metrics = [],
 }: MetricsTableProps) {
-  const [sortingOptions, setSortingOptions] = useState<SortingOptions>(
-    DEFAULT_SORTING_OPTIONS,
-  );
+  const [sortingOptions, setSortingOptions] = useState(DEFAULT_SORTING_OPTIONS);
 
-  const locale = useLocale();
-  const sortedMetrics = sortMetrics(metrics, sortingOptions, locale);
+  const sortedMetrics = sortMetrics(metrics, sortingOptions);
 
   const handleSortingOptionsChange = skeleton ? undefined : setSortingOptions;
 
@@ -408,15 +404,16 @@ function MenuCell({ metric }: { metric?: MetricResult }) {
             variant="subtle"
             px="sm"
             aria-label={t`Metric options`}
+            c="text-dark"
           >
             <Icon name="ellipsis" />
           </Button>
         </Menu.Target>
         <Menu.Dropdown>
-          {actions.map(action => (
+          {actions.map((action) => (
             <Menu.Item
               key={action.key}
-              icon={<Icon name={action.icon} />}
+              leftSection={<Icon name={action.icon} />}
               onClick={action.action}
             >
               {action.title}

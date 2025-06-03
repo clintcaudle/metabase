@@ -2,13 +2,12 @@
   (:require
    [clojure.test :refer :all]
    [metabase-enterprise.test :as met]
-   [metabase.api.card-test :as api.card-test]
-   [metabase.models.data-permissions :as data-perms]
-   [metabase.models.permissions :as perms]
+   [metabase.permissions.core :as perms]
+   [metabase.permissions.models.data-permissions :as data-perms]
+   [metabase.queries.api.card-test :as api.card-test]
    [metabase.query-processor :as qp]
    [metabase.test :as mt]
-   [metabase.util :as u]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [metabase.util :as u]))
 
 (deftest users-with-sandboxed-perms-test
   (testing "Users with sandboxed permissions should be able to save cards"
@@ -19,10 +18,9 @@
                        :model/Table                      table {:db_id (u/the-id db)}
                        :model/Field                      _field {:table_id (u/the-id table) :name "field"}
                        :model/PermissionsGroup           group {}
-                       :model/PermissionsGroupMembership _ {:user_id (mt/user->id :rasta)
-                                                            :group_id (u/the-id group)}
                        :model/GroupTableAccessPolicy     _ {:group_id (u/the-id group)
                                                             :table_id (u/the-id table)}]
+          (perms/add-user-to-group! (mt/user->id :rasta) group)
           (mt/with-db db
             (mt/with-no-data-perms-for-all-users!
               (data-perms/set-database-permission! group db :perms/view-data :unrestricted)
@@ -39,12 +37,11 @@
                        :model/Table                      table {:db_id (u/the-id db)}
                        :model/Field                      _field {:table_id (u/the-id table) :name "field"}
                        :model/PermissionsGroup           group {}
-                       :model/PermissionsGroupMembership _ {:user_id (mt/user->id :rasta)
-                                                            :group_id (u/the-id group)}
                        :model/Card                       card {:name "Some Name"
                                                                :collection_id (u/the-id collection)}
                        :model/GroupTableAccessPolicy     _    {:group_id (u/the-id group)
                                                                :table_id (u/the-id table)}]
+          (perms/add-user-to-group! (mt/user->id :rasta) group)
           (mt/with-db db
             (mt/with-no-data-perms-for-all-users!
               (data-perms/set-database-permission! group db :perms/view-data :unrestricted)
@@ -63,12 +60,11 @@
                        :model/Table                      other-table {:db_id (u/the-id db)}
                        :model/Field                      _field {:table_id (u/the-id table) :name "field"}
                        :model/PermissionsGroup           group {}
-                       :model/PermissionsGroupMembership _ {:user_id (mt/user->id :rasta)
-                                                            :group_id (u/the-id group)}
                        :model/Card                       card {:name "Some Name"
                                                                :collection_id (u/the-id collection)}
                        :model/GroupTableAccessPolicy     _    {:group_id (u/the-id group)
                                                                :table_id (u/the-id table)}]
+          (perms/add-user-to-group! (mt/user->id :rasta) group)
           (mt/with-db db
             (mt/with-no-data-perms-for-all-users!
               (data-perms/set-database-permission! group db :perms/view-data :unrestricted)
@@ -87,10 +83,9 @@
                          :model/Table                      other-table {:db_id (u/the-id db)}
                          :model/Field                      _field {:table_id (u/the-id table) :name "field"}
                          :model/PermissionsGroup           group {}
-                         :model/PermissionsGroupMembership _ {:user_id (mt/user->id :rasta)
-                                                              :group_id (u/the-id group)}
                          :model/GroupTableAccessPolicy     _    {:group_id (u/the-id group)
                                                                  :table_id (u/the-id table)}]
+            (perms/add-user-to-group! (mt/user->id :rasta) group)
             (mt/with-db db
               (mt/with-no-data-perms-for-all-users!
                 (data-perms/set-database-permission! group db :perms/view-data :unrestricted)
@@ -106,12 +101,12 @@
   (mt/with-premium-features #{:advanced-permissions}
     (mt/with-temp [:model/User                       {user-id :id} {}
                    :model/PermissionsGroup           group         {}
-                   :model/PermissionsGroupMembership _             {:user_id  user-id
-                                                                    :group_id (u/the-id group)}
                    :model/Card                       card          {:name "Some Name" :dataset_query {:database (mt/id),
                                                                                                       :type :query,
                                                                                                       :query {:source-table (mt/id :venues)
                                                                                                               :limit 1}}}]
+
+      (perms/add-user-to-group! user-id group)
       (let [cases [[:unrestricted           :query-builder-and-native true]
                    [:unrestricted           :query-builder            true]
                    [:unrestricted           :no                       true]
@@ -212,8 +207,8 @@
 (deftest is-sandboxed-test
   (testing "Adding a GTAP to the all users group to a table makes it such that is_sandboxed returns true."
     (met/with-gtaps! {:gtaps {:categories {:query (mt/mbql-query categories {:filter [:<= $id 3]})}}}
-      (t2.with-temp/with-temp [:model/Card card {:database_id   (mt/id)
-                                                 :table_id      (mt/id :categories)
-                                                 :dataset_query (mt/mbql-query categories)}]
+      (mt/with-temp [:model/Card card {:database_id   (mt/id)
+                                       :table_id      (mt/id :categories)
+                                       :dataset_query (mt/mbql-query categories)}]
         (is (=? {:data {:is_sandboxed true}}
                 (qp/process-query (qp/userland-query (:dataset_query card)))))))))

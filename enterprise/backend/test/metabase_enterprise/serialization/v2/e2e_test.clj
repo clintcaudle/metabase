@@ -1,4 +1,4 @@
-(ns ^:mb/once metabase-enterprise.serialization.v2.e2e-test
+(ns metabase-enterprise.serialization.v2.e2e-test
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -11,13 +11,12 @@
    [metabase-enterprise.serialization.v2.load :as serdes.load]
    [metabase-enterprise.serialization.v2.storage :as storage]
    [metabase.models.serialization :as serdes]
-   [metabase.models.setting :as setting]
+   [metabase.settings.core :as setting]
    [metabase.test :as mt]
    [metabase.test.generate :as test-gen]
    [metabase.util.yaml :as yaml]
    [reifyhealth.specmonstah.core :as rs]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp])
+   [toucan2.core :as t2])
   (:import
    (java.io File)
    (java.nio.file Path)))
@@ -359,7 +358,7 @@
 
               (testing "for settings"
                 (let [settings (get @entities "Setting")]
-                  (is (every? @#'setting/export?
+                  (is (every? setting/export?
                               (set (map (comp symbol :key) settings))))
                   (is (= (into {} (for [{:keys [key value]} settings]
                                     [key value]))
@@ -472,7 +471,7 @@
                                                                :model model}}})
               dashboard->link-cards (fn [dashboard]
                                       (map #(get-in % [:visualization_settings :link :entity]) (:dashcards dashboard)))]
-          (t2.with-temp/with-temp
+          (mt/with-temp
             [:model/Collection    {coll-id   :id
                                    coll-name :name
                                    coll-eid  :entity_id}    {:name        "Link collection"
@@ -632,7 +631,7 @@
       (ts/with-dbs [source-db dest-db]
         (ts/with-db source-db
           ;; preparation
-          (t2.with-temp/with-temp
+          (mt/with-temp
             [:model/Dashboard           {dashboard-id :id
                                          dashboard-eid :entity_id} {:name "Dashboard with tab"}
              :model/Card                {card-id-1 :id
@@ -727,6 +726,28 @@
                     (is (= new-coll-id (:collection_id
                                         (t2/select-one :model/Card new-card-id))))))))))))))
 
+(deftest database-routing-test
+  (testing "Destination Databases and Database Routers are excluded from serialization"
+    (ts/with-random-dump-dir [dump-dir "serdesv2-"]
+      (ts/with-dbs [source-db dest-db]
+        (ts/with-db source-db
+          (mt/with-temp
+            [:model/Database {router-db-id :id} {:name "Router"}
+             :model/DatabaseRouter _ {:database_id router-db-id :user_attribute "foobar"}
+             :model/Database _ {:router_database_id router-db-id
+                                :name "Destination"}]
+            (let [extraction (serdes/with-cache (into [] (extract/extract {})))]
+              (storage/store! (seq extraction) dump-dir))
+            (testing "ingest and load"
+              (ts/with-db dest-db
+                (testing "doing ingestion"
+                  (is (serdes/with-cache (serdes.load/load-metabase! (ingest/ingest-yaml dump-dir)))
+                      "successful"))
+                (testing "only the router database was exported"
+                  (is (t2/exists? :model/Database :name "Router"))
+                  (is (not (t2/exists? :model/Database :name "Destination")))
+                  (is (= 0 (t2/count :model/DatabaseRouter))))))))))))
+
 (deftest premium-features-test
   (testing "with :serialization enabled on the token"
     (ts/with-random-dump-dir [dump-dir "serdesv2-"]
@@ -752,7 +773,7 @@
         (ts/with-dbs [source-db dest-db]
           (ts/with-db source-db
             ;; preparation
-            (t2.with-temp/with-temp [:model/Dashboard _ {:name "some dashboard"}]
+            (mt/with-temp [:model/Dashboard _ {:name "some dashboard"}]
               (testing "export (v2-dump) command"
                 (is (thrown-with-msg? Exception #"Please upgrade"
                                       (cmd/v2-dump! dump-dir {}))
@@ -777,7 +798,7 @@
               ;; ensuring field ids are stable by loading dataset in db first
               (mt/db)
               (mt/$ids nil
-                (t2.with-temp/with-temp
+                (mt/with-temp
                   [:model/Collection {coll-id :id}  {:name "Pivot Collection"}
                    :model/Card       card           {:name          "Pivot Card"
                                                      :collection_id coll-id
@@ -880,7 +901,7 @@
   (ts/with-random-dump-dir [dump-dir "serdesv2-"]
     (ts/with-dbs [source-db dest-db]
       (ts/with-db source-db
-        (t2.with-temp/with-temp
+        (mt/with-temp
           [:model/Collection {coll-id :id}   {:name "Collection"}
            :model/Card       {metric-id :id} {:name "Metric Card"
                                               :collection_id coll-id
@@ -920,7 +941,7 @@
   (ts/with-random-dump-dir [dump-dir "serdesv2-"]
     (ts/with-dbs [source-db dest-db]
       (ts/with-db source-db
-        (t2.with-temp/with-temp
+        (mt/with-temp
           [:model/Collection {coll-id :id}    {:name "Collection"}
            :model/Card       {card-id :id
                               eid :entity_id} {:name "The Card"
@@ -949,7 +970,7 @@
                       :query    {:source-table $$orders
                                  :aggregation  [[:count] [:sum $subtotal]]
                                  :breakout     [$product_id->products.category $created_at]}})]
-          (t2.with-temp/with-temp
+          (mt/with-temp
             [:model/Collection {coll-id :id}    {:name "Collection"}
              :model/Card       {card-id :id
                                 eid :entity_id} {:name "The Card"
@@ -985,3 +1006,19 @@
                     (is (=? {:query {:aggregation-idents {0 (str "aggregation_" eid "@0__0")}
                                      :breakout-idents    {0 (str "breakout_" eid "@0__0")}}}
                             preexisting))))))))))))
+
+(deftest schema-coercion-test
+  (ts/with-random-dump-dir [dump-dir "serdesv2-"]
+    (mt/with-empty-h2-app-db
+      (mt/with-temp [:model/Dashboard _dash {:name       "Dash"
+                                             :parameters [{:id             "abcd"
+                                                           :type           :temporal-unit
+                                                           :temporal_units [:month]}]}]
+        (testing "extracts well"
+          (serdes/with-cache
+            (-> (extract/extract {:no-settings   true
+                                  :no-data-model true})
+                (storage/store! dump-dir))))
+        (testing "loads well too"
+          (is (serdes/with-cache (serdes.load/load-metabase! (ingest/ingest-yaml dump-dir)))
+              "ingested successfully"))))))

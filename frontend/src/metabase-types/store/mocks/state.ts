@@ -8,8 +8,8 @@ import { createMockAppState } from "./app";
 import { createMockAuthState } from "./auth";
 import { createMockDashboardState } from "./dashboard";
 import { createMockEmbedState } from "./embed";
+import { createMockEmbeddingDataPickerState } from "./embedding-data-picker";
 import { createMockNormalizedEntitiesState } from "./entities";
-import { createMockMetabotState } from "./metabot";
 import { createMockParametersState } from "./parameters";
 import { createMockQueryBuilderState } from "./qb";
 import { createMockRequestsState } from "./requests";
@@ -17,6 +17,7 @@ import { createMockRoutingState } from "./routing";
 import { createMockSettingsState } from "./settings";
 import { createMockSetupState } from "./setup";
 import { createMockUploadState } from "./upload";
+import { createMockVisualizerState } from "./visualizer";
 
 export function createMockState<S extends Pick<SdkStoreState, "sdk">>(
   opts?: S,
@@ -32,8 +33,8 @@ export function createMockState(opts: any) {
     currentUser: createMockUser(),
     dashboard: createMockDashboardState(),
     embed: createMockEmbedState(),
+    embeddingDataPicker: createMockEmbeddingDataPickerState(),
     entities: createMockNormalizedEntitiesState(),
-    metabot: createMockMetabotState(),
     parameters: createMockParametersState(),
     qb: createMockQueryBuilderState(),
     requests: createMockRequestsState(),
@@ -41,6 +42,11 @@ export function createMockState(opts: any) {
     settings: createMockSettingsState(),
     setup: createMockSetupState(),
     upload: createMockUploadState(),
+    visualizer: {
+      past: [],
+      present: createMockVisualizerState(),
+      future: [],
+    },
     modal: null,
     ...opts,
   };

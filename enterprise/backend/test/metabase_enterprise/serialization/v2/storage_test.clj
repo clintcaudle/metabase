@@ -1,4 +1,4 @@
-(ns ^:mb/once metabase-enterprise.serialization.v2.storage-test
+(ns metabase-enterprise.serialization.v2.storage-test
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -72,7 +72,7 @@
                          :model/Card        c3          {:name "parent card" :collection_id (:id parent)}
                          :model/Card        c4          {:name "child card" :collection_id (:id child)}
                          :model/Dashboard   d1          {:name "parent dash" :collection_id (:id parent)}]
-        (let [export (into [] (extract/extract nil))]
+        (let [export (into [] (extract/extract {}))]
           (storage/store! export dump-dir)
           (testing "the right files in the right places"
             (let [gp-dir (str (:entity_id grandparent) "_grandparent_collection")

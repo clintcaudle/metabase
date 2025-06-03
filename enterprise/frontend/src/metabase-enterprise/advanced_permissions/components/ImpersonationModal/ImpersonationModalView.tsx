@@ -7,7 +7,7 @@ import Alert from "metabase/core/components/Alert";
 import Button from "metabase/core/components/Button";
 import ExternalLink from "metabase/core/components/ExternalLink/ExternalLink";
 import FormErrorMessage from "metabase/core/components/FormErrorMessage";
-import FormFooter from "metabase/core/components/FormFooter";
+import { FormFooter } from "metabase/core/components/FormFooter";
 import FormSelect from "metabase/core/components/FormSelect";
 import FormSubmitButton from "metabase/core/components/FormSubmitButton";
 import Link from "metabase/core/components/Link/Link";
@@ -55,7 +55,7 @@ export const ImpersonationModalView = ({
         ? [selectedAttribute, ...attributes]
         : attributes;
 
-    return selectableAttributes.map(attribute => ({
+    return selectableAttributes.map((attribute) => ({
       name: attribute,
       value: attribute,
     }));

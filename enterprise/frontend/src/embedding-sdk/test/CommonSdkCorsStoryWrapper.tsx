@@ -1,4 +1,4 @@
-import type { Story } from "@storybook/react";
+import type { StoryFn } from "@storybook/react";
 
 import { type MetabaseAuthConfig, MetabaseProvider } from "embedding-sdk";
 
@@ -7,10 +7,9 @@ const METABASE_INSTANCE_URL =
 
 const DEFAULT_AUTH_CONFIG: MetabaseAuthConfig = {
   metabaseInstanceUrl: METABASE_INSTANCE_URL,
-  authProviderUri: `${METABASE_INSTANCE_URL}/sso/metabase`,
 };
 
-export const CommonSdkStoryCorsWrapper = (Story: Story) => (
+export const CommonSdkStoryCorsWrapper = (Story: StoryFn) => (
   <MetabaseProvider authConfig={DEFAULT_AUTH_CONFIG}>
     <Story />
   </MetabaseProvider>

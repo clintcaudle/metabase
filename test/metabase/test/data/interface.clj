@@ -13,15 +13,14 @@
    [mb.hawk.hooks]
    [mb.hawk.init]
    [medley.core :as m]
-   [metabase.config :as config]
-   [metabase.db :as mdb]
+   [metabase.app-db.core :as mdb]
+   [metabase.classloader.core :as classloader]
+   [metabase.config.core :as config]
    [metabase.driver :as driver]
    [metabase.driver.ddl.interface :as ddl.i]
    [metabase.driver.sql-jdbc.sync.describe-table]
-   [metabase.models.field :as field]
-   [metabase.models.setting :refer [defsetting]]
-   [metabase.plugins.classloader :as classloader]
    [metabase.query-processor.preprocess :as qp.preprocess]
+   [metabase.settings.core :refer [defsetting]]
    [metabase.test.data.env :as tx.env]
    [metabase.test.initialize :as initialize]
    [metabase.util :as u]
@@ -29,6 +28,8 @@
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms]
+   [metabase.util.random :as u.random]
+   [metabase.warehouse-schema.models.field :as field]
    [methodical.core :as methodical]
    [potemkin.types :as p.types]
    [pretty.core :as pretty]
@@ -356,6 +357,77 @@
   [driver]
   (log/infof "%s has no after-run hooks." driver))
 
+(defmulti drop-if-exists-and-create-db!
+  "Drop a database named `db-name` if it already exists, then create a new empty one with that name"
+  {:added "0.55.0" :arglists '([driver db-name & [just-drop]])}
+  dispatch-on-driver-with-test-extensions
+  :hierarchy #'driver/hierarchy)
+
+(defmethod drop-if-exists-and-create-db! ::test-extensions
+  [_driver _db-name & [_just-drop]]
+  nil)
+
+(defn with-temp-database-fn!
+  "Creates a new database, dropping it first if necessary, runs `f`, then drops the db"
+  [driver db-name f]
+  (try
+    (drop-if-exists-and-create-db! driver db-name)
+    (f)
+    (finally
+      (drop-if-exists-and-create-db! driver db-name :just-drop))))
+
+(defmacro with-temp-database!
+  "Creates a new database, dropping it first if necessary, that will be dropped after execution"
+  [driver db-name & body]
+  `(with-temp-database-fn!
+     ~driver
+     ~db-name
+     (fn [] ~@body)))
+
+(defmulti create-and-grant-roles!
+  "Creates the given roles and permissions for the database user
+   `roles` is a map of role names to table permissions of the form
+   {role-name {table-name {:columns [col1 col2 ...]
+                           :rls    honey-sql-form}}}
+   where colN is a column name as a string and honey-sql-form is a predicate"
+  {:added "0.55.0" :arglists '([driver details roles db-user default-role])}
+  dispatch-on-driver-with-test-extensions
+  :hierarchy #'driver/hierarchy)
+
+(defmethod create-and-grant-roles! ::test-extensions
+  [_driver _details _roles _db-user _default-role]
+  nil)
+
+(defmulti drop-roles!
+  "Drops the given roles, and drops the database user if necessary"
+  {:added "0.55.0" :arglists '([driver details roles db-user])}
+  dispatch-on-driver-with-test-extensions
+  :hierarchy #'driver/hierarchy)
+
+(defmethod drop-roles! ::test-extensions
+  [_driver _details _roles _db-user]
+  nil)
+
+(defn with-temp-roles-fn!
+  "Creates the given roles and permissions for the database user, and drops them after execution"
+  [driver details roles db-user default-role f]
+  (try
+    (create-and-grant-roles! driver details roles db-user default-role)
+    (f)
+    (finally
+      (drop-roles! driver details roles db-user))))
+
+(defmacro with-temp-roles!
+  "Creates the given roles and permissions for the database user, and drops them after execution"
+  [driver details roles db-user default-role & body]
+  `(with-temp-roles-fn!
+     ~driver
+     ~details
+     ~roles
+     ~db-user
+     ~default-role
+     (fn [] ~@body)))
+
 (defmulti dbdef->connection-details
   "Return the connection details map that should be used to connect to the Database we will create for
   `database-definition`.
@@ -458,15 +530,16 @@
 
   ([_driver aggregation-type {field-id :id, table-id :table_id}]
    {:pre [(some? table-id)]}
-   (merge
-    (first (qp.preprocess/query->expected-cols {:database (t2/select-one-fn :db_id :model/Table :id table-id)
-                                                :type     :query
-                                                :query    {:source-table table-id
-                                                           :aggregation  [[aggregation-type [:field-id field-id]]]
-                                                           :aggregation-idents {0 (u/generate-nano-id)}}}))
-    (when (= aggregation-type :cum-count)
-      {:base_type     :type/Decimal
-       :semantic_type :type/Quantity}))))
+   (-> (qp.preprocess/query->expected-cols {:database (t2/select-one-fn :db_id :model/Table :id table-id)
+                                            :type     :query
+                                            :query    {:source-table table-id
+                                                       :aggregation  [[aggregation-type [:field-id field-id]]]
+                                                       :aggregation-idents {0 (u/generate-nano-id)}}})
+       first
+       (merge (when (= aggregation-type :cum-count)
+                {:base_type     :type/Decimal
+                 :semantic_type :type/Quantity}))
+       (dissoc :ident :lib/source-uuid :lib/source_uuid))))
 
 (defmulti count-with-template-tag-query
   "Generate a native query for the count of rows in `table` matching a set of conditions where `field-name` is equal to
@@ -478,7 +551,8 @@
 (defmulti count-with-field-filter-query
   "Generate a native query that returns the count of a Table with `table-name` with a field filter against a Field with
   `field-name`."
-  {:arglists '([driver table-name field-name])}
+  {:arglists '([driver table-name field-name]
+               [driver table-name field-name sample-value])}
   dispatch-on-driver-with-test-extensions
   :hierarchy #'driver/hierarchy)
 
@@ -834,3 +908,161 @@
   {:arglists '([driver database view-name options])}
   dispatch-on-driver-with-test-extensions
   :hierarchy #'driver/hierarchy)
+
+(defmulti bad-connection-details
+  "Returns a map that when merged with details will produce a failing connection to db."
+  {:arglists '([driver])}
+  dispatch-on-driver-with-test-extensions
+  :hierarchy #'driver/hierarchy)
+
+(defmethod bad-connection-details :default
+  [_driver]
+  {:user (u.random/random-name)})
+
+(doseq [driver [:h2 :sqlite]]
+  (defmethod bad-connection-details driver
+    [_driver]
+    nil))
+
+(doseq [driver [:bigquery-cloud-sdk]]
+  (defmethod bad-connection-details driver
+    [_driver]
+    {:project-id (u.random/random-name)}))
+
+(doseq [driver [:redshift :snowflake :vertica :sparksql]]
+  (defmethod bad-connection-details driver
+    [_driver]
+    {:db (u.random/random-name)}))
+
+(doseq [driver [:oracle]]
+  (defmethod bad-connection-details driver
+    [_driver]
+    {:service-name (u.random/random-name)}))
+
+(doseq [driver [:presto-jdbc :databricks]]
+  (defmethod bad-connection-details driver
+    [_driver]
+    {:catalog (u.random/random-name)}))
+
+(doseq [driver [:athena]]
+  (defmethod bad-connection-details driver
+    [_driver]
+    {:access_key (u.random/random-name)}))
+
+(doseq [driver [:postgres :mysql :snowflake :databricks :redshift :sqlite :vertica :athena :oracle]]
+  (defmethod driver/database-supports? [driver :test/arrays]
+    [_driver _feature _database]
+    true))
+
+(defmulti native-array-query
+  {:arglists '([driver])}
+  dispatch-on-driver-with-test-extensions
+  :hierarchy #'driver/hierarchy)
+
+(defmethod native-array-query :default
+  [_driver]
+  "select array['a', 'b', 'c']")
+
+(doseq [driver [:redshift :databricks]]
+  (defmethod native-array-query driver
+    [_driver]
+    "select array('a', 'b', 'c')"))
+
+(doseq [driver [:mysql :sqlite]]
+  (defmethod native-array-query driver
+    [_driver]
+    "select json_array('a', 'b', 'c')"))
+
+(defmethod native-array-query :snowflake
+  [_driver]
+  "select array_construct('a', 'b', 'c')")
+
+(defmethod native-array-query :oracle
+  [_driver]
+  "select cast(collect(1) as sys.odcinumberlist) from dual")
+
+(doseq [driver [:postgres :vertica :athena :oracle]]
+  (defmethod driver/database-supports? [driver :test/null-arrays]
+    [_driver _feature _database]
+    true))
+
+;; redshift doesn't have a way to to return null as an array
+(defmethod driver/database-supports? [:redshift :test/null-arrays]
+  [_driver _feature _database]
+  false)
+
+(defmulti native-null-array-query
+  {:arglists '([driver])}
+  dispatch-on-driver-with-test-extensions
+  :hierarchy #'driver/hierarchy)
+
+(defmethod native-null-array-query :default
+  [_driver]
+  "select cast(null as integer[])")
+
+(defmethod native-null-array-query :athena
+  [_driver]
+  "select cast(null as array<integer>)")
+
+(defmethod native-null-array-query :oracle
+  [_driver]
+  "select cast(null as sys.odcinumberlist) from dual")
+
+(doseq [driver [:postgres :athena :oracle]]
+  (defmethod driver/database-supports? [driver :test/array-aggregation]
+    [_driver _feature _database]
+    true))
+
+;; redshift only supports listagg which returns a string
+(defmethod driver/database-supports? [:redshift :test/array-aggregation]
+  [_driver _feature _database]
+  false)
+
+(defmulti agg-venues-by-category-id
+  {:arglists '([driver])}
+  dispatch-on-driver-with-test-extensions
+  :hierarchy #'driver/hierarchy)
+
+(defmethod agg-venues-by-category-id :postgres
+  [_driver]
+  "select category_id, array_agg(name)
+   from public.venues
+   group by category_id
+   order by 1 asc
+   limit 2;")
+
+(defmethod agg-venues-by-category-id :oracle
+  [_driver]
+  "select \"category_id\", cast(collect(\"name\") AS sys.odcivarchar2list)
+   from \"mb_test\".\"test_data_venues\"
+   group by \"category_id\"
+   order by \"category_id\" asc
+   fetch first 2 rows only")
+
+(defmethod agg-venues-by-category-id :athena
+  [_driver]
+  "select category_id, array_agg(name)
+   from test_data.venues
+   group by category_id
+   order by 1 asc
+   limit 2;")
+
+(doseq [driver [:postgres :clickhouse]]
+  (defmethod driver/database-supports? [driver :test/rls-impersonation]
+    [_driver _feature _database]
+    true))
+
+(doseq [driver [:redshift]]
+  (defmethod driver/database-supports? [driver :test/rls-impersonation]
+    [_driver _feature _database]
+    false))
+
+(doseq [driver [:postgres :sqlserver :mysql]]
+  (defmethod driver/database-supports? [driver :test/column-impersonation]
+    [_driver _feature _database]
+    true))
+
+(doseq [driver [:redshift]]
+  (defmethod driver/database-supports? [driver :test/column-impersonation]
+    [_driver _feature _database]
+    false))

@@ -41,6 +41,7 @@
    [metabase.lib.schema :as lib.schema]
    [metabase.lib.schema.drill-thru :as lib.schema.drill-thru]
    [metabase.lib.schema.metadata :as lib.schema.metadata]
+   [metabase.lib.schema.ref :as lib.schema.ref]
    [metabase.lib.temporal-bucket :as lib.temporal-bucket]
    [metabase.lib.types.isa :as lib.types.isa]
    [metabase.lib.underlying :as lib.underlying]
@@ -83,7 +84,7 @@
   (when (and (lib.drill-thru.common/mbql-stage? query stage-number)
              (lib.underlying/has-aggregation-or-breakout? query)
              ;; Either we clicked the aggregation, or there are dimensions.
-             (or (lib.drill-thru.common/aggregation-sourced? query column)
+             (or (lib.underlying/aggregation-sourced? query column)
                  (not-empty dimensions))
              ;; Either we need both column and value (cell/map/data point click) or neither (chart legend click).
              (or (and column (some? value))
@@ -105,7 +106,7 @@
      ;; If the underlying column comes from an aggregation, then the column-ref needs to be updated as well to the
      ;; corresponding aggregation ref so that [[drill-underlying-records]] knows to extract the filter implied by
      ;; aggregations like sum-where.
-     :column-ref (if (lib.drill-thru.common/strictly-underlying-aggregation? query column)
+     :column-ref (if (lib.underlying/strictly-underlying-aggregation? query column)
                    (lib.aggregation/column-metadata->aggregation-ref (lib.underlying/top-level-column query column))
                    column-ref)}))
 
@@ -119,9 +120,11 @@
   [query        :- ::lib.schema/query
    stage-number :- :int
    column       :- ::lib.schema.metadata/column
+   column-ref   :- ::lib.schema.ref/ref
    value        :- :any]
-  (let [filter-clauses (or (when (lib.binning/binning column)
-                             (let [unbinned-column (lib.binning/with-binning column nil)]
+  (let [filter-column  (lib.drill-thru.common/breakout->filterable-column query stage-number column-ref column)
+        filter-clauses (or (when (lib.binning/binning column)
+                             (let [unbinned-column (lib.binning/with-binning filter-column nil)]
                                (if (some? value)
                                  (when-let [{:keys [min-value max-value]} (lib.binning/resolve-bin-width query column value)]
                                    [(lib.filter/>= unbinned-column min-value)
@@ -135,10 +138,13 @@
                            ;; instead of
                            ;;
                            ;;    month(col) = March 2023
-                           (let [column (if-let [temporal-unit (::lib.underlying/temporal-unit column)]
-                                          (lib.temporal-bucket/with-temporal-bucket column temporal-unit)
-                                          column)]
-                             [(lib.filter/= column value)]))]
+                           (let [column (if-let [temporal-unit (or (::lib.underlying/temporal-unit column)
+                                                                   (lib.temporal-bucket/temporal-bucket column))]
+                                          (lib.temporal-bucket/with-temporal-bucket filter-column temporal-unit)
+                                          filter-column)]
+                             (if (some? value)
+                               [(lib.filter/= column value)]
+                               [(lib.filter/is-null column)])))]
     (reduce
      (fn [query filter-clause]
        (lib.filter/filter query stage-number filter-clause))
@@ -156,8 +162,8 @@
         base-query  (lib.util/update-query-stage query -1 dissoc :aggregation :breakout :order-by :limit :fields)
         ;; Turn any non-aggregation dimensions into filters.
         ;; eg. if we drilled into a temporal bucket, add a filter for the [:= breakout-column that-month].
-        filtered    (reduce (fn [q {:keys [column value]}]
-                              (drill-filter q -1 column value))
+        filtered    (reduce (fn [q {:keys [column column-ref value]}]
+                              (drill-filter q -1 column column-ref value))
                             base-query
                             (for [dimension dimensions
                                   :when (-> dimension :column :lib/source (not= :source/aggregations))]

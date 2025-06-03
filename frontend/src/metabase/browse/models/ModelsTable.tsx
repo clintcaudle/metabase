@@ -4,7 +4,6 @@ import { t } from "ttag";
 
 import { getCollectionName } from "metabase/collections/utils";
 import { EllipsifiedCollectionPath } from "metabase/common/components/EllipsifiedPath/EllipsifiedCollectionPath";
-import { useLocale } from "metabase/common/hooks/use-locale/use-locale";
 import EntityItem from "metabase/components/EntityItem";
 import { SortableColumnHeader } from "metabase/components/ItemsTable/BaseItemsTable";
 import {
@@ -33,7 +32,7 @@ import {
 } from "../components/BrowseTable.styled";
 
 import { trackModelClick } from "./analytics";
-import type { ModelResult } from "./types";
+import type { ModelResult, SortColumn } from "./types";
 import { getIcon, getModelDescription, sortModels } from "./utils";
 
 export interface ModelsTableProps {
@@ -54,7 +53,7 @@ const collectionProps: ResponsiveProps = {
   containerName: itemsTableContainerName,
 };
 
-const DEFAULT_SORTING_OPTIONS: SortingOptions = {
+const DEFAULT_SORTING_OPTIONS: SortingOptions<SortColumn> = {
   sort_column: "collection",
   sort_direction: SortDirection.Asc,
 };
@@ -63,12 +62,9 @@ export const ModelsTable = ({
   models = [],
   skeleton = false,
 }: ModelsTableProps) => {
-  const [sortingOptions, setSortingOptions] = useState<SortingOptions>(
-    DEFAULT_SORTING_OPTIONS,
-  );
+  const [sortingOptions, setSortingOptions] = useState(DEFAULT_SORTING_OPTIONS);
 
-  const locale = useLocale();
-  const sortedModels = sortModels(models, sortingOptions, locale);
+  const sortedModels = sortModels(models, sortingOptions);
 
   /** The name column has an explicitly set width. The remaining columns divide the remaining width. This is the percentage allocated to the collection column */
   const collectionWidth = 38.5;
@@ -76,7 +72,7 @@ export const ModelsTable = ({
 
   const handleUpdateSortOptions = skeleton
     ? undefined
-    : (newSortingOptions: SortingOptions) => {
+    : (newSortingOptions: SortingOptions<SortColumn>) => {
         setSortingOptions(newSortingOptions);
       };
 

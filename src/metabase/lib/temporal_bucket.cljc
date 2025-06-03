@@ -62,28 +62,176 @@
       :last    -1
       0)))
 
+(defn- temporal-interval-tru
+  "Chooses the correct temporal interval description based on the provided amount `n`."
+  [n
+   this-interval-message
+   prev-interval-message
+   prev-interval-plural-message
+   next-interval-message
+   next-interval-plural-message]
+  (cond
+    (zero? n) this-interval-message
+    (= n -1)  prev-interval-message
+    (= n 1)   next-interval-message
+    (neg? n)  prev-interval-plural-message
+    (pos? n)  next-interval-plural-message
+    :else     (throw (ex-info (str "Invalid n: " n) {:n n}))))
+
 (mu/defn describe-temporal-interval :- ::lib.schema.common/non-blank-string
   "Get a translated description of a temporal bucketing interval. If unit is unspecified, assume `:day`."
-  [n    :- TemporalIntervalAmount
-   unit :- [:maybe :keyword]]
-  (let [n    (interval-n->int n)
-        unit (or unit :day)]
-    (cond
-      (zero? n) (if (= unit :day)
-                  (i18n/tru "Today")
-                  (i18n/tru "This {0}" (describe-temporal-unit unit)))
-      (= n 1)   (if (= unit :day)
-                  (i18n/tru "Tomorrow")
-                  (i18n/tru "Next {0}" (describe-temporal-unit unit)))
-      (= n -1)  (if (= unit :day)
-                  (i18n/tru "Yesterday")
-                  (i18n/tru "Previous {0}" (describe-temporal-unit unit)))
-      (neg? n)  (i18n/tru "Previous {0} {1}" (abs n) (describe-temporal-unit (abs n) unit))
-      (pos? n)  (i18n/tru "Next {0} {1}" n (describe-temporal-unit n unit)))))
+  ([n    :- TemporalIntervalAmount
+    unit :- [:maybe :keyword]]
+   (describe-temporal-interval n unit nil))
+  ([n    :- TemporalIntervalAmount
+    unit :- [:maybe :keyword]
+    opts :- [:maybe [:map [:include-current {:optional true} :boolean]]]]
+   (let [n                (interval-n->int n)
+         unit             (or unit :day)
+         include-current? (:include-current opts)]
+     (case (keyword unit)
+       :millisecond     (temporal-interval-tru n
+                                               (i18n/tru  "This millisecond")
+                                               (if include-current?
+                                                 (i18n/tru "Previous millisecond or this millisecond")
+                                                 (i18n/tru "Previous millisecond"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} milliseconds or this millisecond" (abs n))
+                                                 (i18n/tru "Previous {0} milliseconds" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Next millisecond or this millisecond")
+                                                 (i18n/tru "Next millisecond"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} milliseconds or this millisecond" (abs n))
+                                                 (i18n/tru "Next {0} milliseconds" (abs n))))
+       :second          (temporal-interval-tru n
+                                               (i18n/tru  "This second")
+                                               (if include-current?
+                                                 (i18n/tru "Previous second or this second")
+                                                 (i18n/tru "Previous second"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} seconds or this second" (abs n))
+                                                 (i18n/tru "Previous {0} seconds" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Next second or this second")
+                                                 (i18n/tru "Next second"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} seconds or this second" (abs n))
+                                                 (i18n/tru "Next {0} seconds" (abs n))))
+       :minute          (temporal-interval-tru n
+                                               (i18n/tru  "This minute")
+                                               (if include-current?
+                                                 (i18n/tru "Previous minute or this minute")
+                                                 (i18n/tru "Previous minute"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} minutes or this minute" (abs n))
+                                                 (i18n/tru "Previous {0} minutes" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Next minute or this minute")
+                                                 (i18n/tru "Next minute"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} minutes or this minute" (abs n))
+                                                 (i18n/tru "Next {0} minutes" (abs n))))
+       :hour            (temporal-interval-tru n
+                                               (i18n/tru  "This hour")
+                                               (if include-current?
+                                                 (i18n/tru "Previous hour or this hour")
+                                                 (i18n/tru "Previous hour"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} hours or this hour" (abs n))
+                                                 (i18n/tru "Previous {0} hours" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Next hour or this hour")
+                                                 (i18n/tru "Next hour"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} hours or this hour" (abs n))
+                                                 (i18n/tru "Next {0} hours" (abs n))))
+       :day             (temporal-interval-tru n
+                                               (i18n/tru  "Today")
+                                               (if include-current?
+                                                 (i18n/tru "Today or yesterday")
+                                                 (i18n/tru "Yesterday"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} days or today" (abs n))
+                                                 (i18n/tru "Previous {0} days" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Today or tomorrow")
+                                                 (i18n/tru "Tomorrow"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} days or today" (abs n))
+                                                 (i18n/tru "Next {0} days" (abs n))))
+       :week            (temporal-interval-tru n
+                                               (i18n/tru  "This week")
+                                               (if include-current?
+                                                 (i18n/tru "Previous week or this week")
+                                                 (i18n/tru "Previous week"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} weeks or this week" (abs n))
+                                                 (i18n/tru "Previous {0} weeks" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Next week or this week")
+                                                 (i18n/tru "Next week"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} weeks or this week" (abs n))
+                                                 (i18n/tru "Next {0} weeks" (abs n))))
+       :month           (temporal-interval-tru n
+                                               (i18n/tru  "This month")
+                                               (if include-current?
+                                                 (i18n/tru "Previous month or this month")
+                                                 (i18n/tru "Previous month"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} months or this month" (abs n))
+                                                 (i18n/tru "Previous {0} months" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Next month or this month")
+                                                 (i18n/tru "Next month"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} months or this month" (abs n))
+                                                 (i18n/tru "Next {0} months" (abs n))))
+       :quarter         (temporal-interval-tru n
+                                               (i18n/tru  "This quarter")
+                                               (if include-current?
+                                                 (i18n/tru "Previous quarter or this quarter")
+                                                 (i18n/tru "Previous quarter"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} quarters or this quarter" (abs n))
+                                                 (i18n/tru "Previous {0} quarters" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Next quarter or this quarter")
+                                                 (i18n/tru "Next quarter"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} quarters or this quarter" (abs n))
+                                                 (i18n/tru "Next {0} quarters" (abs n))))
+       :year            (temporal-interval-tru n
+                                               (i18n/tru  "This year")
+                                               (if include-current?
+                                                 (i18n/tru "Previous year or this year")
+                                                 (i18n/tru "Previous year"))
+                                               (if include-current?
+                                                 (i18n/tru "Previous {0} years or this year" (abs n))
+                                                 (i18n/tru "Previous {0} years" (abs n)))
+                                               (if include-current?
+                                                 (i18n/tru "Next year or this year")
+                                                 (i18n/tru "Next year"))
+                                               (if include-current?
+                                                 (i18n/tru "Next {0} years or this year" (abs n))
+                                                 (i18n/tru "Next {0} years" (abs n))))
+       ;; else
+       (i18n/tru "Unknown unit")))))
+
+(defn- relative-datetime-tru
+  "Chooses the correct relative interval description based on the provided amount `n`."
+  [n
+   prev-interval-message
+   next-interval-message]
+  (cond
+    (neg? n) prev-interval-message
+    (pos? n) next-interval-message
+    :else
+    (i18n/tru "starting now")))
 
 (mu/defn describe-relative-datetime :- ::lib.schema.common/non-blank-string
-  "Get a translated description of a relative datetime interval, ported from
- `frontend/src/metabase-lib/queries/utils/query-time.js`.
+  "Get a translated description of the offset part of a relative datetime interval.
 
   e.g. if the relative interval is `-1 days`, then `n` = `-1` and `unit` = `:day`.
 
@@ -92,19 +240,47 @@
    unit :- [:maybe :keyword]]
   (let [n    (interval-n->int n)
         unit (or unit :day)]
-    (cond
-      (zero? n)
-      (i18n/tru "Now")
+    (case (keyword unit)
+      :millisecond (relative-datetime-tru n
+                                          (i18n/trun "starting {0} millisecond ago" "starting {0} milliseconds ago" (abs n))
+                                          (i18n/trun "starting {0} millisecond from now" "starting {0} milliseconds from now" (abs n)))
+      :second      (relative-datetime-tru n
+                                          (i18n/trun "starting {0} second ago" "starting {0} seconds ago" (abs n))
+                                          (i18n/trun "starting {0} second from now" "starting {0} seconds from now" (abs n)))
+      :minute      (relative-datetime-tru n
+                                          (i18n/trun "starting {0} minute ago" "starting {0} minutes ago" (abs n))
+                                          (i18n/trun "starting {0} minute from now" "starting {0} minutes from now" (abs n)))
+      :hour        (relative-datetime-tru n
+                                          (i18n/trun "starting {0} hour ago" "starting {0} hours ago" (abs n))
+                                          (i18n/trun "starting {0} hour from now" "starting {0} hours from now" (abs n)))
+      :day         (relative-datetime-tru n
+                                          (i18n/trun "starting {0} day ago" "starting {0} days ago" (abs n))
+                                          (i18n/trun "starting {0} day from now" "starting {0} days from now" (abs n)))
+      :week        (relative-datetime-tru n
+                                          (i18n/trun "starting {0} week ago" "starting {0} weeks ago" (abs n))
+                                          (i18n/trun "starting {0} week from now" "starting {0} weeks from now" (abs n)))
+      :month       (relative-datetime-tru n
+                                          (i18n/trun "starting {0} month ago" "starting {0} months ago" (abs n))
+                                          (i18n/trun "starting {0} month from now" "starting {0} months from now" (abs n)))
+      :quarter     (relative-datetime-tru n
+                                          (i18n/trun "starting {0} quarter ago" "starting {0} quarters ago" (abs n))
+                                          (i18n/trun "starting {0} quarter from now" "starting {0} quarters from now" (abs n)))
+      :year        (relative-datetime-tru n
+                                          (i18n/trun "starting {0} year ago" "starting {0} years ago" (abs n))
+                                          (i18n/trun "starting {0} year from now" "starting {0} years from now" (abs n)))
+      ;; else
+      (i18n/tru "Unknown unit"))))
 
-      (neg? n)
-      ;; this should legitimately be lowercasing in the user locale. I know system locale isn't necessarily the same
-      ;; thing, but it might be. This will have to do until we have some sort of user-locale lower-case functionality
-      #_{:clj-kondo/ignore [:discouraged-var]}
-      (i18n/tru "{0} {1} ago" (abs n) (str/lower-case (describe-temporal-unit (abs n) unit)))
-
-      :else
-      #_{:clj-kondo/ignore [:discouraged-var]}
-      (i18n/tru "{0} {1} from now" n (str/lower-case (describe-temporal-unit n unit))))))
+(mu/defn describe-temporal-interval-with-offset :- ::lib.schema.common/non-blank-string
+  "Get a translated description of a temporal bucketing interval with offset."
+  [n           :- TemporalIntervalAmount
+   unit        :- [:maybe :keyword]
+   offset      :- TemporalIntervalAmount
+   offset-unit :- [:maybe :keyword]]
+  (str
+   (describe-temporal-interval n unit)
+   ", "
+   (describe-relative-datetime offset offset-unit)))
 
 (defmulti with-temporal-bucket-method
   "Implementation for [[temporal-bucket]]. Implement this to tell [[temporal-bucket]] how to add a bucket to a

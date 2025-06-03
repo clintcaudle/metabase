@@ -1,5 +1,6 @@
 import type {
   CollectionPermissions,
+  DatabaseId,
   GroupsPermissions,
   SettingDefinition,
   SettingKey,
@@ -8,6 +9,7 @@ import type {
 export type AdminPathKey =
   | "data-model"
   | "settings"
+  | "metabot"
   | "people"
   | "databases"
   | "permissions"
@@ -43,9 +45,12 @@ export interface AdminState {
     settings: SettingDefinition[];
     warnings: Partial<Record<SettingKey, unknown>>;
   };
+  databases: {
+    deletionError: null | unknown;
+    deletes: DatabaseId[];
+  };
 }
 
 export interface AdminAppState {
-  isNoticeEnabled: boolean;
   paths: AdminPath[];
 }

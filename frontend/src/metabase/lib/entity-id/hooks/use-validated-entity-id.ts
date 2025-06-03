@@ -1,11 +1,15 @@
 import { useMemo } from "react";
+import _ from "underscore";
 
 import { skipToken } from "metabase/api";
 import { useTranslateEntityIdQuery } from "metabase/api/entity-id";
-import type { BaseEntityId, CardId, DashboardId } from "metabase-types/api";
 import { isBaseEntityID } from "metabase-types/api/entity-id";
 
-type SUPPORTED_ENTITIES = { dashboard: DashboardId; card: CardId };
+import type {
+  SUPPORTED_ENTITIES,
+  ValidatedEntityIdProps,
+  ValidatedEntityIdReturned,
+} from "../types";
 
 /**
  * A hook that validates and potentially translates an entity ID.
@@ -25,26 +29,15 @@ export const useValidatedEntityId = <
 >({
   type,
   id,
-}: {
-  type: TEntity;
-  id: BaseEntityId | string | number | null | undefined;
-}):
-  | { id: TReturnedId; isLoading: false; isError: false }
-  | {
-      id: null;
-      isLoading: true;
-      isError: false;
-    }
-  | {
-      id: null;
-      isLoading: false;
-      isError: true;
-    } => {
+}: ValidatedEntityIdProps<TEntity>): ValidatedEntityIdReturned<
+  TEntity,
+  TReturnedId
+> => {
   const isEntityId = isBaseEntityID(id);
   const {
     data: entity_ids,
     isError,
-    isLoading,
+    isFetching,
   } = useTranslateEntityIdQuery(
     id && isEntityId
       ? {
@@ -54,7 +47,7 @@ export const useValidatedEntityId = <
   );
 
   return useMemo(() => {
-    if (!isEntityId) {
+    if (_.isNumber(id)) {
       // no need to translate anything if the id is already not a entity id
       return {
         id: id as TReturnedId,
@@ -63,12 +56,20 @@ export const useValidatedEntityId = <
       } as const;
     }
 
-    if (isLoading) {
-      return { id: null, isLoading: true, isError: false } as const;
+    if (isFetching) {
+      return {
+        id: null,
+        isLoading: true,
+        isError: false,
+      } as const;
     }
 
-    if (isError) {
-      return { id: null, isLoading: false, isError: true } as const;
+    if (!isEntityId || isError) {
+      return {
+        id: null,
+        isLoading: false,
+        isError: true,
+      } as const;
     }
 
     if (entity_ids && entity_ids[id]?.status === "ok") {
@@ -81,5 +82,5 @@ export const useValidatedEntityId = <
 
     // something went wrong, either entity_ids is empty or the translation failed
     return { id: null, isLoading: false, isError: true } as const;
-  }, [isEntityId, isLoading, isError, entity_ids, id]);
+  }, [isEntityId, isFetching, isError, entity_ids, id]);
 };

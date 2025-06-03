@@ -7,9 +7,17 @@ on:
         required: true
         type: number
         default: 30
+      specs:
+        required: false
+        type: string
+        default: "./e2e/test/scenarios/**/*.cy.spec.*"
     outputs:
       matrix:
         value: ${{ jobs.build-matrix.outputs.matrix }}
+      regularChunks:
+        value: ${{ jobs.build-matrix.outputs.regularChunks }}
+      isDefaultSpecPattern:
+        value: ${{ jobs.build-matrix.outputs.isDefaultSpecPattern }}
 
 jobs:
   build-matrix:
@@ -17,75 +25,39 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.matrix.outputs.config }}
+      regularChunks: ${{ steps.matrix.outputs.regularChunks }}
+      isDefaultSpecPattern: ${{ steps.matrix.outputs.isDefaultSpecPattern }}
     steps:
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '20.x'
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: e2e
-      - name: get test file names
-        id: test-files
-        shell: bash
-        run: |
-          echo "::set-output name=filenames::$(find e2e/test/scenarios -name '*.cy.spec.*' | tr '\n' ',')"
-      - run: yarn add underscore
-      - uses: actions/github-script@v7
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/Jod # 22.x.x
+      - name: Build e2e matrix
+        uses: actions/github-script@v7
         id: matrix
+        env:
+          chunks: ${{ inputs.chunks }}
         with:
           script: | # js
-            const _ = require('underscore');
-
+            const { buildMatrix } = require('${{ github.workspace }}/.github/scripts/build-e2e-matrix.js');
+            const inputSpecs = "${{ inputs.specs }}";
+            const inputChunks = Number(process.env.chunks);
             const java = 21;
             const defaultRunner = "ubuntu-22.04";
-
-            // these are special and shouldn't be chunked out arbitrarily
-            const blacklist = [
-              "/embedding-sdk/",
-              "/cross-version/"
-            ];
-
-            const defaultOptions = {
-              "java-version": java,
-              runner: defaultRunner,
-              specs: "./e2e/test/scenarios/**/*.cy.spec.*",
-              edition: "ee",
+            const options = {
+              java,
+              defaultRunner,
             };
+            const { config, regularChunks, isDefaultSpecPattern } = buildMatrix(options, inputSpecs, inputChunks);
 
-            const specialTests = [
-              { name: "embedding-sdk", specs: "./e2e/test/scenarios/embedding-sdk/**.cy.spec.*" },
-              { name: "oss-subset", edition: 'oss', tags: "@OSS" },
-              { name: "slow", tags: "@slow" },
-              { name: "mongo", tags: "@mongo" },
-            ];
-
-            const fileNames = "${{ steps.test-files.outputs.filenames }}"
-              .split(",")
-              .filter(Boolean)
-              .filter(testPath => !blacklist.some(blacklisted => testPath.includes(blacklisted)));
-
-            const fileCount = fileNames.length;
-
-            // subtract the special tests since they all get their own runners
-            const chunkSize = fileCount / (Number('${{ inputs.chunks }}') - specialTests.length);
-
-
-
-            const chunkedFiles = _.chunk(fileNames, chunkSize);
-
-            const regularTests = chunkedFiles.map((files, index) => ({
-              name: `e2e-group-${index + 1}`,
-              specs: files.join(","),
-              tags: '',
-            }));
-
-            const testSets = [...regularTests, ...specialTests];
-
-            const config = testSets.map((options) => ({
-              ...defaultOptions,
-              ...options,
-            }));
-
-            console.log("matrix config", config);
-
+            core.setOutput("regularChunks", JSON.stringify(regularChunks));
             core.setOutput("config", JSON.stringify({ include: config }));
+            core.setOutput("isDefaultSpecPattern", JSON.stringify(isDefaultSpecPattern));
+
+            console.log({ regularChunks });
+            console.log("matrix config", config);
+            console.log("isDefaultSpecPattern", isDefaultSpecPattern);

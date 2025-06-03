@@ -37,12 +37,12 @@
 
 .Dashboard.DashboardFullscreen .fullscreenNormalText {
   color: var(--mb-color-text-dark);
-  transition: color 1s linear;
+  transition: var(--transition-theme-change);
 }
 
 .Dashboard.DashboardNight.DashboardFullscreen .fullscreenNightText {
   color: var(--mb-color-text-white-alpha-85);
-  transition: color 1s linear;
+  transition: var(--transition-theme-change);
 }
 
 .Dashboard.DashboardNight .DashCard .Card svg text {
@@ -59,10 +59,9 @@
 
 /* Night mode transition */
 .Dashboard.DashboardFullscreen,
+.Dashboard.DashboardFullscreen .ParameterFieldSet,
 .Dashboard.DashboardFullscreen .DashCard .Card {
-  transition:
-    background-color 1s linear,
-    border 1s linear;
+  transition: var(--transition-theme-change);
 }
 
 .DashEditing {
@@ -180,13 +179,6 @@
 /* Used in frontend/src/metabase/dashboard/components/DashCard/DashCardActionsPanel/DashCardActionsPanel.styled.tsx */
 /* stylelint-disable-next-line block-no-empty */
 .DashDragging {
-}
-
-.Modal.AddSeriesModal {
-  height: 80%;
-  max-height: 600px;
-  width: 80%;
-  max-width: 1024px;
 }
 
 /* what for to print the dashboards */

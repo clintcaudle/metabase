@@ -3,21 +3,24 @@
    [clojure.string :as str]
    [honey.sql :as sql]
    [honey.sql.helpers :as sql.helpers]
-   [metabase.config :as config]
-   [metabase.db :as mdb]
-   [metabase.models.search-index-metadata :as search-index-metadata]
+   [metabase.analytics.core :as analytics]
+   [metabase.app-db.core :as mdb]
+   [metabase.config.core :as config]
    [metabase.search.appdb.specialization.api :as specialization]
    [metabase.search.appdb.specialization.h2 :as h2]
    [metabase.search.appdb.specialization.postgres :as postgres]
    [metabase.search.config :as search.config]
    [metabase.search.engine :as search.engine]
+   [metabase.search.models.search-index-metadata :as search-index-metadata]
    [metabase.search.spec :as search.spec]
    [metabase.util :as u]
+   [metabase.util.i18n :as i18n]
    [metabase.util.json :as json]
    [metabase.util.log :as log]
    [toucan2.core :as t2])
   (:import
    (clojure.lang ExceptionInfo)
+   (org.h2.jdbc JdbcSQLSyntaxErrorException)
    (org.postgresql.util PSQLException)))
 
 (comment
@@ -33,7 +36,7 @@
 (defonce ^:dynamic ^:private *index-version-id*
   (if config/is-prod?
     (:hash config/mb-version-info)
-    (str (random-uuid))))
+    (u/lower-case-en (u/generate-nano-id))))
 
 (defonce ^:private next-sync-at (atom nil))
 
@@ -78,7 +81,7 @@
 (defn gen-table-name
   "Generate a unique table name to use as a search index table."
   []
-  (keyword (str/replace (str "search_index__" (random-uuid)) #"-" "_")))
+  (keyword (str/replace (str "search_index__" (u/lower-case-en (u/generate-nano-id))) #"-" "_")))
 
 (defn- table-name [kw]
   (cond-> (name kw)
@@ -166,12 +169,13 @@
 (defn create-table!
   "Create an index table with the given name. Should fail if it already exists."
   [table-name]
-  (-> (sql.helpers/create-table table-name)
-      (sql.helpers/with-columns (specialization/table-schema base-schema))
-      t2/query)
-  (let [table-name (name table-name)]
-    (doseq [stmt (specialization/post-create-statements table-name table-name)]
-      (t2/query stmt))))
+  (t2/with-transaction [_]
+    (-> (sql.helpers/create-table table-name)
+        (sql.helpers/with-columns (specialization/table-schema base-schema))
+        t2/query)
+    (let [table-name (name table-name)]
+      (doseq [stmt (specialization/post-create-statements table-name table-name)]
+        (t2/query stmt)))))
 
 (defn maybe-create-pending!
   "Create a search index table if one doesn't exist. Record and return the name of the table, regardless."
@@ -212,7 +216,7 @@
 (defn- document->entry [entity]
   (-> entity
       (select-keys
-       ;; remove attrs that get aliased
+       ;; remove attrs that get explicitly aliased below
        (remove #{:id :created_at :updated_at :native_query}
                (conj search.spec/attr-columns :model :display_data :legacy_input)))
       (update :display_data json/encode)
@@ -224,29 +228,24 @@
        :model_updated_at (:updated_at entity))
       (merge (specialization/extra-entry-fields entity))))
 
-(defn delete!
-  "Remove any entries corresponding directly to a given model instance."
-  [id search-models]
-  ;; In practice, we expect this to be 1-1, but the data model does not preclude it.
-  (when (seq search-models)
-    (doseq [table-name [(active-table) (pending-table)] :when table-name]
-      (t2/delete! table-name :model_id id :model [:in search-models]))))
-
 (defn- safe-batch-upsert! [table-name entries]
   ;; For convenience, no-op if we are not tracking any table.
   (when table-name
     (try
       (specialization/batch-upsert! table-name entries)
       (catch Exception e
-        ;; TODO we should handle the H2, MySQL, and MariaDB flavors here too
-        (if (instance? PSQLException (ex-cause e))
-          ;; Suppress database errors, which are likely due to stale tracking data.
-          (sync-tracking-atoms!)
+        ;; TODO we should handle the MySQL and MariaDB flavors here too
+        (if (or (instance? PSQLException (ex-cause e))
+                (instance? JdbcSQLSyntaxErrorException (ex-cause e)))
+          ;; If resetting tracking atoms resolves the issue (which is likely happened because of stale tracking data),
+          ;; suppress the issue - but throw it all the way to the caller if the issue persists
+          (do (sync-tracking-atoms!)
+              (specialization/batch-upsert! table-name entries))
           (throw e))))))
 
 (defn- batch-update!
   "Create the given search index entries in bulk"
-  [documents]
+  [context documents]
   ;; Protect against tests that nuke the appdb
   (when config/is-test?
     (when-let [table (active-table)]
@@ -258,20 +257,52 @@
         (log/warnf "Unable to find table %s and no longer tracking it as pending", table)
         (swap! *indexes* assoc :pending nil))))
 
-  (let [entries          (map document->entry documents)
-        ;; Optimization idea: if the updates are coming from the re-indexing worker, skip updating the active table.
-        ;;                    this should give a close to 2x speed-up as insertion is the bottleneck, and most of the
-        ;;                    updates will be no-ops in any case.
-        active-updated?  (safe-batch-upsert! (active-table) entries)
+  (let [active-table (active-table)
+        entries (map document->entry documents)
+        ;; No need to update the active index if we are doing a full index and it will be swapped out soon. Most updates are no-ops anyway.
+        active-updated? (when-not (and active-table (= context :search/reindexing)) (safe-batch-upsert! active-table entries))
         pending-updated? (safe-batch-upsert! (pending-table) entries)]
     (when (or active-updated? pending-updated?)
-      (->> entries (map :model) frequencies))))
+      (u/prog1 (->> entries (map :model) frequencies)
+        (log/trace "indexed documents for " <>)
+        (when active-updated?
+          (analytics/set! :metabase-search/appdb-index-size (t2/count (name active-table))))))))
 
-(defmethod search.engine/consume! :search.engine/appdb [_engine document-reducible]
+(defn index-docs!
+  "Indexes the documents. The context should be :search/updating or :search/reindexing.
+   Context should be :search/updating or :search/reindexing to help control how to manage the updates"
+  [context document-reducible]
   (transduce (comp (partition-all insert-batch-size)
-                   (map batch-update!))
+                   (map (partial batch-update! context)))
              (partial merge-with +)
              document-reducible))
+
+(defmethod search.engine/update! :search.engine/appdb [_engine document-reducible]
+  (index-docs! :search/updating document-reducible))
+
+(defmethod search.engine/delete! :search.engine/appdb [_engine search-model ids]
+  (when (seq ids)
+    (u/prog1 (->> [(active-table) (pending-table)]
+                  (keep (fn [table-name]
+                          (when table-name
+                            {search-model (t2/delete! table-name :model search-model :model_id [:in (set ids)])})))
+                  (apply merge-with +)
+                  (into {}))
+      (when (active-table)
+        (analytics/set! :metabase-search/appdb-index-size (:count (t2/query-one {:select [[:%count.* :count]]
+                                                                                 :from   [(active-table)]
+                                                                                 :limit  1})))))))
+
+(defn when-index-created
+  "Return creation time of the active index, or nil if there is none."
+  []
+  (t2/select-one-fn :created_at
+                    :model/SearchIndexMetadata
+                    :engine :appdb
+                    :version *index-version-id*
+                    :lang_code (i18n/site-locale-string)
+                    :status :active
+                    {:order-by [[:created_at :desc]]}))
 
 (defn search-query
   "Query fragment for all models corresponding to a query parameter `:search-term`."
@@ -312,13 +343,15 @@
 
 #_{:clj-kondo/ignore [:metabase/test-helpers-use-non-thread-safe-functions]}
 (defmacro with-temp-index-table
-  "Create a temporary index table for the duration of the body."
+  "Create a temporary index table for the duration of the body. Uses the existing index if we're already mocking."
   [& body]
-  `(let [table-name# (gen-table-name)]
-     (binding [*mocking-tables* true
-               *indexes*        (atom {:active table-name#})]
-       (try
-         (create-table! table-name#)
-         ~@body
-         (finally
-           (#'drop-table! table-name#))))))
+  `(if @#'*mocking-tables*
+     ~@body
+     (let [table-name# (gen-table-name)]
+       (binding [*mocking-tables* true
+                 *indexes*        (atom {:active table-name#})]
+         (try
+           (create-table! table-name#)
+           ~@body
+           (finally
+             (#'drop-table! table-name#)))))))

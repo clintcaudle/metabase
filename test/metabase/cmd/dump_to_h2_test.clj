@@ -3,16 +3,16 @@
    [clojure.java.io :as io]
    [clojure.java.jdbc :as jdbc]
    [clojure.test :refer :all]
-   [metabase.cmd :as cmd]
+   [metabase.app-db.connection :as mdb.connection]
+   [metabase.app-db.core :as mdb]
+   [metabase.app-db.test-util :as mdb.test-util]
    [metabase.cmd.copy :as copy]
    [metabase.cmd.copy.h2 :as copy.h2]
+   [metabase.cmd.core :as cmd]
    [metabase.cmd.dump-to-h2 :as dump-to-h2]
    [metabase.cmd.load-from-h2 :as load-from-h2]
    [metabase.cmd.test-util :as cmd.test-util]
-   [metabase.config :as config]
-   [metabase.db :as mdb]
-   [metabase.db.connection :as mdb.connection]
-   [metabase.db.test-util :as mdb.test-util]
+   [metabase.config.core :as config]
    [metabase.driver :as driver]
    [metabase.test :as mt]
    [metabase.test.data.interface :as tx]
@@ -31,8 +31,8 @@
           file-contents        {tmp-h2-db    h2-file-dump-content
                                 tmp-h2-db-mv h2-file-dump-content}]
       ;; 1. Don't actually run the copy steps themselves or the flush
-      (mt/with-dynamic-redefs [copy/copy!    (constantly nil)
-                               jdbc/execute! (constantly nil)]
+      (mt/with-dynamic-fn-redefs [copy/copy!    (constantly nil)
+                                  jdbc/execute! (constantly nil)]
         (doseq [[filename contents] file-contents]
           (spit filename contents))
         (dump-to-h2/dump-to-h2! tmp-h2-db)

@@ -10,6 +10,7 @@ import {
   DatabaseDataSelector,
   SchemaAndTableDataSelector,
 } from "metabase/query_builder/components/DataSelector";
+import { Flex } from "metabase/ui";
 
 const DataSourceSelectorsPropTypes = {
   isNativeEditorOpen: PropTypes.bool,
@@ -69,10 +70,10 @@ const DataSourceSelectors = ({
     const allDatabases = query
       .metadata()
       .databasesList({ savedQuestions: false })
-      .filter(db => db.canWrite());
+      .filter((db) => db.canWrite());
 
     if (editorContext === "action") {
-      return allDatabases.filter(database => database.hasActionsEnabled());
+      return allDatabases.filter((database) => database.hasActionsEnabled());
     }
 
     return allDatabases;
@@ -151,7 +152,7 @@ PopulatedDataSourceSelectors.propTypes = PopulatedDataSourceSelectorsPropTypes;
 
 const checkIfThereAreMultipleDatabases = (database, databases) =>
   database == null ||
-  (databases.length > 1 && databases.some(db => db.id === database.id));
+  (databases.length > 1 && databases.some((db) => db.id === database.id));
 
 const DatabaseSelector = ({ database, databases, readOnly, setDatabaseId }) => (
   <div
@@ -177,9 +178,15 @@ const DatabaseSelector = ({ database, databases, readOnly, setDatabaseId }) => (
 DatabaseSelector.propTypes = DatabaseSelectorPropTypes;
 
 const SingleDatabaseName = ({ database }) => (
-  <div className={cx(CS.p2, CS.textBold)} data-testid="selected-database">
+  <Flex
+    h="55px"
+    px="md"
+    align="center"
+    fw="bold"
+    data-testid="selected-database"
+  >
     {database.name}
-  </div>
+  </Flex>
 );
 
 SingleDatabaseName.propTypes = SingleDatabaseNamePropTypes;
@@ -215,9 +222,13 @@ const Placeholder = ({ query, editorContext }) => {
 
   const language = getNativeQueryLanguage(query.engine());
   return (
-    <div className={cx(CS.ml2, CS.p2, CS.textMedium)}>
+    <Flex
+      align="center"
+      h="55px"
+      className={cx(CS.textNoWrap, CS.ml2, CS.px2, CS.textMedium)}
+    >
       {t`This question is written in ${language}.`}
-    </div>
+    </Flex>
   );
 };
 

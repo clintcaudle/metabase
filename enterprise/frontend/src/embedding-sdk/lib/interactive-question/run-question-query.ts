@@ -1,6 +1,7 @@
 import type { SdkQuestionState } from "embedding-sdk/types/question";
 import type { Deferred } from "metabase/lib/promise";
 import { runQuestionQuery } from "metabase/services";
+import { getSensibleDisplays } from "metabase/visualizations";
 import * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
 
@@ -14,9 +15,6 @@ export async function runQuestionQuerySdk(
   params: RunQuestionQueryParams,
 ): Promise<SdkQuestionState> {
   let { question, originalQuestion, cancelDeferred } = params;
-
-  const query = question.query();
-  const { isNative } = Lib.queryDisplayInfo(query);
 
   if (question.isSaved()) {
     const type = question.type();
@@ -32,12 +30,16 @@ export async function runQuestionQuerySdk(
 
   let queryResults;
 
-  if (question.canRun() && (question.isSaved() || !isNative)) {
+  if (shouldRunCardQuery(question)) {
     queryResults = await runQuestionQuery(question, {
       cancelDeferred,
       ignoreCache: false,
       isDirty: isQueryDirty,
     });
+
+    const [{ data }] = queryResults;
+    const sensibleDisplays = getSensibleDisplays(data);
+    question = question.maybeResetDisplay(data, sensibleDisplays, undefined);
   }
 
   // FIXME: this removes "You can also get an alert when there are some results." feature for question
@@ -46,4 +48,11 @@ export async function runQuestionQuerySdk(
   }
 
   return { question, queryResults };
+}
+
+export function shouldRunCardQuery(question: Question): boolean {
+  const query = question.query();
+  const { isNative } = Lib.queryDisplayInfo(query);
+
+  return question.canRun() && (question.isSaved() || !isNative);
 }

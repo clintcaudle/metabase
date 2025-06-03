@@ -3,6 +3,7 @@ import cx from "classnames";
 import ExternalLink from "metabase/core/components/ExternalLink";
 import Link from "metabase/core/components/Link";
 import CS from "metabase/css/core/index.css";
+import { isEmbeddingSdk } from "metabase/env";
 import { isSameOrSiteUrlOrigin } from "metabase/lib/dom";
 import { getDataFromClicked } from "metabase-lib/v1/parameters/utils/click-behavior";
 import { isURL } from "metabase-lib/v1/types/utils/isa";
@@ -33,13 +34,19 @@ export function getUrlProtocol(url: string) {
 }
 
 export function formatUrl(value: string, options: OptionsType = {}) {
-  const { jsx, rich } = options;
+  const { jsx, rich, column } = options;
 
   const url = getLinkUrl(value, options);
 
   if (jsx && rich && url) {
     const text = getLinkText(value, options);
     const className = cx(CS.link, CS.linkWrappable);
+
+    // (metabase#51099) prevent url from being rendered as a link when in sdk
+    if (isEmbeddingSdk) {
+      return url;
+    }
+
     if (isSameOrSiteUrlOrigin(url)) {
       return (
         <Link className={className} to={url}>
@@ -52,6 +59,9 @@ export function formatUrl(value: string, options: OptionsType = {}) {
         {text}
       </ExternalLink>
     );
+  } else if (!url && !isURL(column)) {
+    // Even when no URL is found, return a formatted value
+    return formatValue(value, { ...options, view_as: null });
   } else {
     return value;
   }

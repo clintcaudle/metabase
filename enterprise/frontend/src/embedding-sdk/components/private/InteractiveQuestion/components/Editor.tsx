@@ -12,19 +12,34 @@ import { getSetting } from "metabase/selectors/settings";
 import { ScrollArea } from "metabase/ui";
 import type Question from "metabase-lib/v1/Question";
 
-type EditorProps = { onApply?: () => void };
+/**
+ * @interface
+ * @expand
+ * @category InteractiveQuestion
+ */
+export type InteractiveQuestionEditorProps = {
+  /**
+   * Callback function executed when changes are applied
+   */
+  onApply?: () => void;
+};
 
-export const Editor = ({ onApply = () => {} }: EditorProps) => {
+/**
+ * Advanced query editor that provides full access to question configuration.
+ * Includes filtering, aggregation, custom expressions, and joins.
+ *
+ * @function
+ * @category InteractiveQuestion
+ * @param props
+ */
+export const Editor = ({
+  onApply = () => {},
+}: InteractiveQuestionEditorProps) => {
   // Loads databases and metadata so we can show notebook steps for the selected data source
   useDatabaseListQuery();
 
-  const {
-    question,
-    originalQuestion,
-    updateQuestion,
-    runQuestion,
-    modelsFilterList,
-  } = useInteractiveQuestionContext();
+  const { question, originalQuestion, updateQuestion, queryQuestion } =
+    useInteractiveQuestionContext();
 
   const isDirty = useMemo(() => {
     return isQuestionDirty(question, originalQuestion);
@@ -34,7 +49,7 @@ export const Editor = ({ onApply = () => {} }: EditorProps) => {
     return isQuestionRunnable(question, isDirty);
   }, [question, isDirty]);
 
-  const reportTimezone = useSelector(state =>
+  const reportTimezone = useSelector((state) =>
     getSetting(state, "report-timezone-long"),
   );
 
@@ -54,11 +69,10 @@ export const Editor = ({ onApply = () => {} }: EditorProps) => {
           }
           runQuestionQuery={async () => {
             onApply();
-            await runQuestion();
+            await queryQuestion();
           }}
           setQueryBuilderMode={() => {}}
           hasVisualizeButton={true}
-          modelsFilterList={modelsFilterList}
         />
       </ScrollArea>
     )

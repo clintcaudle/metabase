@@ -1,6 +1,7 @@
 import { t } from "ttag";
 
-import { Button } from "metabase/ui";
+import { useRegisterShortcut } from "metabase/palette/hooks/useRegisterShortcut";
+import { Button, Icon } from "metabase/ui";
 import * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
 import type { DatasetEditorTab, QueryBuilderMode } from "metabase-types/store";
@@ -20,14 +21,31 @@ export function QuestionNotebookButton({
   isShowingNotebook,
   setQueryBuilderMode,
 }: QuestionNotebookButtonProps) {
+  useRegisterShortcut(
+    [
+      {
+        id: "query-builder-toggle-notebook-editor",
+        perform: () =>
+          setQueryBuilderMode(isShowingNotebook ? "view" : "notebook"),
+      },
+    ],
+    [isShowingNotebook],
+  );
   return (
     <Button
       data-testid="notebook-button"
+      leftSection={
+        isShowingNotebook ? (
+          <Icon name="lineandbar" />
+        ) : (
+          <Icon name="pencil_lines" />
+        )
+      }
       onClick={() =>
         setQueryBuilderMode(isShowingNotebook ? "view" : "notebook")
       }
     >
-      {isShowingNotebook ? t`Show Visualization` : t`Show Editor`}
+      {isShowingNotebook ? t`Visualization` : t`Editor`}
     </Button>
   );
 }

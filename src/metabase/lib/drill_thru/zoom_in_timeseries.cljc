@@ -14,8 +14,7 @@
   - `dimensions` have a date or datetime column with `year`, `quarter`, `month`, `week`, `day`, `hour` temporal unit.
     For other units, or when there is no temporal bucketing, this drill cannot be applied. Changing `hour` to `minute`
     ends the sequence for datetime columns (`week` to `day` for date columns). Only the first matching column would be
-    used in query transformation. If `dimensions` are not provided, `row` data will instead be used to try to find a
-    `matching-breakout-dimension`.
+    used in query transformation.
 
   - `displayInfo` returns `displayName` with `See this {0} by {1}` string using the current and the next available
     temporal unit.
@@ -130,7 +129,9 @@
   (let [{:keys [column value]} dimension
         old-breakout           (:column-ref dimension)
         new-breakout           (lib.temporal-bucket/with-temporal-bucket old-breakout next-unit)
-        stage-number           (lib.underlying/top-level-stage-number query)]
+        stage-number           (lib.underlying/top-level-stage-number query)
+        resolved-column        (lib.drill-thru.common/breakout->resolved-column
+                                query stage-number column {:preserve-type? true})]
     (-> query
-        (lib.filter/filter stage-number (lib.filter/= column value))
+        (lib.filter/filter stage-number (lib.filter/= resolved-column value))
         (lib.remove-replace/replace-clause stage-number old-breakout new-breakout))))

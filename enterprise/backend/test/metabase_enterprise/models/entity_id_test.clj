@@ -1,4 +1,4 @@
-(ns ^:mb/once metabase-enterprise.models.entity-id-test
+(ns metabase-enterprise.models.entity-id-test
   "To support serialization, all exported entities should have either an external name (eg. a database path) or a
   generated NanoID in a column called entity_id. There's a property :entity_id to automatically populate that field.
 
@@ -9,14 +9,9 @@
    [metabase-enterprise.serialization.v2.backfill-ids :as serdes.backfill]
    [metabase-enterprise.serialization.v2.entity-ids :as v2.entity-ids]
    [metabase-enterprise.serialization.v2.models :as serdes.models]
-   [metabase.models]
-   [metabase.models.revision-test]
    [metabase.models.serialization :as serdes]))
 
 (set! *warn-on-reflection* true)
-
-(comment metabase.models/keep-me
-         metabase.models.revision-test/keep-me)
 
 (def ^:private entities-external-name
   "Entities with external names, so they don't need a generated entity_id."
@@ -47,17 +42,16 @@
     :model/CollectionBookmark
     :model/DashboardBookmark
     :model/DataPermissions
+    :model/DatabaseRouter
     :model/CollectionPermissionGraphRevision
     :model/DashboardCardSeries
     :model/LoginHistory
-    :model/FieldUsage
     :model/FieldValues
-    :model/LegacyMetric
-    :model/LegacyMetricImportantField
     :model/ModelIndex
     :model/ModelIndexValue
     :model/ModerationReview
     :model/Notification
+    :model/NotificationCard
     :model/NotificationSubscription
     :model/NotificationHandler
     :model/NotificationRecipient
@@ -82,7 +76,6 @@
     :model/SearchIndexMetadata
     :model/Secret
     :model/Session
-    :model/TablePrivileges
     :model/TaskHistory
     :model/TimelineEvent
     :model/User
@@ -95,14 +88,12 @@
 
 (deftest ^:parallel comprehensive-entity-id-test
   (let [entity-id-models (->> (v2.entity-ids/toucan-models)
-                              (remove (fn [model]
-                                        (not= (namespace model) "model")))
                               (remove entities-not-exported)
                               (remove entities-external-name))]
     (testing "All exported models should get entity id except those with other unique property (like name)"
       (is (= (set (concat serdes.models/exported-models
                           ;; those are inline models which still have entity_id
-                          ["DashboardCard" "DashboardTab" "Dimension"]))
+                          ["DashboardCard" "DashboardTab" "Dimension" "MetabotEntity"]))
              (set (->> (concat entity-id-models
                                entities-external-name)
                        (map name))))))

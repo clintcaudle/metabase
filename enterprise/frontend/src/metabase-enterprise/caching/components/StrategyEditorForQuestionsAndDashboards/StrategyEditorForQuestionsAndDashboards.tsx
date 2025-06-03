@@ -13,7 +13,6 @@ import { useSaveStrategy } from "metabase/admin/performance/hooks/useSaveStrateg
 import { skipToken, useSearchQuery } from "metabase/api";
 import { ClientSortableTable } from "metabase/common/components/Table/ClientSortableTable";
 import type { ColumnItem } from "metabase/common/components/Table/types";
-import { useLocale } from "metabase/common/hooks/use-locale/use-locale";
 import { DelayedLoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper/DelayedLoadingAndErrorWrapper";
 import {
   Box,
@@ -76,16 +75,16 @@ const _StrategyEditorForQuestionsAndDashboards = ({
   const dashboardIds = useMemo(
     () =>
       configs
-        .filter(config => config.model === "dashboard")
-        .map(c => c.model_id),
+        .filter((config) => config.model === "dashboard")
+        .map((c) => c.model_id),
     [configs],
   );
 
   const questionIds = useMemo(
     () =>
       configs
-        .filter(config => config.model === "question")
-        .map(c => c.model_id),
+        .filter((config) => config.model === "question")
+        .map((c) => c.model_id),
     [configs],
   );
 
@@ -138,7 +137,7 @@ const _StrategyEditorForQuestionsAndDashboards = ({
     }
     // Filter out items that have no match in the dashboard and question list
     const hydratedCacheableItems: CacheableItem[] = [...items.values()].filter(
-      item => item.name !== undefined,
+      (item) => item.name !== undefined,
     );
 
     return hydratedCacheableItems;
@@ -149,7 +148,7 @@ const _StrategyEditorForQuestionsAndDashboards = ({
      * disappears from the table, it should no longer be the target */
     function removeTargetIfNoLongerInTable() {
       const isTargetIdInTable = cacheableItems.some(
-        item => item.id === targetId,
+        (item) => item.id === targetId,
       );
       if (targetId !== null && !isTargetIdInTable) {
         setTargetId(null);
@@ -248,8 +247,6 @@ const _StrategyEditorForQuestionsAndDashboards = ({
     updateTarget({ id: null, model: null }, isStrategyFormDirty);
   }, [updateTarget, isStrategyFormDirty]);
 
-  const locale = useLocale();
-
   return (
     <Flex
       role="region"
@@ -257,14 +254,14 @@ const _StrategyEditorForQuestionsAndDashboards = ({
       w="100%"
       direction="row"
       justify="space-between"
-      onKeyDown={e => {
+      onKeyDown={(e) => {
         if (e.key === "Escape" && !e.ctrlKey && !e.metaKey) {
           closeForm();
         }
       }}
     >
       <Stack
-        spacing="sm"
+        gap="sm"
         lh="1.5rem"
         pt="md"
         pb="md"
@@ -292,7 +289,6 @@ const _StrategyEditorForQuestionsAndDashboards = ({
                 rowRenderer={rowRenderer}
                 defaultSortColumn="name"
                 defaultSortDirection={SortDirection.Asc}
-                locale={locale}
                 formatValueForSorting={formatValueForSorting}
                 emptyBody={<NoResultsTableRow />}
                 aria-labelledby={explanatoryAsideId}
@@ -359,16 +355,11 @@ const TableSkeleton = ({ columns }: { columns: ColumnItem[] }) => (
       </tr>
     )}
     className={Styles.CacheableItemTable}
-    locale="en-US"
   />
 );
 
 const NoResultsTableRow = () => (
-  <tr className={Styles.NoResultsTableRow}>
-    <td colSpan={3}>
-      <Center fw="bold" c="text-light">
-        {t`No dashboards or questions have their own caching policies yet.`}
-      </Center>
-    </td>
-  </tr>
+  <Center fw="bold" c="text-light">
+    {t`No dashboards or questions have their own caching policies yet.`}
+  </Center>
 );

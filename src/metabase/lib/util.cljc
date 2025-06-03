@@ -12,17 +12,14 @@
    [medley.core :as m]
    [metabase.legacy-mbql.util :as mbql.u]
    [metabase.lib.common :as lib.common]
-   [metabase.lib.database.methods :as lib.database.methods]
    [metabase.lib.dispatch :as lib.dispatch]
    [metabase.lib.hierarchy :as lib.hierarchy]
    [metabase.lib.ident :as lib.ident]
-   [metabase.lib.metadata.protocols :as lib.metadata.protocols]
    [metabase.lib.options :as lib.options]
    [metabase.lib.schema :as lib.schema]
    [metabase.lib.schema.common :as lib.schema.common]
    [metabase.lib.schema.expression :as lib.schema.expression]
    [metabase.lib.schema.id :as lib.schema.id]
-   [metabase.lib.schema.metadata :as lib.schema.metadata]
    [metabase.lib.schema.ref :as lib.schema.ref]
    [metabase.lib.util.match :as lib.util.match]
    [metabase.util :as u]
@@ -68,6 +65,18 @@
   [clause]
   (and (clause? clause)
        (lib.hierarchy/isa? (first clause) ::lib.schema.ref/ref)))
+
+(defn segment-clause?
+  "Returns true if this is a segment clause"
+  [clause]
+  (and (clause? clause)
+       (lib.hierarchy/isa? (first clause) ::lib.schema.ref/segment)))
+
+(defn metric-clause?
+  "Returns true if this is a metric clause"
+  [clause]
+  (and (clause? clause)
+       (lib.hierarchy/isa? (first clause) ::lib.schema.ref/metric)))
 
 (defn original-isa?
   "Returns whether the type of `expression` isa? `typ`.
@@ -199,19 +208,6 @@
                                                    [%]))
     (contains? m legacy-key) (set/rename-keys {legacy-key pMBQL-key})))
 
-(defn- join->pipeline [join]
-  (let [source (select-keys join [:source-table :source-query])
-        stages (inner-query->stages source)]
-    (-> join
-        (dissoc :source-table :source-query)
-        (update-legacy-boolean-expression->list :condition :conditions)
-        (assoc :lib/type :mbql/join
-               :stages stages)
-        lib.options/ensure-uuid)))
-
-(defn- joins->pipeline [joins]
-  (mapv join->pipeline joins))
-
 (defn ->stage-metadata
   "Convert legacy `:source-metadata` to [[metabase.lib.metadata/StageMetadata]]."
   [source-metadata]
@@ -226,6 +222,23 @@
                                        (assoc :lib/type :metadata/column)))
                                  columns)))
         (assoc :lib/type :metadata/results))))
+
+(defn- join->pipeline [join]
+  (let [source (select-keys join [:source-table :source-query])
+        stages (inner-query->stages source)
+        stages (if-let [source-metadata (and (>= (count stages) 2)
+                                             (:source-metadata join))]
+                 (assoc-in stages [(- (count stages) 2) :lib/stage-metadata] (->stage-metadata source-metadata))
+                 stages)]
+    (-> join
+        (dissoc :source-table :source-query)
+        (update-legacy-boolean-expression->list :condition :conditions)
+        (assoc :lib/type :mbql/join
+               :stages stages)
+        lib.options/ensure-uuid)))
+
+(defn- joins->pipeline [joins]
+  (mapv join->pipeline joins))
 
 (defn- inner-query->stages [{:keys [source-query source-metadata], :as inner-query}]
   (let [previous-stages (if source-query
@@ -320,6 +333,12 @@
     (when (< (inc stage-number) (count stages))
       (inc stage-number))))
 
+(defn last-stage?
+  "Whether a `stage-number` is referring to the last stage of a query or not."
+  [query stage-number]
+  ;; Call canonical-stage-index to ensure this throws when given an invalid stage-number.
+  (not (next-stage-number query (canonical-stage-index query stage-number))))
+
 (mu/defn query-stage :- [:maybe ::lib.schema/stage]
   "Fetch a specific `stage` of a query. This handles negative indices as well, e.g. `-1` will return the last stage of
   the query."
@@ -348,12 +367,20 @@
         stages'                     (apply update (vec stages) stage-number' f args)]
     (assoc query :stages stages')))
 
+(mu/defn drop-later-stages :- ::lib.schema/query
+  "Drop any stages in the `query` that come after `stage-number`."
+  [query        :- LegacyOrPMBQLQuery
+   stage-number :- :int]
+  (cond-> (pipeline query)
+    (not (last-stage? query stage-number))
+    (update :stages #(take (inc (canonical-stage-index query stage-number)) %))))
+
 (defn native-stage?
   "Is this query stage a native stage?"
-  [query stage-number]
-  (-> (query-stage query stage-number)
-      :lib/type
-      (= :mbql.stage/native)))
+  ([stage]
+   (= (:lib/type stage) :mbql.stage/native))
+  ([query stage-number]
+   (native-stage? (query-stage query stage-number))))
 
 (mu/defn ensure-mbql-final-stage :- ::lib.schema/query
   "Convert query to a pMBQL (pipeline) query, and make sure the final stage is an `:mbql` one."
@@ -457,20 +484,11 @@
   [query :- :map]
   (= (first-stage-type query) :mbql.stage/native))
 
-(mu/defn- escape-and-truncate :- :string
-  [database :- [:maybe ::lib.schema.metadata/database]
-   s        :- :string]
-  (->> s
-       (lib.database.methods/escape-alias database)
-       ;; truncate alias to 60 characters (actually 51 characters plus a hash).
-       truncate-alias))
-
 (mu/defn- unique-alias :- :string
-  [database :- [:maybe ::lib.schema.metadata/database]
-   original :- :string
+  [original :- :string
    suffix   :- :string]
-  (->> (str original \_ suffix)
-       (escape-and-truncate database)))
+  (-> (str original \_ suffix)
+      (truncate-alias)))
 
 (mu/defn unique-name-generator :- [:function
                                    ;; (f str) => unique-str
@@ -497,32 +515,28 @@
 
   The two-arity version of the returned function can be used for idempotence. See docstring
   for [[metabase.legacy-mbql.util/unique-name-generator]] for more information."
-  ([metadata-provider :- [:maybe ::lib.schema.metadata/metadata-provider]]
-   (let [database     (some-> metadata-provider lib.metadata.protocols/database)
-         uniqify      (mbql.u/unique-name-generator
+  ([]
+   (let [uniqify      (mbql.u/unique-name-generator
                        ;; unique by lower-case name, e.g. `NAME` and `name` => `NAME` and `name_2`
                        ;;
                        ;; some databases treat aliases as case-insensitive so make sure the generated aliases are
                        ;; unique regardless of case
                        :name-key-fn     u/lower-case-en
-                       :unique-alias-fn (partial unique-alias database))]
+                       :unique-alias-fn unique-alias)]
      ;; I know we could just use `comp` here but it gets really hard to figure out where it's coming from when you're
      ;; debugging things; a named function like this makes it clear where this function came from
      (fn unique-name-generator-fn
        ([s]
         (->> s
-             (escape-and-truncate database)
-             uniqify
-             truncate-alias))
+             truncate-alias
+             uniqify))
        ([id s]
         (->> s
-             (escape-and-truncate database)
-             (uniqify id)
-             truncate-alias)))))
+             truncate-alias
+             (uniqify id))))))
 
-  ([metadata-provider :- [:maybe ::lib.schema.metadata/metadata-provider]
-    existing-names    :- [:sequential :string]]
-   (let [f (unique-name-generator metadata-provider)]
+  ([existing-names    :- [:sequential :string]]
+   (let [f (unique-name-generator)]
      (doseq [existing existing-names]
        (f existing))
      f)))
@@ -569,6 +583,17 @@
                  (m/update-existing :joins (fn [joins] (mapv #(dissoc % :fields) joins))))))
           (update :stages #(into [] (take (inc (canonical-stage-index query stage-number))) %)))
       new-query)))
+
+(defn find-stage-index-and-clause-by-uuid
+  "Find the clause in `query` with the given `lib-uuid`. Return a [stage-index clause] pair, if found."
+  ([query lib-uuid]
+   (find-stage-index-and-clause-by-uuid query -1 lib-uuid))
+  ([query stage-number lib-uuid]
+   (first (keep-indexed (fn [idx stage]
+                          (lib.util.match/match-one stage
+                            (clause :guard #(= lib-uuid (lib.options/uuid %)))
+                            [idx clause]))
+                        (:stages (drop-later-stages query stage-number))))))
 
 (defn fresh-uuids
   "Recursively replace all the :lib/uuids in `x` with fresh ones. Useful if you need to attach something to a query more

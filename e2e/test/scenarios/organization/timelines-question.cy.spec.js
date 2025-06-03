@@ -1,4 +1,4 @@
-import { H } from "e2e/support";
+const { H } = cy;
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ORDERS_BY_YEAR_QUESTION_ID } from "e2e/support/cypress_sample_instance_data";
@@ -26,7 +26,7 @@ describe("scenarios > organization > timelines > question", () => {
 
       cy.icon("calendar").click();
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
+      cy.findByText("Create event").click();
 
       cy.findByLabelText("Event name").type("RC1");
       cy.findByLabelText("Date").type("10/20/2024");
@@ -52,7 +52,7 @@ describe("scenarios > organization > timelines > question", () => {
 
       cy.icon("calendar").click();
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
+      cy.findByText("Create event").click();
 
       cy.findByLabelText("Event name").type("RC2");
       cy.findByLabelText("Date").type("10/30/2024");
@@ -334,16 +334,19 @@ describe("scenarios > organization > timelines > question", () => {
         H.echartsIcon("cloud").should("be.visible");
 
         // should show a newly created event
-        cy.button("Add an event").click();
+        cy.button("Create event").click();
         cy.findByLabelText("Event name").type("RC2");
         cy.findByLabelText("Date").type("10/20/2023");
         cy.button("Create").click();
         cy.wait("@createEvent");
 
+        H.undoToast().icon("close").click();
         H.echartsIcon("star").should("be.visible");
 
         // should then hide the newly created event
+        timelineEventVisibility("RC2").should("be.checked");
         toggleEventVisibility("RC2");
+        timelineEventVisibility("RC2").should("not.be.checked");
 
         H.echartsIcon("star").should("not.exist");
 
@@ -351,7 +354,7 @@ describe("scenarios > organization > timelines > question", () => {
         // should display its checkbox with a "dash" icon
         cy.findByTestId("sidebar-content")
           .findByText("Releases")
-          .closest("[aria-label=Timeline card header]")
+          .closest("[aria-label='Timeline card header']")
           .within(() => {
             cy.icon("dash").should("be.visible");
 
@@ -372,7 +375,7 @@ describe("scenarios > organization > timelines > question", () => {
 
         cy.findByTestId("sidebar-content")
           .findByText("TC1")
-          .closest("[aria-label=Timeline event card]")
+          .closest("[aria-label='Timeline event card']")
           .within(() => {
             cy.findByRole("checkbox").should("not.be.checked");
           });
@@ -381,7 +384,7 @@ describe("scenarios > organization > timelines > question", () => {
         // should make its events automatically visible
         cy.findByTestId("sidebar-content")
           .findByText("Timeline for collection")
-          .closest("[aria-label=Timeline card header]")
+          .closest("[aria-label='Timeline card header']")
           .within(() => cy.findByRole("checkbox").click());
 
         H.echartsIcon("warning").should("be.visible");
@@ -409,36 +412,40 @@ describe("scenarios > organization > timelines > question", () => {
       H.echartsIcon("star", true).should("be.visible");
     });
 
-    it("should open the sidebar when clicking an event icon", () => {
-      H.createTimelineWithEvents({
-        timeline: { name: "Releases" },
-        events: [
-          { name: "RC1", timestamp: "2024-10-20T00:00:00Z", icon: "star" },
-        ],
-      });
+    it(
+      "should open the sidebar when clicking an event icon",
+      { tags: "@flaky" },
+      () => {
+        H.createTimelineWithEvents({
+          timeline: { name: "Releases" },
+          events: [
+            { name: "RC1", timestamp: "2024-10-20T00:00:00Z", icon: "star" },
+          ],
+        });
 
-      H.visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
+        H.visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
 
-      H.echartsIcon("star").should("be.visible");
-      H.echartsIcon("star").realClick();
+        H.echartsIcon("star").should("be.visible");
+        H.echartsIcon("star").click();
 
-      // event should be selected in sidebar
-      timelineEventCard("RC1").should("be.visible");
-      timelineEventCard("RC1").should(
-        "have.css",
-        "border-left",
-        "4px solid rgb(80, 158, 227)",
-      );
+        // event should be selected in sidebar
+        timelineEventCard("RC1").should("be.visible");
+        timelineEventCard("RC1").should(
+          "have.css",
+          "border-left",
+          "4px solid rgb(80, 158, 227)",
+        );
 
-      // after clicking the icon again, it should be deselected in sidebar
-      H.echartsIcon("star", true).click();
-      timelineEventCard("RC1").should("be.visible");
-      timelineEventCard("RC1").should(
-        "have.css",
-        "border-left",
-        "4px solid rgba(0, 0, 0, 0)",
-      );
-    });
+        // after clicking the icon again, it should be deselected in sidebar
+        H.echartsIcon("star", true).click();
+        timelineEventCard("RC1").should("be.visible");
+        timelineEventCard("RC1").should(
+          "have.css",
+          "border-left",
+          "4px solid rgba(0, 0, 0, 0)",
+        );
+      },
+    );
 
     it("should not filter out events in last period (metabase#23336)", () => {
       H.createTimelineWithEvents({
@@ -520,7 +527,7 @@ describe("scenarios > organization > timelines > question", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText(/Events in Metabase/);
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").should("not.exist");
+      cy.findByText("Create event").should("not.exist");
     });
 
     it("should not allow creating or editing events", () => {
@@ -539,18 +546,20 @@ describe("scenarios > organization > timelines > question", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Releases").should("be.visible");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").should("not.exist");
+      cy.findByText("Create event").should("not.exist");
       H.rightSidebar().icon("ellipsis").should("not.exist");
     });
   });
 });
 
 function timelineEventCard(eventName) {
-  return cy.findByText(eventName).closest("[aria-label=Timeline event card]");
+  return cy.findByText(eventName).closest("[aria-label='Timeline event card']");
 }
 
 function toggleEventVisibility(eventName) {
-  timelineEventCard(eventName).within(() => {
-    cy.findByRole("checkbox").click();
-  });
+  timelineEventVisibility(eventName).click();
+}
+
+function timelineEventVisibility(eventName) {
+  return timelineEventCard(eventName).findByRole("checkbox");
 }

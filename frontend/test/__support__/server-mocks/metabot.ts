@@ -1,44 +1,41 @@
 import fetchMock from "fetch-mock";
 
-import type { Card, DatabaseId } from "metabase-types/api";
+import type {
+  MetabotApiEntity,
+  MetabotId,
+  MetabotInfo,
+} from "metabase-types/api";
 
-export function setupMetabotModelEndpoint(
-  modelId: number,
-  card: Card,
-  overwriteRoutes = false,
+export function setupMetabotsEndpoint(
+  metabots: MetabotInfo[],
+  statusCode?: number,
 ) {
-  fetchMock.post(
-    `path:/api/metabot/model/${modelId}`,
-    {
-      card,
-      prompt_template_versions: [],
-    },
-    { overwriteRoutes },
+  fetchMock.get(
+    "path:/api/ee/metabot-v3/metabot",
+    statusCode ? { status: statusCode } : { items: metabots },
+    { overwriteRoutes: true },
   );
 }
 
-export function setupMetabotDatabaseEndpoint(
-  databaseId: DatabaseId,
-  card: Card,
+export function setupMetabotEntitiesEndpoint(
+  metabotId: MetabotId,
+  entities: MetabotApiEntity[],
 ) {
-  fetchMock.post(`path:/api/metabot/database/${databaseId}`, {
-    card,
-    prompt_template_versions: [],
+  fetchMock.get(
+    `path:/api/ee/metabot-v3/metabot/${metabotId}/entities`,
+    { items: entities },
+    { overwriteRoutes: true },
+  );
+}
+
+export function setupMetabotAddEntitiesEndpoint(metabotId: MetabotId) {
+  fetchMock.put(`path:/api/ee/metabot-v3/metabot/${metabotId}/entities`, {
+    status: 204,
   });
 }
 
-export const API_ERROR = "Unable to generate a query from the prompt";
-
-export function setupBadRequestMetabotModelEndpoint(modelId: number) {
-  fetchMock.post(`path:/api/metabot/model/${modelId}`, {
-    status: 401,
-    body: API_ERROR,
-  });
-}
-
-export function setupBadRequestMetabotDatabaseEndpoint(databaseId: DatabaseId) {
-  fetchMock.post(`path:/api/metabot/database/${databaseId}`, {
-    status: 401,
-    body: API_ERROR,
+export function setupMetabotDeleteEntitiesEndpoint() {
+  fetchMock.delete(/api\/ee\/metabot-v3\/metabot\/\d+\/entities/, {
+    status: 204,
   });
 }

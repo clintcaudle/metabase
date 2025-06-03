@@ -1,6 +1,6 @@
 import type { CardId } from "./card";
 import type { RowValue, TemporalUnit } from "./dataset";
-import type { ConcreteFieldReference, ExpressionReference } from "./query";
+import type { FieldReference } from "./query";
 
 export type StringParameterType =
   | "string/="
@@ -25,17 +25,21 @@ export type DateParameterType =
   | "date/quarter-year"
   | "date/all-options";
 
-export type TemporalUnitParameterType = "temporal-unit";
+export type BooleanParameterType = "boolean/=";
 
 export type ParameterType =
   | StringParameterType
   | NumberParameterType
   | DateParameterType
-  | TemporalUnitParameterType;
+  | BooleanParameterType
+  | "id"
+  | "category" // x-rays only
+  | "temporal-unit"
+  | string; // x-rays generate broken parameter types not in the list
 
 export type ParameterId = string;
 
-export type ActionParameterValue = string | number;
+export type ActionParameterValue = string | number | boolean;
 
 export interface Parameter extends ParameterValuesConfig {
   id: ParameterId;
@@ -92,14 +96,14 @@ export type NativeParameterDimensionTarget =
   | ["dimension", VariableTarget, DimensionTargetOptions];
 
 export type StructuredParameterDimensionTarget =
-  | ["dimension", ConcreteFieldReference | ExpressionReference]
-  | [
-      "dimension",
-      ConcreteFieldReference | ExpressionReference,
-      DimensionTargetOptions,
-    ];
+  | ["dimension", FieldReference]
+  | ["dimension", FieldReference, DimensionTargetOptions];
 
-export type ParameterValueOrArray = string | number | boolean | Array<any>;
+export type ParameterValueOrArray =
+  | string
+  | number
+  | boolean
+  | Array<string | number | boolean>;
 
 export type HumanReadableParameterValue = string;
 export type NotRemappedParameterValue = [RowValue];

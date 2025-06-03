@@ -1,19 +1,16 @@
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
   createNativeQuestion,
-  describeEE,
   tableInteractiveBody,
 } from "e2e/support/helpers";
-import {
-  mockAuthProviderAndJwtSignIn,
-  mountInteractiveQuestion,
-  signInAsAdminAndEnableEmbeddingSdk,
-} from "e2e/support/helpers/component-testing-sdk";
+import { mountInteractiveQuestion } from "e2e/support/helpers/embedding-sdk-component-testing";
+import { signInAsAdminAndEnableEmbeddingSdk } from "e2e/support/helpers/embedding-sdk-testing";
+import { mockAuthProviderAndJwtSignIn } from "e2e/support/helpers/embedding-sdk-testing/embedding-sdk-helpers";
 import type { DatasetColumn } from "metabase-types/api";
 
 const { ORDERS, ORDERS_ID } = SAMPLE_DATABASE;
 
-describeEE("scenarios > embedding-sdk > interactive-question > native", () => {
+describe("scenarios > embedding-sdk > interactive-question > native", () => {
   beforeEach(() => {
     signInAsAdminAndEnableEmbeddingSdk();
 
@@ -47,7 +44,7 @@ describeEE("scenarios > embedding-sdk > interactive-question > native", () => {
     cy.wait("@cardQuery").then(({ response }) => {
       const { body } = response ?? {};
 
-      const rows = tableInteractiveBody().findAllByRole("rowgroup");
+      const rows = tableInteractiveBody().findAllByRole("row");
 
       // There should be one row in the table
       rows.should("have.length", 1);
@@ -57,6 +54,7 @@ describeEE("scenarios > embedding-sdk > interactive-question > native", () => {
       );
 
       // The first row should have the same ID column value as the initial SQL parameters
+      // eslint-disable-next-line no-unsafe-element-filtering
       rows
         .findAllByTestId("cell-data")
         .eq(idColumnIndex)

@@ -1,25 +1,27 @@
 import { createContext, useContext, useEffect, useMemo } from "react";
 
+import { StaticQuestionSdkMode } from "embedding-sdk/components/public/StaticQuestion/mode";
 import { useLoadQuestion } from "embedding-sdk/hooks/private/use-load-question";
 import { transformSdkQuestion } from "embedding-sdk/lib/transform-question";
-import { useSdkSelector } from "embedding-sdk/store";
+import { useSdkDispatch, useSdkSelector } from "embedding-sdk/store";
 import { getPlugins } from "embedding-sdk/store/selectors";
-import type { DataPickerValue } from "metabase/common/components/DataPicker";
-import { useValidatedEntityId } from "metabase/lib/entity-id/hooks/use-validated-entity-id";
+import type { MetabasePluginsConfig } from "embedding-sdk/types/plugins";
+import type { MetabasePluginsConfig as InternalMetabasePluginsConfig } from "metabase/embedding-sdk/types/plugins";
 import { useCreateQuestion } from "metabase/query_builder/containers/use-create-question";
 import { useSaveQuestion } from "metabase/query_builder/containers/use-save-question";
+import { setEntityTypes } from "metabase/redux/embedding-data-picker";
 import { getEmbeddingMode } from "metabase/visualizations/click-actions/lib/modes";
+import { EmbeddingSdkMode } from "metabase/visualizations/click-actions/modes/EmbeddingSdkMode";
 import type Question from "metabase-lib/v1/Question";
 
 import type {
-  EntityTypeFilterKeys,
   InteractiveQuestionContextType,
   InteractiveQuestionProviderProps,
 } from "./types";
 
 /**
- * Note: This context should only be used as a wrapper for the InteractiveQuestionResult
- * component. The idea behind this context is to allow the InteractiveQuestionResult component
+ * Note: This context should only be used as a wrapper for the InteractiveQuestionDefaultView
+ * component. The idea behind this context is to allow the InteractiveQuestionDefaultView component
  * to use components within the ./components folder, which use the context for display
  * and functions.
  * */
@@ -29,21 +31,8 @@ export const InteractiveQuestionContext = createContext<
 
 const DEFAULT_OPTIONS = {};
 
-const FILTER_MODEL_MAP: Record<EntityTypeFilterKeys, DataPickerValue["model"]> =
-  {
-    table: "table",
-    question: "card",
-    model: "dataset",
-    metric: "metric",
-  };
-const mapEntityTypeFilterToDataPickerModels = (
-  entityTypeFilter: InteractiveQuestionProviderProps["entityTypeFilter"],
-): InteractiveQuestionContextType["modelsFilterList"] => {
-  return entityTypeFilter?.map(entityType => FILTER_MODEL_MAP[entityType]);
-};
-
 export const InteractiveQuestionProvider = ({
-  cardId: initId,
+  questionId,
   options = DEFAULT_OPTIONS,
   deserializedCard,
   componentPlugins,
@@ -52,15 +41,12 @@ export const InteractiveQuestionProvider = ({
   onBeforeSave,
   onSave,
   isSaveEnabled = true,
-  entityTypeFilter,
-  saveToCollectionId,
+  entityTypes,
+  targetCollection,
   initialSqlParameters,
+  withDownloads,
+  variant,
 }: InteractiveQuestionProviderProps) => {
-  const { id: cardId, isLoading: isLoadingValidatedId } = useValidatedEntityId({
-    type: "card",
-    id: initId,
-  });
-
   const handleCreateQuestion = useCreateQuestion();
   const handleSaveQuestion = useSaveQuestion();
 
@@ -72,7 +58,7 @@ export const InteractiveQuestionProvider = ({
       await onBeforeSave?.(sdkQuestion, saveContext);
       await handleSaveQuestion(question);
       onSave?.(sdkQuestion, saveContext);
-      await loadQuestion();
+      await loadAndQueryQuestion();
     }
   };
 
@@ -103,13 +89,13 @@ export const InteractiveQuestionProvider = ({
     isQuestionLoading,
     isQueryRunning,
 
-    runQuestion,
+    queryQuestion,
     replaceQuestion,
-    loadQuestion,
+    loadAndQueryQuestion,
     updateQuestion,
     navigateToNewCard,
   } = useLoadQuestion({
-    cardId,
+    questionId,
     options,
     deserializedCard,
     initialSqlParameters,
@@ -117,39 +103,55 @@ export const InteractiveQuestionProvider = ({
 
   const globalPlugins = useSdkSelector(getPlugins);
 
-  const combinedPlugins = useMemo(() => {
+  const plugins: MetabasePluginsConfig = useMemo(() => {
     return { ...globalPlugins, ...componentPlugins };
   }, [globalPlugins, componentPlugins]);
 
   const mode = useMemo(() => {
-    return question && getEmbeddingMode(question, combinedPlugins ?? undefined);
-  }, [question, combinedPlugins]);
+    return (
+      question &&
+      getEmbeddingMode({
+        question,
+        queryMode:
+          variant === "static" ? StaticQuestionSdkMode : EmbeddingSdkMode,
+        plugins: plugins as InternalMetabasePluginsConfig,
+      })
+    );
+  }, [question, variant, plugins]);
 
   const questionContext: InteractiveQuestionContextType = {
-    isQuestionLoading: isQuestionLoading || isLoadingValidatedId,
+    originalId: questionId,
+    isQuestionLoading: isQuestionLoading,
     isQueryRunning,
-    resetQuestion: loadQuestion,
-    onReset: loadQuestion,
+    resetQuestion: loadAndQueryQuestion,
+    onReset: loadAndQueryQuestion,
     onNavigateBack,
-    runQuestion,
+    queryQuestion,
     replaceQuestion,
     updateQuestion,
     navigateToNewCard,
-    plugins: combinedPlugins,
+    plugins,
     question,
     originalQuestion,
     queryResults,
     mode,
     onSave: handleSave,
     onCreate: handleCreate,
-    modelsFilterList: mapEntityTypeFilterToDataPickerModels(entityTypeFilter),
     isSaveEnabled,
-    saveToCollectionId,
+    targetCollection,
+    withDownloads,
+    variant,
   };
 
   useEffect(() => {
-    loadQuestion();
-  }, [loadQuestion]);
+    loadAndQueryQuestion();
+  }, [loadAndQueryQuestion]);
+
+  const dispatch = useSdkDispatch();
+
+  useEffect(() => {
+    dispatch(setEntityTypes(entityTypes));
+  }, [dispatch, entityTypes]);
 
   return (
     <InteractiveQuestionContext.Provider value={questionContext}>

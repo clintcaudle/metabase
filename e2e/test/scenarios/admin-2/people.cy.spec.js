@@ -1,6 +1,6 @@
 import _ from "underscore";
 
-import { H } from "e2e/support";
+const { H } = cy;
 import { USERS, USER_GROUPS } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
@@ -151,7 +151,9 @@ describe("scenarios > admin > people", () => {
 
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText(FULL_NAME);
-      cy.location().should(loc => expect(loc.pathname).to.eq("/admin/people"));
+      cy.location().should((loc) =>
+        expect(loc.pathname).to.eq("/admin/people"),
+      );
     });
 
     it("should allow admin to create new users without first name or last name (metabase#22754)", () => {
@@ -219,7 +221,7 @@ describe("scenarios > admin > people", () => {
         cy.findByText("Deactivate user").click();
         clickButton("Deactivate");
         cy.findByText(FULL_NAME).should("not.exist");
-        cy.location().should(loc =>
+        cy.location().should((loc) =>
           expect(loc.pathname).to.eq("/admin/people"),
         );
 
@@ -229,7 +231,7 @@ describe("scenarios > admin > people", () => {
         cy.icon("refresh").click();
         cy.findByText(`Reactivate ${FULL_NAME}?`);
         clickButton("Reactivate");
-        cy.location().should(loc =>
+        cy.location().should((loc) =>
           expect(loc.pathname).to.eq("/admin/people"),
         );
       });
@@ -256,7 +258,9 @@ describe("scenarios > admin > people", () => {
 
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText(NEW_FULL_NAME);
-      cy.location().should(loc => expect(loc.pathname).to.eq("/admin/people"));
+      cy.location().should((loc) =>
+        expect(loc.pathname).to.eq("/admin/people"),
+      );
     });
 
     it("should reset user password without SMTP set up", () => {
@@ -272,7 +276,9 @@ describe("scenarios > admin > people", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText(/^temporary password$/i);
       clickButton("Done");
-      cy.location().should(loc => expect(loc.pathname).to.eq("/admin/people"));
+      cy.location().should((loc) =>
+        expect(loc.pathname).to.eq("/admin/people"),
+      );
     });
 
     it("should not offer to reset passwords when password login is disabled", () => {
@@ -332,6 +338,8 @@ describe("scenarios > admin > people", () => {
     });
 
     it("should allow group creation and deletion", () => {
+      const longGroupName =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
       cy.intercept("POST", "/api/permissions/group").as("createGroup");
       cy.intercept("DELETE", "/api/permissions/group/*").as("deleteGroup");
 
@@ -343,10 +351,39 @@ describe("scenarios > admin > people", () => {
         cy.findByPlaceholderText(/something like/i).type("My New Group");
         cy.button("Add").click();
         cy.wait(["@createGroup", "@getGroups"]);
-
-        cy.findByText("My New Group").closest("tr").icon("ellipsis").click();
       });
 
+      cy.log("should show API errors from group endpoints (metabase#52886)");
+
+      cy.findByTestId("admin-panel").within(() => {
+        cy.button("Create a group").click();
+        cy.findByPlaceholderText(/something like/i).type(longGroupName);
+        cy.button("Add").click();
+      });
+
+      cy.findByTestId("alert-modal").should("exist");
+      H.modal().findByText("Ok").click();
+
+      cy.findByTestId("admin-panel").within(() => {
+        cy.findByText("My New Group").closest("tr").icon("ellipsis").click();
+      });
+      H.popover().findByText("Edit Name").click();
+      cy.findByTestId("admin-panel").within(() => {
+        cy.findByDisplayValue("My New Group").clear().type(longGroupName);
+        cy.button("Done").click();
+      });
+
+      cy.findByTestId("alert-modal").should("exist");
+      H.modal().findByText("Ok").click();
+      cy.findByTestId("admin-panel")
+        .findByRole("button", { name: "Cancel" })
+        .click();
+
+      cy.findByTestId("admin-panel")
+        .findByText("My New Group")
+        .closest("tr")
+        .icon("ellipsis")
+        .click();
       H.popover().findByText("Remove Group").click();
       H.modal().button("Remove group").click();
 
@@ -430,11 +467,6 @@ describe("scenarios > admin > people", () => {
       const NEW_USERS = 18;
       const NEW_TOTAL_USERS = TOTAL_USERS + NEW_USERS;
 
-      const waitForUserRequests = () => {
-        cy.wait("@users");
-        cy.wait("@memberships");
-      };
-
       beforeEach(() => {
         generateUsers(NEW_USERS);
 
@@ -447,8 +479,6 @@ describe("scenarios > admin > people", () => {
 
         cy.visit("/admin/people");
 
-        waitForUserRequests();
-
         // Total
         // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
         cy.findByText(`${NEW_TOTAL_USERS} people found`);
@@ -459,11 +489,8 @@ describe("scenarios > admin > people", () => {
         assertTableRowsCount(PAGE_SIZE);
         cy.findByLabelText("Previous page").should("be.disabled");
 
-        // cy.findByLabelText("Next page").click();
         cy.findByTestId("next-page-btn").click();
-        waitForUserRequests();
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Loading...").should("not.exist");
+        cy.wait("@users");
 
         // Page 2
         cy.findByTestId("people-list-footer")
@@ -473,9 +500,6 @@ describe("scenarios > admin > people", () => {
         cy.findByLabelText("Next page").should("be.disabled");
 
         cy.findByLabelText("Previous page").click();
-        cy.wait("@users");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Loading...").should("not.exist");
 
         // Page 1
         // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
@@ -498,7 +522,6 @@ describe("scenarios > admin > people", () => {
         cy.findByLabelText("Previous page").should("be.disabled");
 
         cy.findByLabelText("Next page").click();
-        waitForUserRequests();
         // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
         cy.findByText("Loading...").should("not.exist");
 
@@ -508,7 +531,6 @@ describe("scenarios > admin > people", () => {
         cy.findByLabelText("Next page").should("be.disabled");
 
         cy.findByLabelText("Previous page").click();
-        cy.wait("@users");
         // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
         cy.findByText("Loading...").should("not.exist");
 
@@ -521,7 +543,7 @@ describe("scenarios > admin > people", () => {
   });
 });
 
-H.describeEE("scenarios > admin > people", () => {
+describe("scenarios > admin > people", () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
@@ -530,10 +552,10 @@ H.describeEE("scenarios > admin > people", () => {
 
   it("should unsubscribe a user from all subscriptions and alerts", () => {
     H.getCurrentUser().then(({ body: { id: user_id } }) => {
-      cy.createQuestionAndDashboard({
+      H.createQuestionAndDashboard({
         questionDetails: getQuestionDetails(),
       }).then(({ body: { card_id, dashboard_id } }) => {
-        H.createAlert(getAlertDetails({ user_id, card_id }));
+        H.createQuestionAlert({ user_id, card_id });
         H.createPulse(getPulseDetails({ card_id, dashboard_id }));
       });
     });
@@ -589,7 +611,7 @@ H.describeEE("scenarios > admin > people", () => {
     cy.contains(
       `We’ve sent an invite to ${email} with instructions to log in. If this user is unable to authenticate then you can reset their password.`,
     );
-    cy.url().then(url => {
+    cy.url().then((url) => {
       const URL_REGEX = /\/admin\/people\/(?<userId>\d+)\/success/;
       const { userId } = URL_REGEX.exec(url).groups;
       assertLinkMatchesUrl(
@@ -605,7 +627,7 @@ H.describeEE("scenarios > admin > people", () => {
   });
 });
 
-H.describeEE("scenarios > admin > people > group managers", () => {
+describe("scenarios > admin > people > group managers", () => {
   function confirmLosingAbilityToManageGroup() {
     H.modal().within(() => {
       cy.findByText(
@@ -787,7 +809,7 @@ H.describeEE("scenarios > admin > people > group managers", () => {
   });
 });
 
-H.describeEE("issue 23689", () => {
+describe("issue 23689", () => {
   function findUserByFullName(user) {
     const { first_name, last_name } = user;
     return cy.findByText(`${first_name} ${last_name}`);
@@ -878,7 +900,7 @@ function assertTableRowsCount(length) {
 }
 
 function generateUsers(count, groupIds) {
-  const users = _.range(count).map(index => ({
+  const users = _.range(count).map((index) => ({
     first_name: `FirstName ${index}`,
     last_name: `LastName ${index}`,
     email: `user_${index}@metabase.com`,
@@ -886,13 +908,13 @@ function generateUsers(count, groupIds) {
     groupIds,
   }));
 
-  users.forEach(u => cy.createUserFromRawData(u));
+  users.forEach((u) => cy.createUserFromRawData(u));
 
   return users;
 }
 
 function generateGroups(count) {
-  _.range(count).map(index => {
+  _.range(count).map((index) => {
     cy.request("POST", "api/permissions/group", { name: "Group" + index });
   });
 }
@@ -903,28 +925,6 @@ function getQuestionDetails() {
     query: {
       "source-table": ORDERS_ID,
     },
-  };
-}
-
-function getAlertDetails({ user_id, card_id }) {
-  return {
-    card: {
-      id: card_id,
-      include_csv: false,
-      include_xls: false,
-    },
-    channels: [
-      {
-        enabled: true,
-        channel_type: "email",
-        schedule_type: "hourly",
-        recipients: [
-          {
-            id: user_id,
-          },
-        ],
-      },
-    ],
   };
 }
 

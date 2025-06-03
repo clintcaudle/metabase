@@ -1,4 +1,4 @@
-import { H } from "e2e/support";
+const { H } = cy;
 
 import * as SQLFilter from "../native-filters/helpers/e2e-sql-filter-helpers";
 
@@ -23,7 +23,7 @@ describe("scenarios > embedding > native questions", () => {
         details.native["template-tags"][requiredTagName].required = true;
       }
 
-      cy.createNativeQuestion(details, {
+      H.createNativeQuestion(details, {
         wrapId: true,
         visitQuestion: true,
       });
@@ -73,7 +73,7 @@ describe("scenarios > embedding > native questions", () => {
         assert.deepEqual(actual, expected);
       });
 
-      cy.get("@questionId").then(questionId => {
+      cy.get("@questionId").then((questionId) => {
         const payload = {
           resource: { question: questionId },
           params: { total: [] },
@@ -125,7 +125,7 @@ describe("scenarios > embedding > native questions", () => {
       cy.findByPlaceholderText("Enter an ID").type("926");
       cy.button("Add filter").click();
 
-      cy.findByTestId("table-row").should("have.length", 1);
+      cy.findAllByRole("row").should("have.length", 1);
 
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("December 29, 2024, 4:54 AM");
@@ -181,7 +181,9 @@ describe("scenarios > embedding > native questions", () => {
         .click();
 
       // Open variable editor
-      cy.findByTestId("native-query-editor-sidebar").icon("variable").click();
+      cy.findByTestId("native-query-editor-action-buttons")
+        .icon("variable")
+        .click();
 
       // Now check that all disabled parameters can't be required and the rest can
       assertRequiredEnabledForName({ name: "id", enabled: true });
@@ -196,13 +198,13 @@ describe("scenarios > embedding > native questions", () => {
 
   context("API", () => {
     beforeEach(() => {
-      cy.createNativeQuestion(questionDetails, {
+      H.createNativeQuestion(questionDetails, {
         wrapId: true,
       });
     });
 
     it("should hide filters via url", () => {
-      cy.get("@questionId").then(questionId => {
+      cy.get("@questionId").then((questionId) => {
         cy.request("PUT", `/api/card/${questionId}`, {
           enable_embedding: true,
           embedding_params: {
@@ -228,7 +230,7 @@ describe("scenarios > embedding > native questions", () => {
           },
         });
 
-        cy.findByTestId("table-row").should("have.length", 1);
+        cy.findAllByRole("row").should("have.length", 1);
         cy.findByText("92");
 
         H.filterWidget().should("not.exist");
@@ -236,7 +238,7 @@ describe("scenarios > embedding > native questions", () => {
     });
 
     it("should set multiple filter values via url", () => {
-      cy.get("@questionId").then(questionId => {
+      cy.get("@questionId").then((questionId) => {
         cy.request("PUT", `/api/card/${questionId}`, {
           enable_embedding: true,
           embedding_params: {
@@ -281,7 +283,7 @@ describe("scenarios > embedding > native questions", () => {
     });
 
     it("should lock all parameters", () => {
-      cy.get("@questionId").then(questionId => {
+      cy.get("@questionId").then((questionId) => {
         cy.request("PUT", `/api/card/${questionId}`, {
           enable_embedding: true,
           embedding_params: {
@@ -308,7 +310,7 @@ describe("scenarios > embedding > native questions", () => {
 
         H.visitEmbeddedPage(payload);
 
-        cy.findByTestId("table-row").should("have.length", 1);
+        cy.findAllByRole("row").should("have.length", 1);
         cy.findByText("66.8");
 
         H.filterWidget().should("not.exist");
@@ -326,7 +328,7 @@ describe("scenarios > embedding > native questions", () => {
         wrapId: true,
       });
 
-      cy.get("@questionId").then(questionId => {
+      cy.get("@questionId").then((questionId) => {
         cy.request("PUT", `/api/card/${questionId}`, {
           enable_embedding: true,
           embedding_params: {
@@ -338,7 +340,7 @@ describe("scenarios > embedding > native questions", () => {
     });
 
     it("locked parameters require a value to be specified in the JWT", () => {
-      cy.get("@questionId").then(questionId => {
+      cy.get("@questionId").then((questionId) => {
         const payload = {
           resource: { question: questionId },
           params: { source: null },
@@ -355,16 +357,16 @@ describe("scenarios > embedding > native questions", () => {
 
     it("locked parameters should still render results in the preview by default (metabase#47570)", () => {
       H.visitQuestion("@questionId");
-      H.openStaticEmbeddingModal({ activeTab: "parameters" });
+      H.openStaticEmbeddingModal({
+        activeTab: "parameters",
+      });
       H.visitIframe();
 
       cy.log("should show card results by default");
       cy.findByTestId("visualization-root")
         .findByText("2,500")
         .should("be.visible");
-      cy.findByTestId("visualization-root")
-        .findByText("test question")
-        .should("be.visible");
+      cy.findByRole("heading", { name: "test question" }).should("be.visible");
     });
   });
 });
@@ -374,7 +376,7 @@ describe("scenarios > embedding > native questions with default parameters", () 
     H.restore();
     cy.signInAsAdmin();
 
-    cy.createNativeQuestion(questionDetailsWithDefaults, {
+    H.createNativeQuestion(questionDetailsWithDefaults, {
       visitQuestion: true,
       wrapId: true,
     });
@@ -393,7 +395,7 @@ describe("scenarios > embedding > native questions with default parameters", () 
   });
 
   it("card parameter defaults should apply for disabled parameters, but not for editable or locked parameters", () => {
-    cy.get("@questionId").then(questionId => {
+    cy.get("@questionId").then((questionId) => {
       const payload = {
         resource: { question: questionId },
         params: { source: [] },

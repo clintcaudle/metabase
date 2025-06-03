@@ -28,10 +28,12 @@ export function getDashboardCards() {
 }
 
 export function getDashboardCard(index = 0) {
+  // eslint-disable-next-line no-unsafe-element-filtering
   return getDashboardCards().eq(index);
 }
 
 export function ensureDashboardCardHasText(text: string, index = 0) {
+  // eslint-disable-next-line no-unsafe-element-filtering
   cy.findAllByTestId("dashcard").eq(index).should("contain", text);
 }
 
@@ -40,7 +42,7 @@ export function getDashboardCardMenu(index = 0) {
 }
 
 export function showDashboardCardActions(index = 0) {
-  getDashboardCard(index).realHover({ scrollBehavior: "bottom" });
+  return getDashboardCard(index).realHover({ scrollBehavior: "bottom" });
 }
 
 /**
@@ -88,11 +90,17 @@ export function saveDashboard({
     "saveDashboard-saveDashboardCards",
   );
   cy.intercept("GET", "/api/dashboard/*").as("saveDashboard-getDashboard");
+  cy.intercept("GET", "/api/dashboard/*/query_metadata*").as(
+    "saveDashboard-getDashboardMetadata",
+  );
+
+  cy.findByText(editBarText).should("be.visible");
   cy.button(buttonLabel).click();
 
   if (awaitRequest) {
     cy.wait("@saveDashboard-saveDashboardCards");
     cy.wait("@saveDashboard-getDashboard");
+    cy.wait("@saveDashboard-getDashboardMetadata");
   }
 
   cy.findByText(editBarText).should("not.exist");
@@ -232,6 +240,14 @@ export function duplicateTab(tabName: string) {
   });
 }
 
+export function renameTab(tabName: string, newTabName: string) {
+  cy.findByRole("tab", { name: tabName }).findByRole("button").click();
+  popover().within(() => {
+    cy.findByText("Rename").click();
+  });
+  cy.findByRole("tab", { name: tabName }).type(newTabName + "{Enter}");
+}
+
 export function goToTab(tabName: string) {
   cy.findByRole("tab", { name: tabName }).click();
 }
@@ -296,7 +312,7 @@ export function resizeDashboardCard({
 
 /** Opens the dashboard info sidesheet */
 export function openDashboardInfoSidebar() {
-  dashboardHeader().icon("info").click();
+  dashboardHeader().findByLabelText("More info").click();
   return sidesheet();
 }
 /** Closes the dashboard info sidesheet */
@@ -319,6 +335,12 @@ export function openDashboardMenu(option?: string) {
   }
 }
 
+export function assertDashboardCardTitle(index: number, title: string) {
+  getDashboardCard(index)
+    .findByTestId("legend-caption-title")
+    .should("have.text", title);
+}
+
 export const dashboardHeader = () => {
   return cy.findByTestId("dashboard-header");
 };
@@ -337,6 +359,10 @@ export function dashboardParameterSidebar() {
 
 export function dashboardParametersDoneButton() {
   return dashboardParameterSidebar().button("Done");
+}
+
+export function dashboardParametersPopover() {
+  return popover({ testId: "parameter-value-dropdown" } as any);
 }
 
 /**

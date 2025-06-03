@@ -1,14 +1,16 @@
 import { assocIn, dissocIn, updateIn } from "icepick";
 import { t } from "ttag";
 
+import { cardApi } from "metabase/api";
 import Collections from "metabase/entities/collections";
+import { entityCompatibleQuery } from "metabase/lib/entities";
 import {
   createAction,
   createThunkAction,
   handleActions,
 } from "metabase/lib/redux";
 import { runQuestionQuery } from "metabase/query_builder/actions";
-import { CardApi, MetabaseApi } from "metabase/services";
+import { MetabaseApi } from "metabase/services";
 import type { CardId, CollectionId, TableId } from "metabase-types/api";
 import type { Dispatch, State } from "metabase-types/store";
 import type { FileUploadState } from "metabase-types/store/upload";
@@ -39,7 +41,7 @@ export const getAllUploads = (state: State) => state.upload;
 
 export const hasActiveUploads = (state: State) =>
   Object.values(getAllUploads(state)).some(
-    upload => upload.status === "in-progress",
+    (upload) => upload.status === "in-progress",
   );
 
 export interface UploadFileProps {
@@ -102,7 +104,11 @@ export const uploadFile = createThunkAction(
               return MetabaseApi.tableReplaceCSV({ tableId, formData });
             case UploadMode.create:
             default:
-              return CardApi.uploadCSV({ formData });
+              return entityCompatibleQuery(
+                { file, collection_id: collectionId },
+                dispatch,
+                cardApi.endpoints.createCardFromCsv,
+              );
           }
         })();
 
@@ -157,7 +163,7 @@ const upload = handleActions<
     },
     [UPLOAD_FILE_END]: {
       next: (state, { payload }) =>
-        updateIn(state, [payload.id], val => ({
+        updateIn(state, [payload.id], (val) => ({
           ...val,
           ...payload,
           status: "complete",
@@ -165,7 +171,7 @@ const upload = handleActions<
     },
     [UPLOAD_FILE_ERROR]: {
       next: (state, { payload }) =>
-        updateIn(state, [payload.id], val => ({
+        updateIn(state, [payload.id], (val) => ({
           ...val,
           ...payload,
           status: "error",

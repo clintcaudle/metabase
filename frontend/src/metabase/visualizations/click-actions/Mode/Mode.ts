@@ -1,4 +1,4 @@
-import type { MetabasePluginsConfig } from "embedding-sdk/lib/plugins";
+import type { MetabasePluginsConfig } from "metabase/embedding-sdk/types/plugins";
 import { queryDrill } from "metabase/querying/drills/utils/query-drill";
 import type { DrillThruDisplayInfo } from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
@@ -45,7 +45,7 @@ export class Mode {
       ...(mode.hasDrills
         ? queryDrill(question, clicked, this.isDrillEnabled)
         : []),
-      ...(mode.clickActions?.flatMap(drill => drill(props)) ?? []),
+      ...(mode.clickActions?.flatMap((drill) => drill(props)) ?? []),
     ];
 
     if (!actions.length && mode.fallback) {

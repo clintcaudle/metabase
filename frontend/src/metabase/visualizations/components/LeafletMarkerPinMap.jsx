@@ -1,23 +1,24 @@
 import L from "leaflet";
 import _ from "underscore";
 
+import { getSubpathSafeUrl } from "metabase/lib/urls";
 import { isPK } from "metabase-lib/v1/types/utils/isa";
 
 import { markerIcons } from "./CarinaIcons";
 import LeafletMap from "./LeafletMap";
-
-const MARKER_ICON = L.icon({
-  iconUrl: "app/assets/img/pin.png",
-  iconSize: [28, 32],
-  iconAnchor: [15, 24],
-  popupAnchor: [0, -13],
-});
 
 export default class LeafletMarkerPinMap extends LeafletMap {
   componentDidMount() {
     super.componentDidMount();
 
     this.pinMarkerLayer = L.layerGroup([]).addTo(this.map);
+    this.pinMarkerIcon = L.icon({
+      iconUrl: getSubpathSafeUrl("app/assets/img/pin.png"),
+      iconSize: [28, 32],
+      iconAnchor: [15, 24],
+      popupAnchor: [0, -13],
+    });
+
     this.componentDidUpdate({}, {});
   }
 
@@ -108,11 +109,11 @@ export default class LeafletMarkerPinMap extends LeafletMap {
     }
   }
 
-  _createMarker = rowIndex => {
-    const marker = L.marker([0, 0], { icon: MARKER_ICON });
+  _createMarker = (rowIndex) => {
+    const marker = L.marker([0, 0], { icon: this.pinMarkerIcon });
     const { onHoverChange, onVisualizationClick, settings } = this.props;
     if (onHoverChange) {
-      marker.on("mousemove", e => {
+      marker.on("mousemove", (e) => {
         const {
           series: [
             {

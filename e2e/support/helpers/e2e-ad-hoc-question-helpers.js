@@ -1,7 +1,7 @@
 import { SAMPLE_DB_ID, SAMPLE_DB_TABLES } from "e2e/support/cypress_data";
 
 import { runNativeQuery } from "./e2e-misc-helpers";
-import { nativeEditor } from "./e2e-native-editor-helpers";
+import { NativeEditor } from "./e2e-native-editor-helpers";
 
 const {
   STATIC_ORDERS_ID,
@@ -60,22 +60,32 @@ export function startNewMetric() {
 
 /**
  * @param {("question" | "model")} type
- * @param {("number" | null)} config.database
- * @param {string} config.query
+ * @param {Object} [config]
+ * @param {("number" | null)} [config.database]
+ * @param {string} [config.query]
+ * @param {number} [config.collection_id]
+ * @param {string} [config.display]
  */
 function newNativeCardHash(
   type,
-  config = { database: SAMPLE_DB_ID, query: "" },
+  {
+    database = SAMPLE_DB_ID,
+    query = "",
+    collection_id = null,
+    display = "scalar",
+    visualization_settings = {},
+  } = {},
 ) {
   const card = {
+    collection_id,
     dataset_query: {
-      database: config.database,
-      native: { query: config.query, "template-tags": {} },
+      database,
+      native: { query, "template-tags": {} },
       type: "native",
     },
-    display: "table",
+    display,
     parameters: [],
-    visualization_settings: {},
+    visualization_settings,
     type,
   };
 
@@ -87,16 +97,15 @@ function newNativeCardHash(
  *
  * @example
  * H.startNewNativeQuestion({ query: "SELECT * FROM ORDERS" });
- * @param {object} config
- * @param {number} config.database
+ * @param {object} [config]
+ * @param {number} [config.database]
  * @param {string} config.query
+ * @param {number} [config.collection_id]
+ * @param {string} [config.display]
  */
 export function startNewNativeQuestion(config) {
   const hash = newNativeCardHash("question", config);
-
   cy.visit("/question#" + hash);
-
-  return nativeEditor();
 }
 
 /**
@@ -107,7 +116,7 @@ export function startNewNativeModel(config) {
 
   cy.visit("/model/query#" + hash);
 
-  return nativeEditor();
+  return NativeEditor.get();
 }
 
 /**
@@ -131,8 +140,11 @@ export function visitQuestionAdhoc(
   runQueryIfNeeded(question, autorun);
 
   if (mode !== "notebook" && !skipWaiting) {
-    cy.wait("@" + alias).then(xhr => callback && callback(xhr));
+    return cy.wait("@" + alias).then((xhr) => callback && callback(xhr));
   }
+
+  // Ensure chainability
+  return cy.wrap(null);
 }
 
 /**

@@ -4,21 +4,20 @@
    [clojure.test :refer :all]
    [honey.sql :as sql]
    [java-time.api :as t]
-   [metabase.api.database :as api.database]
-   [metabase.db.metadata-queries :as metadata-queries]
    [metabase.driver :as driver]
+   [metabase.driver.common.table-rows-sample :as table-rows-sample]
    [metabase.driver.presto-jdbc :as presto-jdbc]
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
    [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.query-processor :as qp]
    [metabase.query-processor.compile :as qp.compile]
-   [metabase.sync :as sync]
+   [metabase.sync.core :as sync]
    [metabase.test :as mt]
    [metabase.test.data.presto-jdbc :as data.presto-jdbc]
    [metabase.test.fixtures :as fixtures]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp])
+   [metabase.warehouses.api :as api.database]
+   [toucan2.core :as t2])
   (:import
    (java.io File)))
 
@@ -78,10 +77,10 @@
             [3 "The Apple Pan"]
             [4 "Wurstküche"]
             [5 "Brite Spot Family Restaurant"]]
-           (->> (metadata-queries/table-rows-sample (t2/select-one :model/Table :id (mt/id :venues))
-                                                    [(t2/select-one :model/Field :id (mt/id :venues :id))
-                                                     (t2/select-one :model/Field :id (mt/id :venues :name))]
-                                                    (constantly conj))
+           (->> (table-rows-sample/table-rows-sample (t2/select-one :model/Table :id (mt/id :venues))
+                                                     [(t2/select-one :model/Field :id (mt/id :venues :id))
+                                                      (t2/select-one :model/Field :id (mt/id :venues :name))]
+                                                     (constantly conj))
                 (sort-by first)
                 (take 5))))))
 
@@ -215,7 +214,7 @@
                        (format "DROP SCHEMA IF EXISTS %s" s)
                        (format "CREATE SCHEMA %s" s)
                        (format "CREATE TABLE %s.%s (pk INTEGER, val1 VARCHAR(512))" s t)])
-        (t2.with-temp/with-temp [:model/Database db {:engine :presto-jdbc, :name "Temp Presto JDBC Schema DB", :details with-schema}]
+        (mt/with-temp [:model/Database db {:engine :presto-jdbc, :name "Temp Presto JDBC Schema DB", :details with-schema}]
           (mt/with-db db
             ;; same as test_data, but with schema, so should NOT pick up venues, users, etc.
             (sync/sync-database! db)
@@ -283,3 +282,7 @@
         (finally
           (.delete truststore)
           (.delete keystore))))))
+
+(deftest bytes-to-varbinary-test
+  (is (= ["FROM_BASE64(?)" "YSBzdHJpbmc="]
+         (sql/format (sql.qp/->honeysql :presto-jdbc (.getBytes "a string"))))))

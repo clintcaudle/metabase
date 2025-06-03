@@ -5,14 +5,13 @@
    [clojure.test :refer :all]
    [java-time.api :as t]
    [metabase.driver :as driver]
-   [metabase.driver.mysql-test :as mysql-test]
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    [metabase.sync.sync-metadata.sync-timezone :as sync-tz]
    [metabase.sync.util-test :as sync.util-test]
    [metabase.test :as mt]
+   [metabase.test.data.interface :as tx]
    [metabase.util :as u]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [toucan2.core :as t2]))
 
 (set! *warn-on-reflection* true)
 
@@ -74,8 +73,8 @@
     (testing "sync-timezone should allow non-standard MySQL default database time zones, such as offset strings (metabase#34050)"
       (let [details (mt/dbdef->connection-details :mysql :db {:database-name "sync_timezone_test"})
             spec    (sql-jdbc.conn/connection-details->spec :mysql details)]
-        (mysql-test/drop-if-exists-and-create-db! "sync_timezone_test")
-        (t2.with-temp/with-temp [:model/Database database {:engine :mysql, :details (assoc details :dbname "sync_timezone_test")}]
+        (tx/drop-if-exists-and-create-db! driver/*driver* "sync_timezone_test")
+        (mt/with-temp [:model/Database database {:engine :mysql, :details (assoc details :dbname "sync_timezone_test")}]
           (let [global-time-zone (-> (jdbc/query spec ["SELECT @@GLOBAL.time_zone;"])
                                      first
                                      (get (keyword "@@global.time_zone")))]

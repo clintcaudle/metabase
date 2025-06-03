@@ -2,6 +2,7 @@ import { push } from "react-router-redux";
 import _ from "underscore";
 
 import { setParameterValuesFromQueryParams } from "metabase/dashboard/actions";
+import { isEmbeddingSdk } from "metabase/env";
 import { open } from "metabase/lib/dom";
 
 export function performAction(
@@ -13,15 +14,21 @@ export function performAction(
     const reduxAction = action.action();
     if (reduxAction) {
       dispatch(reduxAction);
+
       didPerform = true;
     }
   }
   if (action.url) {
+    // (metabase#51099) disable url click behavior when in sdk
+    if (isEmbeddingSdk) {
+      return true;
+    }
+
     const url = action.url();
     const ignoreSiteUrl = action.ignoreSiteUrl;
     if (url) {
       open(url, {
-        openInSameOrigin: location => {
+        openInSameOrigin: (location) => {
           dispatch(push(location));
           dispatch(setParameterValuesFromQueryParams(location.query));
         },
@@ -64,7 +71,7 @@ export function performDefaultAction(actions, props) {
   }
 
   // "defaultAlways" action even if there's more than one
-  const action = _.find(actions, action => action.defaultAlways === true);
+  const action = _.find(actions, (action) => action.defaultAlways === true);
   if (action) {
     return performAction(action, props);
   }

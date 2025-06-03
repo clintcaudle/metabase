@@ -9,14 +9,13 @@
    [medley.core :as m]
    [metabase.driver :as driver]
    [metabase.lib.native :as lib-native]
-   [metabase.models.permissions :as perms]
-   [metabase.models.permissions-group :as perms-group]
+   [metabase.permissions.models.permissions :as perms]
+   [metabase.permissions.models.permissions-group :as perms-group]
    [metabase.query-processor :as qp]
    [metabase.query-processor.compile :as qp.compile]
    [metabase.test :as mt]
    [metabase.util :as u]
-   [metabase.util.date-2 :as u.date]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [metabase.util.date-2 :as u.date]))
 
 (defn- run-count-query [query]
   (or (ffirst
@@ -102,7 +101,7 @@
 
 (deftest ^:parallel template-tag-generation-test
   (testing "Generating template tags produces correct types for running process-query (#31252)"
-    (t2.with-temp/with-temp
+    (mt/with-temp
       [:model/Card {card-id :id} {:type          :model
                                   :dataset_query (mt/native-query {:query "select * from checkins"})}]
       (let [q   (str "SELECT * FROM {{#" card-id "}} LIMIT 2")
@@ -157,12 +156,9 @@
              (run-count-query query))))))
 
 (deftest ^:parallel field-filter-param-test
-  ;; TIMEZONE FIXME — The excluded drivers don't have TIME types, so the `attempted-murders` dataset doesn't currently
-  ;; work. We should use the closest equivalent types (e.g. `DATETIME` or `TIMESTAMP` so we can still load the dataset
-  ;; and run tests using this dataset such as these, which doesn't even use the TIME type.
-  (mt/test-drivers (mt/normal-drivers-with-feature :native-parameters :test/time-type)
+  (mt/test-drivers (mt/normal-drivers-with-feature :native-parameters :test/dynamic-dataset-loading)
     (testing "temporal field filters"
-      (mt/dataset attempted-murders
+      (mt/dataset attempted-murders-no-time
         (doseq [field
                 [:datetime
                  :date
@@ -203,7 +199,7 @@
 
 (deftest ^:parallel filter-nested-queries-test
   (mt/test-drivers (mt/normal-drivers-with-feature :native-parameters :nested-queries)
-    (t2.with-temp/with-temp [:model/Card {card-id :id} {:dataset_query (mt/native-query (qp.compile/compile (mt/mbql-query checkins)))}]
+    (mt/with-temp [:model/Card {card-id :id} {:dataset_query (mt/native-query (qp.compile/compile (mt/mbql-query checkins)))}]
       (let [query (assoc (mt/mbql-query nil
                            {:source-table (format "card__%d" card-id)})
                          :parameters [{:type   :date/all-options
@@ -450,7 +446,7 @@
 (deftest ^:parallel date-parameter-for-native-query-with-nested-mbql-query-test
   (testing "Should be able to have a native query with a nested MBQL query and a date parameter (#21246)"
     (mt/dataset test-data
-      (t2.with-temp/with-temp [:model/Card {card-id :id} {:dataset_query (mt/mbql-query products)}]
+      (mt/with-temp [:model/Card {card-id :id} {:dataset_query (mt/mbql-query products)}]
         (let [param-name (format "#%d" card-id)
               query      (mt/native-query
                            {:query         (str/join \newline
@@ -603,7 +599,7 @@
                           (qp/process-query {:database (mt/id)
                                              :type     :native
                                              :native   (dissoc (qp.compile/compile (:dataset_query card-2))
-                                                               :metabase.models.query.permissions/referenced-card-ids)}))))))
+                                                               :query-permissions/referenced-card-ids)}))))))
               (let [query (mt/native-query
                             {:query         (mt/native-query-with-card-template-tag driver/*driver* "card")
                              :template-tags {"card" {:name         "card"

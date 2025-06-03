@@ -1,4 +1,5 @@
-import { within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import fetchMock from "fetch-mock";
 
 import {
   setupAlertsEndpoints,
@@ -9,16 +10,23 @@ import {
   setupTableEndpoints,
   setupUnauthorizedCardEndpoints,
 } from "__support__/server-mocks";
+import { setupEntityIdEndpoint } from "__support__/server-mocks/entity-id";
 import {
   act,
-  renderWithProviders,
+  mockGetBoundingClientRect,
   screen,
   waitForLoaderToBeRemoved,
+  within,
 } from "__support__/ui";
-import { InteractiveQuestionResult } from "embedding-sdk/components/private/InteractiveQuestionResult";
-import { createMockAuthProviderUriConfig } from "embedding-sdk/test/mocks/config";
+import {
+  InteractiveQuestionDefaultView,
+  type InteractiveQuestionDefaultViewProps,
+} from "embedding-sdk/components/private/InteractiveQuestionDefaultView";
+import { renderWithSDKProviders } from "embedding-sdk/test/__support__/ui";
+import { createMockSdkConfig } from "embedding-sdk/test/mocks/config";
 import { setupSdkState } from "embedding-sdk/test/server-mocks/sdk-init";
 import type { SdkQuestionTitleProps } from "embedding-sdk/types/question";
+import type { BaseEntityId, CardId } from "metabase-types/api";
 import {
   createMockCard,
   createMockCardQueryMetadata,
@@ -26,13 +34,23 @@ import {
   createMockDatabase,
   createMockDataset,
   createMockDatasetData,
+  createMockParameter,
   createMockTable,
   createMockUser,
 } from "metabase-types/api/mocks";
+import { createMockEntityId } from "metabase-types/api/mocks/entity-id";
 
 import { useInteractiveQuestionContext } from "../../private/InteractiveQuestion/context";
 
-import { InteractiveQuestion } from "./InteractiveQuestion";
+import {
+  type BaseInteractiveQuestionProps,
+  InteractiveQuestion,
+} from "./InteractiveQuestion";
+const TEST_PARAM = createMockParameter({
+  type: "number/=",
+  slug: "product_id",
+  target: ["variable", ["template-tag", "product_id"]],
+});
 
 const TEST_USER = createMockUser();
 const TEST_DB_ID = 1;
@@ -53,6 +71,8 @@ const TEST_DATASET = createMockDataset({
   }),
 });
 
+const VISUALIZATION_TYPES = ["Table", "Number", "Gauge", "Detail", "Progress"];
+
 // Provides a button to re-run the query
 function InteractiveQuestionCustomLayout({
   title,
@@ -64,27 +84,39 @@ function InteractiveQuestionCustomLayout({
   return (
     <div>
       <button onClick={resetQuestion}>Run Query</button>
-      <InteractiveQuestionResult title={title} />
+      <InteractiveQuestionDefaultView title={title} />
     </div>
   );
 }
+
+const TEST_CARD_ID: CardId = 1 as const;
+const TEST_ENTITY_ID = createMockEntityId();
+const TEST_CARD = createMockCard({
+  name: "My Question",
+  parameters: [TEST_PARAM],
+});
 
 const setup = ({
   isValidCard = true,
   title,
   withCustomLayout = false,
   withChartTypeSelector = false,
-}: {
-  isValidCard?: boolean;
-  title?: SdkQuestionTitleProps;
-  withCustomLayout?: boolean;
-  withChartTypeSelector?: boolean;
-} = {}) => {
+  initialSqlParameters,
+  cardId = TEST_CARD_ID,
+}: Partial<
+  Pick<BaseInteractiveQuestionProps, "initialSqlParameters"> &
+    Pick<
+      InteractiveQuestionDefaultViewProps,
+      "withChartTypeSelector" | "title"
+    > & {
+      isValidCard?: boolean;
+      withCustomLayout?: boolean;
+    } & { cardId: BaseEntityId | CardId }
+> = {}) => {
   const { state } = setupSdkState({
     currentUser: TEST_USER,
   });
 
-  const TEST_CARD = createMockCard({ name: "My Question" });
   if (isValidCard) {
     setupCardEndpoints(TEST_CARD);
     setupCardQueryMetadataEndpoint(
@@ -103,20 +135,20 @@ const setup = ({
 
   setupCardQueryEndpoints(TEST_CARD, TEST_DATASET);
 
-  return renderWithProviders(
+  setupEntityIdEndpoint({ card: { [TEST_ENTITY_ID]: TEST_CARD_ID } });
+
+  return renderWithSDKProviders(
     <InteractiveQuestion
-      questionId={TEST_CARD.id}
+      questionId={cardId}
       title={title}
       withChartTypeSelector={withChartTypeSelector}
+      initialSqlParameters={initialSqlParameters}
     >
       {withCustomLayout ? <InteractiveQuestionCustomLayout /> : undefined}
     </InteractiveQuestion>,
     {
-      mode: "sdk",
       sdkProviderProps: {
-        authConfig: createMockAuthProviderUriConfig({
-          authProviderUri: "http://TEST_URI/sso/metabase",
-        }),
+        authConfig: createMockSdkConfig(),
       },
       storeInitialState: state,
     },
@@ -130,30 +162,48 @@ describe("InteractiveQuestion", () => {
     expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
   });
 
-  it("should render loading state when rerunning the query", async () => {
-    setup({ withCustomLayout: true });
+  describe("table visualization", () => {
+    beforeAll(() => {
+      mockGetBoundingClientRect();
+    });
 
-    await waitForLoaderToBeRemoved();
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
 
-    expect(
-      await within(screen.getByTestId("TableInteractive-root")).findByText(
-        TEST_COLUMN.display_name,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      await within(screen.getByRole("gridcell")).findByText("Test Row"),
-    ).toBeInTheDocument();
+    afterEach(() => {
+      jest.useRealTimers();
+    });
 
-    expect(screen.queryByTestId("loading-indicator")).not.toBeInTheDocument();
+    it("should render loading state when rerunning the query", async () => {
+      setup({ withCustomLayout: true });
 
-    // Simulate drilling down by re-running the query again
-    act(() => screen.getByText("Run Query").click());
+      await waitForLoaderToBeRemoved();
 
-    expect(screen.queryByText("Question not found")).not.toBeInTheDocument();
-    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
-    expect(
-      within(await screen.findByRole("gridcell")).getByText("Test Row"),
-    ).toBeInTheDocument();
+      act(() => {
+        jest.runAllTimers();
+      });
+
+      expect(
+        await within(screen.getByTestId("table-root")).findByText(
+          TEST_COLUMN.display_name,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        await within(screen.getByRole("gridcell")).findByText("Test Row"),
+      ).toBeInTheDocument();
+
+      expect(screen.queryByTestId("loading-indicator")).not.toBeInTheDocument();
+
+      // Simulate drilling down by re-running the query again
+      act(() => screen.getByText("Run Query").click());
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
+      expect(
+        within(await screen.findByRole("gridcell")).getByText("Test Row"),
+      ).toBeInTheDocument();
+    });
   });
 
   it("should render when question is valid", async () => {
@@ -161,8 +211,12 @@ describe("InteractiveQuestion", () => {
 
     await waitForLoaderToBeRemoved();
 
+    act(() => {
+      jest.runAllTimers();
+    });
+
     expect(
-      within(screen.getByTestId("TableInteractive-root")).getByText(
+      within(screen.getByTestId("table-root")).getByText(
         TEST_COLUMN.display_name,
       ),
     ).toBeInTheDocument();
@@ -177,7 +231,7 @@ describe("InteractiveQuestion", () => {
     await waitForLoaderToBeRemoved();
 
     expect(screen.queryByText("Error")).not.toBeInTheDocument();
-    expect(screen.queryByText("Question not found")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("should render an error if a question isn't found", async () => {
@@ -185,7 +239,9 @@ describe("InteractiveQuestion", () => {
 
     await waitForLoaderToBeRemoved();
 
-    expect(screen.getByText("Question not found")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      `Question ${TEST_CARD.id} not found. Make sure you pass the correct ID.`,
+    );
   });
 
   it.each([
@@ -233,5 +289,82 @@ describe("InteractiveQuestion", () => {
     expect(
       screen.queryByTestId("chart-type-selector-button"),
     ).not.toBeInTheDocument();
+  });
+
+  it("should change the visualization if a different visualization is selected", async () => {
+    setup({ withChartTypeSelector: true });
+    await waitForLoaderToBeRemoved();
+    expect(
+      screen.getByTestId("chart-type-selector-button"),
+    ).toBeInTheDocument();
+
+    for (const visType of VISUALIZATION_TYPES) {
+      await userEvent.click(screen.getByTestId("chart-type-selector-button"));
+      await userEvent.click(
+        await within(screen.getByRole("menu")).findByText(visType),
+      );
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(
+        within(screen.getByTestId("chart-type-selector-button")).getByText(
+          visType,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("visualization-root")).toHaveAttribute(
+        "data-viz-ui-name",
+        visType,
+      );
+    }
+  });
+
+  // Obviously, we can't test every single permutation of chart settings right now, but tests in the core
+  // app should cover most cases anyway.
+  it("should allow user to use chart settings", async () => {
+    setup({ withChartTypeSelector: true });
+    await waitForLoaderToBeRemoved();
+
+    await userEvent.click(screen.getByLabelText("gear icon"));
+
+    const popover = within(screen.getByRole("dialog"));
+    expect(popover.getByTestId("chartsettings-sidebar")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("Test Column-settings-button"));
+
+    const columnTitle = screen.getByTestId("column_title");
+    await userEvent.clear(columnTitle);
+    await userEvent.type(columnTitle, "A New Test Column");
+    await userEvent.tab();
+
+    expect(
+      await screen.findByTestId("draggable-item-A New Test Column"),
+    ).toBeInTheDocument();
+  });
+
+  it("should query with the parameters in a parameterized question", async () => {
+    setup({ initialSqlParameters: { product_id: 1024 } });
+
+    await waitForLoaderToBeRemoved();
+
+    const lastQuery = fetchMock.lastCall(
+      `path:/api/card/${TEST_CARD.id}/query`,
+    );
+    const queryRequest = await lastQuery?.request?.json();
+
+    expect(queryRequest.parameters?.[0]).toMatchObject({
+      id: TEST_PARAM.id,
+      type: TEST_PARAM.type,
+      target: TEST_PARAM.target,
+      value: [1024],
+    });
+  });
+
+  it("should not flash an error when loading with an entity ID (metabase#57059)", async () => {
+    setup({ cardId: TEST_ENTITY_ID });
+
+    await waitForLoaderToBeRemoved();
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Query results will appear here."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("query-visualization-root")).toBeInTheDocument();
   });
 });

@@ -17,6 +17,7 @@ import {
   setParameterType as setParamType,
 } from "metabase/parameters/utils/dashboards";
 import { addUndo, dismissUndo } from "metabase/redux/undo";
+import * as Lib from "metabase-lib";
 import { getParameterValuesByIdFromQueryParams } from "metabase-lib/v1/parameters/utils/parameter-parsing";
 import {
   PULSE_PARAM_EMPTY,
@@ -47,6 +48,7 @@ import {
   getDashCardById,
   getDashboard,
   getDashboardBeforeEditing,
+  getDashboardComplete,
   getDashboardId,
   getDashcards,
   getDraftParameterValues,
@@ -55,11 +57,17 @@ import {
   getParameterMappingsBeforeEditing,
   getParameterValues,
   getParameters,
+  getQuestions,
   getSelectedTabId,
 } from "../selectors";
 import { isQuestionDashCard } from "../utils";
 
-import { setDashCardAttributes, setDashboardAttributes } from "./core";
+import {
+  type SetDashCardAttributesOpts,
+  setDashCardAttributes,
+  setDashboardAttributes,
+  setMultipleDashCardAttributes,
+} from "./core";
 import { closeSidebar, setSidebar } from "./ui";
 
 type SingleParamUpdater = (p: Parameter) => Parameter;
@@ -75,7 +83,7 @@ function updateParameter(
     return;
   }
 
-  const index = _.findIndex(dashboard.parameters, p => p.id === id);
+  const index = _.findIndex(dashboard.parameters, (p) => p.id === id);
   if (index >= 0) {
     const parameters = assoc(
       dashboard.parameters,
@@ -126,7 +134,7 @@ export const addParameter = createThunkAction(
   (option: ParameterMappingOptions) => (dispatch, getState) => {
     let newId: undefined | ParameterId = undefined;
 
-    updateParameters(dispatch, getState, parameters => {
+    updateParameters(dispatch, getState, (parameters) => {
       const parameter = createParameter(option, parameters);
       newId = parameter.id;
       return [...parameters, parameter];
@@ -151,9 +159,23 @@ export const removeParameter = createThunkAction(
   (parameterId: ParameterId) => (dispatch, getState) => {
     dispatch(closeAddCardAutoWireToasts());
 
-    updateParameters(dispatch, getState, parameters =>
-      parameters.filter(p => p.id !== parameterId),
-    );
+    updateParameters(dispatch, getState, (parameters) => {
+      return parameters
+        .filter((parameter) => parameter.id !== parameterId)
+        .map((parameter) => {
+          if (parameter.filteringParameters) {
+            const filteringParameters = parameter.filteringParameters.filter(
+              (filteringParameter) => {
+                return filteringParameter !== parameterId;
+              },
+            );
+
+            return { ...parameter, filteringParameters };
+          }
+
+          return parameter;
+        });
+    });
 
     return { id: parameterId };
   },
@@ -215,7 +237,7 @@ export const resetParameterMapping = createThunkAction(
 
       const dashcards = dashcardId
         ? [allDashcards[dashcardId]]
-        : dashboard.dashcards.map(dashcardId => allDashcards[dashcardId]);
+        : dashboard.dashcards.map((dashcardId) => allDashcards[dashcardId]);
 
       for (const dashcard of dashcards) {
         if (!dashcard.parameter_mappings?.length) {
@@ -223,7 +245,7 @@ export const resetParameterMapping = createThunkAction(
         }
 
         const isDashcardMappedToParameter = dashcard.parameter_mappings.some(
-          mapping => mapping.parameter_id === parameterId,
+          (mapping) => mapping.parameter_id === parameterId,
         );
 
         if (!isDashcardMappedToParameter) {
@@ -232,7 +254,7 @@ export const resetParameterMapping = createThunkAction(
 
         const parameterMappingsWithoutParameterId =
           dashcard.parameter_mappings.filter(
-            mapping => mapping.parameter_id !== parameterId,
+            (mapping) => mapping.parameter_id !== parameterId,
           );
 
         dispatch(
@@ -252,7 +274,7 @@ export const SET_ACTION_FOR_DASHCARD =
   "metabase/dashboard/SET_ACTION_FOR_DASHCARD";
 export const setActionForDashcard = createThunkAction(
   SET_PARAMETER_MAPPING,
-  (dashcard: ActionDashboardCard, newAction: WritebackAction) => dispatch => {
+  (dashcard: ActionDashboardCard, newAction: WritebackAction) => (dispatch) => {
     dispatch(
       setDashCardAttributes({
         id: dashcard.id,
@@ -269,7 +291,7 @@ export const SET_PARAMETER_NAME = "metabase/dashboard/SET_PARAMETER_NAME";
 export const setParameterName = createThunkAction(
   SET_PARAMETER_NAME,
   (parameterId: ParameterId, name: string) => (dispatch, getState) => {
-    updateParameter(dispatch, getState, parameterId, parameter =>
+    updateParameter(dispatch, getState, parameterId, (parameter) =>
       setParamName(parameter, name),
     );
 
@@ -304,11 +326,13 @@ export const setParameterType = createThunkAction(
             parameterId,
             sectionId,
           );
+      } else if (parameter.type !== type) {
+        resetNativeCardParameterMappings(getState, dispatch, parameterId);
       }
 
       if (!haveRestoredParameterMappingsToPristine) {
         // update to default
-        updateParameter(dispatch, getState, parameterId, parameter =>
+        updateParameter(dispatch, getState, parameterId, (parameter) =>
           setParamType(parameter, type, sectionId),
         );
       }
@@ -318,6 +342,52 @@ export const setParameterType = createThunkAction(
       return { id: parameterId, type };
     },
 );
+
+function resetNativeCardParameterMappings(
+  getState: GetState,
+  dispatch: Dispatch,
+  parameterId: ParameterId,
+) {
+  const dashboard = getDashboardComplete(getState());
+  const dashcards = dashboard?.dashcards ?? [];
+  const questionById = getQuestions(getState());
+
+  const newAttributes = dashcards.reduce(
+    (attributes: SetDashCardAttributesOpts[], dashcard) => {
+      if (!isQuestionDashCard(dashcard)) {
+        return attributes;
+      }
+
+      const parameterMappings = dashcard.parameter_mappings ?? [];
+      const newParameterMappings = parameterMappings.filter(
+        (parameterMapping) => {
+          const question = questionById[parameterMapping.card_id];
+          return (
+            parameterMapping.parameter_id !== parameterId ||
+            !question ||
+            !Lib.queryDisplayInfo(question.query()).isNative
+          );
+        },
+      );
+
+      if (newParameterMappings.length !== parameterMappings.length) {
+        attributes.push({
+          id: dashcard.id,
+          attributes: {
+            parameter_mappings: newParameterMappings,
+          },
+        });
+      }
+
+      return attributes;
+    },
+    [],
+  );
+
+  if (newAttributes.length > 0) {
+    dispatch(setMultipleDashCardAttributes({ dashcards: newAttributes }));
+  }
+}
 
 function restoreParameterMappingsIfNeeded(
   getState: GetState,
@@ -424,7 +494,7 @@ export const setParameterFilteringParameters = createThunkAction(
   SET_PARAMETER_NAME,
   (parameterId: ParameterId, filteringParameters: ParameterId[]) =>
     (dispatch, getState) => {
-      updateParameter(dispatch, getState, parameterId, parameter => ({
+      updateParameter(dispatch, getState, parameterId, (parameter) => ({
         ...parameter,
         filteringParameters,
       }));
@@ -467,7 +537,7 @@ export const SET_PARAMETER_DEFAULT_VALUE =
 export const setParameterDefaultValue = createThunkAction(
   SET_PARAMETER_DEFAULT_VALUE,
   (parameterId: ParameterId, defaultValue: any) => (dispatch, getState) => {
-    updateParameter(dispatch, getState, parameterId, parameter => ({
+    updateParameter(dispatch, getState, parameterId, (parameter) => ({
       ...parameter,
       default: defaultValue,
     }));
@@ -497,7 +567,7 @@ export const resetParameters = createThunkAction(
   () => (_dispatch, getState) => {
     const parameters = getFiltersToReset(getState());
 
-    return parameters.map(parameter => {
+    return parameters.map((parameter) => {
       const newValue = parameter.default ?? null;
       const isValueEmpty = isParameterValueEmpty(newValue);
 
@@ -519,7 +589,7 @@ export const setParameterRequired = createThunkAction(
     );
 
     if (parameter && parameter.required !== required) {
-      updateParameter(dispatch, getState, parameterId, parameter => ({
+      updateParameter(dispatch, getState, parameterId, (parameter) => ({
         ...parameter,
         required,
       }));
@@ -540,7 +610,7 @@ export const setParameterIsMultiSelect = createThunkAction(
   SET_PARAMETER_IS_MULTI_SELECT,
   (parameterId: ParameterId, isMultiSelect: boolean) =>
     (dispatch, getState) => {
-      updateParameter(dispatch, getState, parameterId, parameter => ({
+      updateParameter(dispatch, getState, parameterId, (parameter) => ({
         ...parameter,
         isMultiSelect: isMultiSelect,
         default:
@@ -561,7 +631,7 @@ export const setParameterTemporalUnits = createThunkAction(
   SET_PARAMETER_TEMPORAL_UNITS,
   (parameterId: ParameterId, temporalUnits: TemporalUnit[]) =>
     (dispatch, getState) => {
-      updateParameter(dispatch, getState, parameterId, parameter => ({
+      updateParameter(dispatch, getState, parameterId, (parameter) => ({
         ...parameter,
         temporal_units: temporalUnits,
         default:
@@ -580,7 +650,7 @@ export const setParameterQueryType = createThunkAction(
   SET_PARAMETER_QUERY_TYPE,
   (parameterId: ParameterId, queryType: ValuesQueryType) =>
     (dispatch, getState) => {
-      updateParameter(dispatch, getState, parameterId, parameter => ({
+      updateParameter(dispatch, getState, parameterId, (parameter) => ({
         ...parameter,
         values_query_type: queryType,
       }));
@@ -595,7 +665,7 @@ export const setParameterSourceType = createThunkAction(
   SET_PARAMETER_SOURCE_TYPE,
   (parameterId: ParameterId, sourceType: ValuesSourceType) =>
     (dispatch, getState) => {
-      updateParameter(dispatch, getState, parameterId, parameter => ({
+      updateParameter(dispatch, getState, parameterId, (parameter) => ({
         ...parameter,
         values_source_type: sourceType,
       }));
@@ -610,7 +680,7 @@ export const setParameterSourceConfig = createThunkAction(
   SET_PARAMETER_SOURCE_CONFIG,
   (parameterId: ParameterId, sourceConfig: ValuesSourceConfig) =>
     (dispatch, getState) => {
-      updateParameter(dispatch, getState, parameterId, parameter => ({
+      updateParameter(dispatch, getState, parameterId, (parameter) => ({
         ...parameter,
         values_source_config: sourceConfig,
       }));
@@ -630,7 +700,7 @@ export const setParameterIndex = createThunkAction(
 
     const parameterIndex = _.findIndex(
       dashboard.parameters,
-      p => p.id === parameterId,
+      (p) => p.id === parameterId,
     );
     if (parameterIndex >= 0) {
       const parameters = dashboard.parameters.slice();
@@ -660,7 +730,10 @@ export const setOrUnsetParameterValues =
     const parameterValues = getParameterValues(getState());
     parameterIdValuePairs
       .map(([id, value]) =>
-        setParameterValue(id, value === parameterValues[id] ? null : value),
+        setParameterValue(
+          id,
+          _.isEqual(value, parameterValues[id]) ? null : value,
+        ),
       )
       .forEach(dispatch);
   };

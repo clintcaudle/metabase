@@ -1,5 +1,3 @@
-import { Box } from "@mantine/core";
-import { waitFor } from "@testing-library/react";
 import fetchMock from "fetch-mock";
 import { indexBy } from "underscore";
 
@@ -8,10 +6,12 @@ import {
   setupDashboardQueryMetadataEndpoint,
 } from "__support__/server-mocks";
 import { setupDashcardQueryEndpoints } from "__support__/server-mocks/dashcard";
-import { renderWithProviders, screen } from "__support__/ui";
+import { screen, waitFor } from "__support__/ui";
 import type { MetabaseProviderProps } from "embedding-sdk/components/public/MetabaseProvider";
-import { createMockAuthProviderUriConfig } from "embedding-sdk/test/mocks/config";
+import { renderWithSDKProviders } from "embedding-sdk/test/__support__/ui";
+import { createMockSdkConfig } from "embedding-sdk/test/mocks/config";
 import { setupSdkState } from "embedding-sdk/test/server-mocks/sdk-init";
+import { Box } from "metabase/ui";
 import {
   createMockCard,
   createMockDashboard,
@@ -85,23 +85,20 @@ const setup = async (options: SetupOptions = {}) => {
       dashboards: {
         [dashboard.id]: {
           ...dashboard,
-          dashcards: dashcards.map(dc => dc.id),
+          dashcards: dashcards.map((dc) => dc.id),
         },
       },
       dashcards: indexBy(dashcards, "id"),
     }),
   });
 
-  renderWithProviders(
+  renderWithSDKProviders(
     <Box h="500px">
       <StaticDashboard dashboardId={dashboardId} {...props} />
     </Box>,
     {
-      mode: "sdk",
       sdkProviderProps: {
-        authConfig: createMockAuthProviderUriConfig({
-          authProviderUri: "http://TEST_URI/sso/metabase",
-        }),
+        authConfig: createMockSdkConfig(),
         ...providerProps,
       },
       storeInitialState: state,

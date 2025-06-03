@@ -1,7 +1,6 @@
 import type { Query } from "history";
 import { Priority, useKBar, useRegisterActions } from "kbar";
 import { useMemo, useState } from "react";
-import { push } from "react-router-redux";
 import { useDebounce } from "react-use";
 import { jt, t } from "ttag";
 
@@ -17,7 +16,7 @@ import { getIcon } from "metabase/lib/icon";
 import { getName } from "metabase/lib/name";
 import { useDispatch, useSelector } from "metabase/lib/redux";
 import * as Urls from "metabase/lib/urls";
-import { PLUGIN_CACHING } from "metabase/plugins";
+import { PLUGIN_CACHING, PLUGIN_METABOT } from "metabase/plugins";
 import { trackSearchClick } from "metabase/search/analytics";
 import {
   getDocsSearchUrl,
@@ -42,7 +41,7 @@ export const useCommandPalette = ({
   locationQuery: Query;
 }) => {
   const dispatch = useDispatch();
-  const docsUrl = useSelector(state => getDocsUrl(state, {}));
+  const docsUrl = useSelector((state) => getDocsUrl(state, {}));
   const showMetabaseLinks = useSelector(getShowMetabaseLinks);
 
   const isAdmin = useSelector(getUserIsAdmin);
@@ -51,7 +50,7 @@ export const useCommandPalette = ({
   const isSearchTypeaheadEnabled = useSetting("search-typeahead-enabled");
 
   // Used for finding actions within the list
-  const { searchQuery } = useKBar(state => ({
+  const { searchQuery } = useKBar((state) => ({
     searchQuery: state.searchQuery,
   }));
   const trimmedQuery = searchQuery.trim();
@@ -124,6 +123,9 @@ export const useCommandPalette = ({
     docsAction,
     showDocsAction,
   ]);
+
+  const metabotActions = PLUGIN_METABOT.useMetabotPalletteActions(trimmedQuery);
+  useRegisterActions(metabotActions, [metabotActions]);
 
   const searchResultActions = useMemo<PaletteAction[]>(() => {
     const searchLocation = {
@@ -235,7 +237,7 @@ export const useCommandPalette = ({
 
   const recentItemsActions = useMemo<PaletteAction[]>(() => {
     return (
-      filterRecentItems(recentItems ?? []).map(item => {
+      filterRecentItems(recentItems ?? []).map((item) => {
         const icon = getIcon(item);
         return {
           id: `recent-item-${getName(item)}-${item.model}-${item.id}`,
@@ -269,14 +271,17 @@ export const useCommandPalette = ({
       : [];
 
     const paths = [...adminPaths, ...adminSubpaths];
-    return paths.map(adminPath => ({
+    return paths.map((adminPath) => ({
       id: `admin-page-${adminPath.key}`,
       name: `${adminPath.name}`,
       icon: "gear",
-      perform: () => dispatch(push(adminPath.path)),
+      perform: () => {},
       section: "admin",
+      extra: {
+        href: adminPath.path,
+      },
     }));
-  }, [isAdmin, adminPaths, dispatch]);
+  }, [isAdmin, adminPaths]);
 
   const settingsActions = useMemo<PaletteAction[]>(() => {
     if (!canUserAccessSettings) {
@@ -299,16 +304,13 @@ export const useCommandPalette = ({
         id: `admin-settings-${slug}`,
         name: `${t`Settings`} - ${section.name}`,
         icon: "gear",
-        perform: () => dispatch(push(`/admin/settings/${slug}`)),
+        perform: () => {},
         section: "admin",
+        extra: {
+          href: `/admin/settings/${slug}`,
+        },
       }));
-  }, [
-    canUserAccessSettings,
-    isAdmin,
-    settingsSections,
-    settingValues,
-    dispatch,
-  ]);
+  }, [canUserAccessSettings, isAdmin, settingsSections, settingValues]);
 
   useRegisterActions(hasQuery ? [...adminActions, ...settingsActions] : [], [
     adminActions,

@@ -1,3 +1,5 @@
+/* eslint-disable no-color-literals */
+
 import { match } from "ts-pattern";
 
 import type { SdkUsageProblem } from "embedding-sdk/types/usage-problem";
@@ -22,7 +24,7 @@ export function printUsageProblemToConsole(problem: SdkUsageProblem | null) {
     `%cMetabase Embedding SDK for React\n\n` +
     `%c${problem.message}\n` +
     `See the documentation for more information:\n\n` +
-    `%chttps://github.com/metabase/metabase/blob/master/enterprise/frontend/src/embedding-sdk/README.md#authenticate-users-from-your-back-end\n\n`;
+    `%c${problem.documentationUrl}\n\n`;
 
   logger(message, HEADER_STYLE, TEXT_STYLE, LINK_STYLE);
 }

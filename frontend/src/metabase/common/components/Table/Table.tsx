@@ -62,7 +62,7 @@ export function Table<Row extends BaseRow>({
         {cols && <colgroup>{cols}</colgroup>}
         <thead>
           <tr>
-            {columns.map(column => {
+            {columns.map((column) => {
               const { sortable = true } = column;
               return (
                 <th key={String(column.key)}>
@@ -84,13 +84,17 @@ export function Table<Row extends BaseRow>({
           </tr>
         </thead>
         <tbody>
-          {rows.length > 0
-            ? rows.map((row, index) => (
-                <React.Fragment key={String(row.id) || index}>
-                  {rowRenderer(row)}
-                </React.Fragment>
-              ))
-            : emptyBody}
+          {rows.length > 0 ? (
+            rows.map((row, index) => (
+              <React.Fragment key={String(row.id) || index}>
+                {rowRenderer(row)}
+              </React.Fragment>
+            ))
+          ) : (
+            <tr className={CS.EmptyTableRow}>
+              <td colSpan={columns.length}>{emptyBody}</td>
+            </tr>
+          )}
         </tbody>
       </table>
 

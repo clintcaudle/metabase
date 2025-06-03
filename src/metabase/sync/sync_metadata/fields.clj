@@ -40,7 +40,6 @@
     for logging purposes by higher-level sync logic."
   (:require
    [metabase.driver.util :as driver.u]
-   [metabase.models.table :as table]
    [metabase.sync.fetch-metadata :as fetch-metadata]
    [metabase.sync.interface :as i]
    [metabase.sync.sync-metadata.fields.our-metadata :as fields.our-metadata]
@@ -50,6 +49,7 @@
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms]
+   [metabase.warehouse-schema.models.table :as table]
    [toucan2.core :as t2]
    [toucan2.util :as t2.util]))
 
@@ -60,13 +60,22 @@
 (mu/defn- sync-and-update! :- ms/IntGreaterThanOrEqualToZero
   "Sync Field instances (i.e., rows in the Field table in the Metabase application DB) for a Table, and update metadata
   properties (e.g. base type and comment/remark) as needed. Returns number of Fields synced."
-  [table       :- i/TableInstance
+  [database    :- i/DatabaseInstance
+   table       :- i/TableInstance
    db-metadata :- [:set i/TableMetadataField]]
   (+ (sync-instances/sync-instances! table db-metadata (fields.our-metadata/our-metadata table))
      ;; Now that tables are synced and fields created as needed make sure field properties are in sync.
-     ;; Re-fetch our metadata because there might be somethings that have changed after calling
+     ;; Re-fetch our metadata because there might be some things that have changed after calling
      ;; `sync-instances`
-     (sync-metadata/update-metadata! table db-metadata (fields.our-metadata/our-metadata table))))
+     (sync-metadata/update-metadata! database table db-metadata (fields.our-metadata/our-metadata table))))
+
+(defn- select-best-matching-name
+  "Returns a key function for use with [[sort-by]] that ranks items based on how closely their `:schema` and `:name` match the given target values.
+   Items with matching `:schema` and `:name` are prioritized, with exact matches ranked higher than non-exact matches."
+  [target-schema target-name]
+  (fn [item]
+    [(not= (:schema item) target-schema)
+     (not= (:name item) target-name)]))
 
 (mu/defn sync-fields! :- [:map
                           [:updated-fields ms/IntGreaterThanOrEqualToZero]
@@ -82,12 +91,15 @@
       (transduce (comp
                   (partition-by (juxt :table-name :table-schema))
                   (map (fn [table-metadata]
-                         (let [fst     (first table-metadata)
-                               table   (t2/select-one :model/Table
-                                                      :db_id (:id database)
-                                                      :%lower.name (t2.util/lower-case-en (:table-name fst))
-                                                      :%lower.schema (some-> fst :table-schema t2.util/lower-case-en)
-                                                      {:where sync-util/sync-tables-clause})
+                         (let [{:keys [table-name table-schema]} (first table-metadata)
+
+                               table   (->> (t2/select :model/Table
+                                                       :db_id (:id database)
+                                                       :%lower.name (t2.util/lower-case-en table-name)
+                                                       :%lower.schema (some-> table-schema t2.util/lower-case-en)
+                                                       {:where sync-util/sync-tables-clause})
+                                            (sort-by (select-best-matching-name table-schema table-name))
+                                            first)
                                updated (if table
                                          (try
                                            ;; TODO: decouple nested field columns sync from field sync. This will allow
@@ -97,7 +109,7 @@
                                                                (set table-metadata)
                                                                database
                                                                table)]
-                                             (sync-and-update! table all-metadata))
+                                             (sync-and-update! database table all-metadata))
                                            (catch Exception e
                                              (log/error e)
                                              0))
@@ -123,4 +135,4 @@
            ;; Also this should be a driver method, not a sql-jdbc.sync method
            db-metadata (fetch-metadata/include-nested-fields-for-table db-metadata database table)]
        {:total-fields   (count db-metadata)
-        :updated-fields (sync-and-update! table db-metadata)}))))
+        :updated-fields (sync-and-update! database table db-metadata)}))))

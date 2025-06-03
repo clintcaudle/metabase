@@ -20,7 +20,6 @@ import type {
   UploadFile,
 } from "metabase/collections/types";
 import {
-  isPersonalCollectionChild,
   isRootTrashCollection,
   isTrashedCollection,
 } from "metabase/collections/utils";
@@ -32,7 +31,6 @@ import Search from "metabase/entities/search";
 import { useListSelect } from "metabase/hooks/use-list-select";
 import { useToggle } from "metabase/hooks/use-toggle";
 import { useDispatch } from "metabase/lib/redux";
-import { PLUGIN_COLLECTIONS } from "metabase/plugins";
 import { addUndo } from "metabase/redux/undo";
 import type Database from "metabase-lib/v1/metadata/Database";
 import type {
@@ -41,6 +39,8 @@ import type {
   CollectionId,
   CollectionItem,
 } from "metabase-types/api";
+import { SortDirection } from "metabase-types/api/sorting";
+import type { State } from "metabase-types/store";
 
 import type { CollectionOrTableIdProps } from "../ModelUploadModal";
 import { ModelUploadModal } from "../ModelUploadModal";
@@ -52,15 +52,16 @@ import { getComposedDragProps } from "./utils";
 
 const itemKeyFn = (item: CollectionItem) => `${item.id}:${item.model}`;
 
-export const CollectionContentView = ({
+const CollectionContentViewInner = ({
   databases,
   bookmarks,
   collection,
-  collections: collectionList = [],
   collectionId,
   createBookmark,
   deleteBookmark,
   isAdmin,
+  list,
+  loading,
   uploadFile,
   uploadsEnabled,
   canCreateUploadInDb,
@@ -69,11 +70,12 @@ export const CollectionContentView = ({
   databases?: Database[];
   bookmarks?: Bookmark[];
   collection: Collection;
-  collections: Collection[];
   collectionId: CollectionId;
   createBookmark: CreateBookmark;
   deleteBookmark: DeleteBookmark;
   isAdmin: boolean;
+  list: CollectionItem[] | undefined;
+  loading: boolean;
   uploadFile: UploadFile;
   uploadsEnabled: boolean;
   canCreateUploadInDb: boolean;
@@ -122,7 +124,7 @@ export const CollectionContentView = ({
 
   useEffect(() => {
     const shouldBeBookmarked = !!bookmarks?.some(
-      bookmark =>
+      (bookmark) =>
         bookmark.type === "collection" && bookmark.item_id === collectionId,
     );
     setIsBookmarked(shouldBeBookmarked);
@@ -184,142 +186,117 @@ export const CollectionContentView = ({
     ? getComposedDragProps(getRootProps())
     : {};
 
-  const pinnedQuery = {
+  const pinnedItems = list && !isRootTrashCollection(collection) ? list : [];
+  const hasPinnedItems = pinnedItems.length > 0;
+  const actionId = { id: collectionId };
+
+  return (
+    <CollectionRoot {...dropzoneProps}>
+      {canCreateUpload && (
+        <>
+          <ModelUploadModal
+            collectionId={collectionId}
+            opened={isModelUploadModalOpen}
+            onClose={closeModelUploadModal}
+            onUpload={handleUploadFile}
+          />
+          <UploadOverlay isDragActive={isDragActive} collection={collection} />
+        </>
+      )}
+
+      {collection.archived && (
+        <ArchivedEntityBanner
+          name={collection.name}
+          entityType="collection"
+          canMove={collection.can_write}
+          canRestore={collection.can_restore}
+          canDelete={collection.can_delete}
+          onUnarchive={async () => {
+            const input = { ...actionId, name: collection.name };
+            await dispatch(Collections.actions.setArchived(input, false));
+            await dispatch(Bookmarks.actions.invalidateLists());
+          }}
+          onMove={({ id }) =>
+            dispatch(Collections.actions.setCollection(actionId, { id }))
+          }
+          onDeletePermanently={() =>
+            dispatch(deletePermanently(Collections.actions.delete(actionId)))
+          }
+        />
+      )}
+
+      <CollectionMain>
+        <ErrorBoundary>
+          <Header
+            collection={collection}
+            isAdmin={isAdmin}
+            isBookmarked={isBookmarked}
+            onCreateBookmark={handleCreateBookmark}
+            onDeleteBookmark={handleDeleteBookmark}
+            canUpload={canCreateUpload}
+            uploadsEnabled={uploadsEnabled}
+            saveFile={saveFile}
+          />
+        </ErrorBoundary>
+
+        <ErrorBoundary>
+          <PinnedItemOverview
+            databases={databases}
+            bookmarks={bookmarks}
+            createBookmark={createBookmark}
+            deleteBookmark={deleteBookmark}
+            items={pinnedItems}
+            collection={collection}
+            onMove={handleMove}
+            onCopy={handleCopy}
+          />
+        </ErrorBoundary>
+        <ErrorBoundary>
+          <CollectionItemsTable
+            collectionId={collectionId}
+            collection={collection}
+            getIsSelected={getIsSelected}
+            selectOnlyTheseItems={selectOnlyTheseItems}
+            databases={databases}
+            bookmarks={bookmarks}
+            createBookmark={createBookmark}
+            deleteBookmark={deleteBookmark}
+            loadingPinnedItems={loading}
+            hasPinnedItems={hasPinnedItems}
+            selected={selected}
+            toggleItem={toggleItem}
+            clear={clear}
+            handleMove={handleMove}
+            handleCopy={handleCopy}
+          />
+          <CollectionBulkActions
+            collection={collection}
+            selected={selected}
+            clearSelected={clear}
+            selectedItems={selectedItems}
+            setSelectedItems={setSelectedItems}
+            selectedAction={selectedAction}
+            setSelectedAction={setSelectedAction}
+          />
+        </ErrorBoundary>
+      </CollectionMain>
+      <ItemsDragLayer
+        selectedItems={selected}
+        pinnedItems={pinnedItems}
+        collection={collection}
+        visibleColumnsMap={visibleColumnsMap}
+      />
+    </CollectionRoot>
+  );
+};
+
+export const CollectionContentView = Search.loadList({
+  query: (_state: State, { collectionId }: { collectionId: CollectionId }) => ({
     collection: collectionId,
     pinned_state: "is_pinned",
     sort_column: "name",
-    sort_direction: "asc",
-  };
-
-  return (
-    <Search.ListLoader
-      query={pinnedQuery}
-      loadingAndErrorWrapper={false}
-      keepListWhileLoading
-      wrapped
-    >
-      {({
-        list,
-        loading: loadingPinnedItems,
-      }: {
-        list: CollectionItem[];
-        loading: boolean;
-      }) => {
-        const pinnedItems =
-          list && !isRootTrashCollection(collection) ? list : [];
-        const hasPinnedItems = pinnedItems.length > 0;
-        const actionId = { id: collectionId };
-
-        return (
-          <CollectionRoot {...dropzoneProps}>
-            {canCreateUpload && (
-              <>
-                <ModelUploadModal
-                  collectionId={collectionId}
-                  opened={isModelUploadModalOpen}
-                  onClose={closeModelUploadModal}
-                  onUpload={handleUploadFile}
-                />
-                <UploadOverlay
-                  isDragActive={isDragActive}
-                  collection={collection}
-                />
-              </>
-            )}
-
-            {collection.archived && (
-              <ArchivedEntityBanner
-                name={collection.name}
-                entityType="collection"
-                canMove={collection.can_write}
-                canRestore={collection.can_restore}
-                canDelete={collection.can_delete}
-                onUnarchive={async () => {
-                  const input = { ...actionId, name: collection.name };
-                  await dispatch(Collections.actions.setArchived(input, false));
-                  await dispatch(Bookmarks.actions.invalidateLists());
-                }}
-                onMove={({ id }) =>
-                  dispatch(Collections.actions.setCollection(actionId, { id }))
-                }
-                onDeletePermanently={() =>
-                  dispatch(
-                    deletePermanently(Collections.actions.delete(actionId)),
-                  )
-                }
-              />
-            )}
-
-            <CollectionMain>
-              <ErrorBoundary>
-                <Header
-                  collection={collection}
-                  isAdmin={isAdmin}
-                  isBookmarked={isBookmarked}
-                  isPersonalCollectionChild={isPersonalCollectionChild(
-                    collection,
-                    collectionList,
-                  )}
-                  onCreateBookmark={handleCreateBookmark}
-                  onDeleteBookmark={handleDeleteBookmark}
-                  canUpload={canCreateUpload}
-                  uploadsEnabled={uploadsEnabled}
-                  saveFile={saveFile}
-                />
-              </ErrorBoundary>
-              <ErrorBoundary>
-                <PLUGIN_COLLECTIONS.cleanUpAlert collection={collection} />
-              </ErrorBoundary>
-              <ErrorBoundary>
-                <PinnedItemOverview
-                  databases={databases}
-                  bookmarks={bookmarks}
-                  createBookmark={createBookmark}
-                  deleteBookmark={deleteBookmark}
-                  items={pinnedItems}
-                  collection={collection}
-                  onMove={handleMove}
-                  onCopy={handleCopy}
-                />
-              </ErrorBoundary>
-              <ErrorBoundary>
-                <CollectionItemsTable
-                  collectionId={collectionId}
-                  collection={collection}
-                  getIsSelected={getIsSelected}
-                  selectOnlyTheseItems={selectOnlyTheseItems}
-                  databases={databases}
-                  bookmarks={bookmarks}
-                  createBookmark={createBookmark}
-                  deleteBookmark={deleteBookmark}
-                  loadingPinnedItems={loadingPinnedItems}
-                  hasPinnedItems={hasPinnedItems}
-                  selected={selected}
-                  toggleItem={toggleItem}
-                  clear={clear}
-                  handleMove={handleMove}
-                  handleCopy={handleCopy}
-                />
-                <CollectionBulkActions
-                  collection={collection}
-                  selected={selected}
-                  clearSelected={clear}
-                  selectedItems={selectedItems}
-                  setSelectedItems={setSelectedItems}
-                  selectedAction={selectedAction}
-                  setSelectedAction={setSelectedAction}
-                />
-              </ErrorBoundary>
-            </CollectionMain>
-            <ItemsDragLayer
-              selectedItems={selected}
-              pinnedItems={pinnedItems}
-              collection={collection}
-              visibleColumnsMap={visibleColumnsMap}
-            />
-          </CollectionRoot>
-        );
-      }}
-    </Search.ListLoader>
-  );
-};
+    sort_direction: SortDirection.Asc,
+  }),
+  loadingAndErrorWrapper: false,
+  wrapped: true,
+})(CollectionContentViewInner);

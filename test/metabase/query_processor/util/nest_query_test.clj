@@ -14,8 +14,7 @@
    [metabase.query-processor.util.add-alias-info :as add]
    [metabase.query-processor.util.nest-query :as nest-query]
    [metabase.test :as mt]
-   [metabase.util :as u]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [metabase.util :as u]))
 
 ;; TODO -- this is duplicated with [[metabase.query-processor.util.add-alias-info-test/remove-source-metadata]]
 (defn- remove-source-metadata [x]
@@ -74,6 +73,67 @@
                         qp.preprocess/preprocess
                         add/add-alias-info
                         nest-expressions))))))
+
+(deftest ^:parallel nest-order-by-expressions-test
+  (testing "Expressions in an order-by clause result in nesting"
+    (driver/with-driver :h2
+      (qp.store/with-metadata-provider meta/metadata-provider
+        (is (partial= (lib.tu.macros/$ids venues
+                        {:source-query {:source-table $$venues
+                                        :expressions  {"double_price" [:* [:field %price {::add/source-table  $$venues
+                                                                                          ::add/source-alias  "PRICE"
+                                                                                          ::add/desired-alias "PRICE"
+                                                                                          ::add/position      0}]
+                                                                       2]}
+                                        :fields       [[:field %price       {::add/source-table  $$venues
+                                                                             ::add/source-alias  "PRICE"
+                                                                             ::add/desired-alias "PRICE"
+                                                                             ::add/position      0}]
+                                                       [:expression "double_price" {::add/desired-alias "double_price"
+                                                                                    ::add/position      1}]]}
+                         :order-by     [[:asc *double_price/Float]]})
+                      (-> (lib.tu.macros/mbql-query venues
+                            {:expressions {"double_price" [:* $price 2]}
+                             :fields      [$price
+                                           [:expression "double_price"]]
+                             :order-by    [[:asc [:expression "double_price"]]]})
+                          qp.preprocess/preprocess
+                          add/add-alias-info
+                          nest-expressions)))))))
+
+(deftest ^:parallel nest-order-by-literal-expressions-test
+  (testing "Literal expressions in an order-by clause result in nesting"
+    (driver/with-driver :h2
+      (qp.store/with-metadata-provider meta/metadata-provider
+        (is (partial= (lib.tu.macros/$ids venues
+                        {:source-query {:source-table $$venues
+                                        :expressions  {"favorite" [:value "good venue" {:base_type :type/Text}]}
+                                        :fields       [[:field %name       {::add/source-table  $$venues
+                                                                            ::add/source-alias  "NAME"
+                                                                            ::add/desired-alias "NAME"
+                                                                            ::add/position      0}]
+                                                       [:expression "favorite" {::add/desired-alias "favorite"
+                                                                                ::add/position      1}]]}
+                         :filter       [:= [:field %name {::add/source-table ::add/source,
+                                                          ::add/source-alias "NAME",
+                                                          ::add/desired-alias "NAME",
+                                                          ::add/position 0,
+                                                          :qp/ignore-coercion true}]
+                                        [:field "favorite" {:base-type :type/Text,
+                                                            ::add/source-table ::add/source,
+                                                            ::add/source-alias "favorite",
+                                                            ::add/desired-alias "favorite",
+                                                            ::add/position 1}]]
+                         :order-by     [[:asc *favorite/Text]]})
+                      (-> (lib.tu.macros/mbql-query venues
+                            {:expressions {"favorite" [:value "good venue" {:base_type :type/Text}]}
+                             :fields      [$name
+                                           [:expression "favorite"]]
+                             :filter      [:= $name [:expression "favorite"]]
+                             :order-by    [[:asc [:expression "favorite"]]]})
+                          qp.preprocess/preprocess
+                          add/add-alias-info
+                          nest-expressions)))))))
 
 (deftest ^:parallel multiple-expressions-test
   (testing "Make sure the nested version of the query doesn't mix up expressions if we have ones that reference others"
@@ -233,13 +293,13 @@
 (deftest ^:parallel nest-expressions-ignore-source-queries-from-joins-test-e2e-test
   (testing "Ignores source-query from joins (#20809)"
     (mt/dataset test-data
-      (t2.with-temp/with-temp [:model/Card base {:dataset_query
-                                                 (mt/mbql-query
-                                                   reviews
-                                                   {:breakout [$product_id]
-                                                    :aggregation [[:count]]
+      (mt/with-temp [:model/Card base {:dataset_query
+                                       (mt/mbql-query
+                                         reviews
+                                         {:breakout [$product_id]
+                                          :aggregation [[:count]]
                                                     ;; filter on an implicit join
-                                                    :filter [:= $product_id->products.category "Doohickey"]})}]
+                                          :filter [:= $product_id->products.category "Doohickey"]})}]
         ;; the result returned is not important, just important that the query is valid and completes
         (is (vector?
              (mt/rows

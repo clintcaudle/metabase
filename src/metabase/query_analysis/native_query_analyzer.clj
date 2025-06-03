@@ -308,6 +308,7 @@
   to return tables that are in the query.
 
   If it is unable to analyze the query, it should return an error of the form `:query-analysis.error/...`"
+  {:arglists '([driver query opts])}
   (fn [driver _query _opts] driver)
   :hierarchy #'driver/hierarchy)
 
@@ -317,7 +318,8 @@
 
 (defmethod tables-for-native* :sql
   [driver query opts]
-  (if (nqa.impl/trusted-for-table-permissions? driver)
+  (if (or (:all-drivers-trusted? opts)
+          (nqa.impl/trusted-for-table-permissions? driver))
     (tables-via-macaw driver query opts)
     {:error :query-analysis.error/driver-not-supported}))
 

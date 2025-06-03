@@ -1,5 +1,6 @@
 ---
 title: Dashboard filters
+summary: Make your dashboards do more with filters and parameters. Instead of creating a bunch of similar dashboards, just add widgets to change variables.
 redirect_from:
   - /docs/latest/users-guide/08-dashboard-filters
 ---
@@ -27,17 +28,22 @@ Metabase will display the filter only if the filter is connected to a card on th
 
 ## Filter and parameter types
 
-The type of filter or parameter widget you choose will determine how the widget works, as well as which fields you’ll be able to filter your cards by.
+The type of filter or parameter widget you choose determines how the widget works, including which fields you'll be able to filter your cards by.
 
 ### Filter widgets
+
+**Filters** determine what data to show. For example, a date filter might show only data from the last 30 days, or a category filter might show only specific product categories.
 
 - [Date picker](#date-picker-filters)
 - [Location](#location-filters)
 - [ID](#id-filter)
 - [Number](#number-filter)
 - [Text or category](#text-or-category-filter)
+- [Boolean](#boolean-filter)
 
 ### Parameter widgets
+
+ **Parameters** determine how to show the data. The time grouping parameter, for example, changes the granularity of time-based visualizations (like showing data by month instead of by day) without removing any data points.
 
 - [Time grouping](#time-grouping-parameter)
 
@@ -107,6 +113,10 @@ A flexible filter type that will let you create either a dropdown menu or an inp
 - **Does not contain**. Filter out values that contain the entered text.
 - **Starts with**. Match values that begin with the entered text.
 - **Ends with**. Match values that end with the entered text.
+
+## Boolean filter
+
+A boolean filter allows people to filter data based on true/false values.
 
 ## Connecting a filter or parameter widget to dashboard cards
 
@@ -240,22 +250,7 @@ A multi-select filter with the widget type [Dropdown list](#dropdown-list) or [S
 
 ## Linking filters
 
-You can also **link filters** so that a child filter knows to limit its choices based on the activation of a parent filter.
-
-Say you have two filters, one to filter by state, the other to filter by city. You can link the city filter to the state filter so that when someone filters by California, the city filter will "know" to only show cities in California. In this case, state is the parent filter, and city is the child filter.
-
-To link filters, you'll need to set up this parent-child relationship. And you set up this relationship through the child filter. In the above scenario, with a state and city filter, we'd edit the child filter, city, by clicking on the **gears** icon on the city filter. From the filter sidebar on the right, select the **Linked filters** tab.
-
-![Linked filters](./images/linked-filter.png)
-
-Here you can limit the current filter's choices. If you toggle on one of these dashboard filters, selecting a value for that filter will limit the available choices for this filter. In this case, we toggle on the state filter (the parent), to limit the choices for the city filter. When states are selected, the city filter will limit its choices to cities in those states. Click **Done**, then **Save** to save the dashboard.
-
-### Limitations of linking filters
-
-- Native/SQL questions must have a [field filter](../questions/native-editor/sql-parameters.md#the-field-filter-variable-type) variable in order to be linked. Regular SQL variables won't work.
-- You can't link filters that use "Custom List" or "From another model or question" as their value's source.
-
-To learn more about linked filters, check out [Linking filters in dashboards](https://www.metabase.com/learn/metabase-basics/querying-and-dashboards/dashboards/linking-filters).
+See [Linked filters](linked-filters.md).
 
 ## Auto-apply filters
 
@@ -263,13 +258,19 @@ By default, each time you change the value in a filter on a dashboard, the dashb
 
 If a dashboard is particularly large or slow, or you have multiple filters that you want to adjust before the dashboard refreshes its results, you may want to tell Metabase when to apply those filters and refresh the dashboard.
 
-To turn off the automatic application of filters, click on the info **i** icon, and toggle the **Auto-apply filters** option. With auto-apply turned off, each time you change a value in a filter, you'll need to click the **Apply** button to refresh the dashboard with the new filter value.
+To turn off the automatic application of filters.
+
+1. Click on the three-dot menu **...**.
+2. Select **Edit settings**.
+3. In the **General** section, toggle off **Auto-apply filters**.
+
+With auto-apply turned off, each time you change a value in a filter, you'll need to click the **Apply** button to refresh the dashboard with the new filter value.
 
 ![Click Apply to apply the filters and refresh the dashboard](./images/apply-button.png)
 
 ## Using filter widgets
 
-Once you’ve added a filter to your dashboard, just click on the filter widget to select a value and activate the filter. To stop filtering, just click the blue X.
+Once you've added a filter to your dashboard, just click on the filter widget to select a value and activate the filter. To stop filtering, just click the blue X.
 
 Your active filter will only apply to your view of the dashboard. If someone else is viewing the same dashboard link at the same time, they won't see your filter.
 

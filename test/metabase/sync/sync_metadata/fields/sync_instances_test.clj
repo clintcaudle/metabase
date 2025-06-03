@@ -1,4 +1,4 @@
-(ns ^:mb/once metabase.sync.sync-metadata.fields.sync-instances-test
+(ns metabase.sync.sync-metadata.fields.sync-instances-test
   (:require
    [clojure.test :refer :all]
    [metabase.sync.sync-metadata :as sync-metadata]
@@ -6,8 +6,7 @@
    [metabase.test :as mt]
    [metabase.test.mock.toucanery :as toucanery]
    [metabase.util :as u]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [toucan2.core :as t2]))
 
 (def ^:private toucannery-transactions-expected-fields-hierarchy
   {"ts"     nil
@@ -27,8 +26,8 @@
     (format-fields (get parent-id->children nil))))
 
 (deftest sync-fields-test
-  (t2.with-temp/with-temp [:model/Database db    {:engine ::toucanery/toucanery}
-                           :model/Table    table {:name "transactions", :db_id (u/the-id db)}]
+  (mt/with-temp [:model/Database db    {:engine ::toucanery/toucanery}
+                 :model/Table    table {:name "transactions", :db_id (u/the-id db)}]
     ;; do the initial sync
     (sync-fields/sync-fields-for-table! table)
     (let [transactions-table-id (u/the-id (t2/select-one-pk :model/Table :db_id (u/the-id db), :name "transactions"))]
@@ -38,8 +37,8 @@
 (deftest delete-nested-field-test
   (testing (str "If you delete a nested Field, and re-sync a Table, it should recreate the Field as it was before! It "
                 "should not create any duplicate Fields (#8950)")
-    (t2.with-temp/with-temp [:model/Database db    {:engine ::toucanery/toucanery}
-                             :model/Table    table {:name "transactions", :db_id (u/the-id db)}]
+    (mt/with-temp [:model/Database db    {:engine ::toucanery/toucanery}
+                   :model/Table    table {:name "transactions", :db_id (u/the-id db)}]
       ;; do the initial sync
       (sync-fields/sync-fields-for-table! table)
       (let [transactions-table-id (u/the-id (t2/select-one-pk :model/Table :db_id (u/the-id db), :name "transactions"))]
@@ -58,7 +57,7 @@
 
 (deftest resync-nested-fields-test
   (testing "Make sure nested fields get resynced correctly if their parent field didnt' change"
-    (t2.with-temp/with-temp [:model/Database db {:engine ::toucanery/toucanery}]
+    (mt/with-temp [:model/Database db {:engine ::toucanery/toucanery}]
       ;; do the initial sync
       (sync-metadata/sync-db-metadata! db)
       ;; delete our entry for the `transactions.toucan.details.age` field
@@ -108,7 +107,7 @@
 
 (deftest mark-nested-field-inactive-test
   (testing "Nested fields can be marked inactive"
-    (t2.with-temp/with-temp [:model/Database db {:engine ::toucanery/toucanery}]
+    (mt/with-temp [:model/Database db {:engine ::toucanery/toucanery}]
       ;; do the initial sync
       (sync-metadata/sync-db-metadata! db)
       ;; Add an entry for a `transactions.toucan.details.gender` field
@@ -130,7 +129,7 @@
 
 (deftest mark-nested-field-children-inactive-test
   (testing "When a nested field is marked inactive so are its children"
-    (t2.with-temp/with-temp [:model/Database db {:engine ::toucanery/toucanery}]
+    (mt/with-temp [:model/Database db {:engine ::toucanery/toucanery}]
       ;; do the initial sync
       (sync-metadata/sync-db-metadata! db)
       ;; Add an entry for a `transactions.toucan.details.gender` field
@@ -151,8 +150,42 @@
                                                                    :table_id      transactions-table-id
                                                                    :parent_id     food-likes-field-id
                                                                    :active        true))]
-
         ;; now sync again.
         (sync-metadata/sync-db-metadata! db)
         ;; field should become inactive
         (is (false? (t2/select-one-fn :active :model/Field :id blueberries-field-id)))))))
+
+(defn run-cruft-test [patterns freqs]
+  (mt/with-temp [:model/Database db {:engine ::toucanery/toucanery
+                                     :settings {:auto-cruft-columns patterns}}]
+    (sync-metadata/sync-db-metadata! db)
+    (let [tables (t2/select :model/Table :db_id (u/the-id db))
+          fields (mapcat (fn [{:keys [id]}] (t2/select :model/Field :table_id id)) tables)]
+      (is (= freqs
+             (frequencies (map :visibility_type fields)))))))
+
+(deftest auto-cruft-all-fields-test
+  (testing "Make sure a db's settings.auto_cruft_fields mark all fields as crufty"
+    (run-cruft-test [".*"]
+                    {:details-only 12})
+    (run-cruft-test (map str (into [] "abcdefghijklmnoqprstuvwxyz"))
+                    {:details-only 12})))
+
+(deftest auto-cruft-exact-field-name-test
+  (testing "Make sure a db's settings.auto_cruft_fields mark fields as crufty for exact table names"
+    (run-cruft-test ["^details$" "^age$"]
+                    {:normal 10 :details-only 2})))
+
+(deftest auto-cruft-fields-with-multiple-patterns-test
+  (testing "Make sure a db's settings.auto_cruft_fields mark fields as crufty against multiple patterns"
+    (run-cruft-test ["a" "b" "c"]     {:normal 4 :details-only 8})
+    (run-cruft-test ["c" "a" "t"]     {:normal 3 :details-only 9})
+    (run-cruft-test ["d" "o" "g"]     {:normal 6 :details-only 6})
+    (run-cruft-test ["b" "i" "r" "d"] {:normal 7 :details-only 5})
+    (run-cruft-test ["x" "y" "z"]     {:normal 11 :details-only 1})))
+
+(deftest auto-cruft-fields-none-are-crufted-with-missing-pattern
+  (run-cruft-test [] {:normal 12}))
+
+(deftest auto-cruft-fields-none-are-crufted-with-no-hit-pattern
+  (run-cruft-test ["^it was the best$" "^of times it was$" "^the worst of times$"] {:normal 12}))

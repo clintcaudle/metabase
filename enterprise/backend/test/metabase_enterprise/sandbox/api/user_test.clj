@@ -1,13 +1,14 @@
 (ns metabase-enterprise.sandbox.api.user-test
-  "Tests that would logically be included in `metabase.api.user-test` but are separate as they are enterprise only."
+  "Tests that would logically be included in [[metabase.users.api-test]] but are separate as they are enterprise only."
   (:require
+   [clojure.set :as set]
    [clojure.test :refer :all]
+   [metabase-enterprise.sandbox.api.user]
    [metabase-enterprise.test :as met]
    [metabase.test :as mt]
    [metabase.test.fixtures :as fixtures]
    [metabase.util :as u]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp]))
+   [toucan2.core :as t2]))
 
 (use-fixtures :once (fixtures/initialize :test-users-personal-collections))
 
@@ -53,12 +54,22 @@
              (mt/user-http-request :rasta :get 403 "mt/user/attributes"))))
 
     (testing "returns set of user attributes"
-      (t2.with-temp/with-temp
-        ['User _ {:login_attributes {:foo "bar"}}
-         'User _ {:login_attributes {:foo "baz"
-                                     :miz "bar"}}]
-        (is (= ["foo" "miz"]
-               (mt/user-http-request :crowberto :get 200 "mt/user/attributes")))))))
+      (mt/with-temp
+        [:model/User _ {:login_attributes {:foo "bar"}}
+         :model/User _ {:login_attributes {:foo "baz"
+                                           :miz "bar"}}]
+        (is (set/subset? #{"foo" "miz"}
+                         (set (mt/user-http-request :crowberto :get 200 "mt/user/attributes"))))))
+    (testing "returns maximum number of login attributes"
+      (with-redefs [metabase-enterprise.sandbox.api.user/max-login-attributes 2]
+        (mt/with-temp
+          [:model/User _ {:login_attributes {:foo "bar"
+                                             :woo "hoo"}}
+           :model/User _ {:login_attributes {:foo "biz"
+                                             :woo "haa"}}
+           :model/User _ {:login_attributes {:third-one "nope"}}]
+          (is (= 2
+                 (count (mt/user-http-request :crowberto :get 200 "mt/user/attributes")))))))))
 
 (deftest update-user-attributes-test
   (mt/with-premium-features #{}
@@ -75,8 +86,8 @@
              (mt/user-http-request :crowberto :put 404 (format "mt/user/%d/attributes" Integer/MAX_VALUE) {}))))
 
     (testing "Admin can update user attributes"
-      (t2.with-temp/with-temp
-        ['User {id :id} {}]
+      (mt/with-temp
+        [:model/User {id :id} {}]
         (mt/user-http-request :crowberto :put 200 (format "mt/user/%d/attributes" id) {:login_attributes {"foo" "bar"}})
         (is (= {"foo" "bar"}
-               (t2/select-one-fn :login_attributes 'User :id id)))))))
+               (t2/select-one-fn :login_attributes :model/User :id id)))))))

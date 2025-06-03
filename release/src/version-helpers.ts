@@ -76,6 +76,10 @@ export const getMajorVersion = (versionString: string) =>
     .replace(/-rc\d+/i, "")
     .split(".")[0];
 
+export const isReleaseBranch = (branchName: string) => {
+  return branchName.startsWith("release-x.");
+};
+
 export const getReleaseBranch = (versionString: string) => {
   if (!isValidVersionString(versionString)) {
     throw new Error(`Invalid version string: ${versionString}`);
@@ -90,8 +94,10 @@ export const getVersionFromReleaseBranch = (branch: string) => {
   return `v0.${majorVersion}.0`;
 };
 
+const SDK_TAG_REGEXP = /embedding-sdk-(0\.\d+\.\d+(-\w+)?)$/;
+
 export const getSdkVersionFromReleaseTagName = (tagName: string) => {
-  const match = /embedding-sdk-(0\.\d+\.\d+(-nightly)?)/.exec(tagName);
+  const match = SDK_TAG_REGEXP.exec(tagName);
 
   if (!match) {
     throw new Error(`Invalid sdk release tag: ${tagName}`);
@@ -154,6 +160,37 @@ export const getSdkVersionFromReleaseBranchName = async ({
   return sdkVersion;
 };
 
+export const getDotXs = (version: string, number: number) => {
+  const pieces = version.replace(/-.+/, "").split("."); // ignore any -suffixes
+  return pieces.slice(0, number + 1).join(".") + ".x";
+};
+
+export const getDotXVersion = (version: string) => {
+  const versionType = getVersionType(version);
+
+  if (versionType === "major") {
+    return getDotXs(version, 1);
+  }
+
+  return getDotXs(version, 2);
+};
+
+export const getExtraTagsForVersion = ({ version }: { version: string }) => {
+  const ossVerion = getOSSVersion(version);
+  const eeVersion = getEnterpriseVersion(version);
+  const versionType = getVersionType(version);
+
+  // eg. v0.23.x / v1.23.x
+  const tags = [getDotXs(ossVerion, 1), getDotXs(eeVersion, 1)];
+
+  if (versionType === "major") {
+    return tags;
+  }
+
+  // eg. v0.23.4.x / v1.23.4.x
+  return [...tags, getDotXs(ossVerion, 2), getDotXs(eeVersion, 2)];
+};
+
 /**
  * queries the github api to get all embedding sdk version tags
  */
@@ -172,10 +209,25 @@ export async function getLastEmbeddingSdkReleaseTag({
   });
 
   const lastRelease = getLastReleaseFromTags({
-    tags,
+    tags: tags.filter(filterOutNonSupportedPrereleaseIdentifier),
   });
 
   return lastRelease;
+}
+
+const ALLOWED_SDK_PRERELEASE_IDENTIFIERS = ["nightly"];
+/**
+ *
+ * @param tag a GitHub tag object
+ */
+export function filterOutNonSupportedPrereleaseIdentifier(tag: Tag) {
+  const prereleaseIdentifier = /\d+\.\d+\.\d+-(?<prerelease>\w+)$/.exec(tag.ref)
+    ?.groups?.prerelease;
+
+  return (
+    !prereleaseIdentifier ||
+    ALLOWED_SDK_PRERELEASE_IDENTIFIERS.includes(prereleaseIdentifier)
+  );
 }
 
 export const getMajorVersionNumberFromReleaseBranch = (branch: string) => {
@@ -190,18 +242,21 @@ export const getMajorVersionNumberFromReleaseBranch = (branch: string) => {
 
 export const versionRequirements: Record<
   number,
-  { java: number; node: number }
+  { java: number; node: number; platforms: string }
 > = {
-  43: { java: 8, node: 14 },
-  44: { java: 11, node: 14 },
-  45: { java: 11, node: 14 },
-  46: { java: 11, node: 16 },
-  47: { java: 11, node: 18 },
-  48: { java: 11, node: 18 },
-  49: { java: 11, node: 18 },
-  50: { java: 11, node: 18 },
-  51: { java: 11, node: 18 },
-  52: { java: 11, node: 18 },
+  43: { java: 8, node: 14, platforms: "linux/amd64" },
+  44: { java: 11, node: 14, platforms: "linux/amd64" },
+  45: { java: 11, node: 14, platforms: "linux/amd64" },
+  46: { java: 11, node: 16, platforms: "linux/amd64" },
+  47: { java: 11, node: 18, platforms: "linux/amd64" },
+  48: { java: 11, node: 18, platforms: "linux/amd64" },
+  49: { java: 11, node: 18, platforms: "linux/amd64" },
+  50: { java: 11, node: 18, platforms: "linux/amd64" },
+  51: { java: 11, node: 18, platforms: "linux/amd64" },
+  52: { java: 11, node: 18, platforms: "linux/amd64" },
+  53: { java: 21, node: 22, platforms: "linux/amd64,linux/arm64" },
+  54: { java: 21, node: 22, platforms: "linux/amd64,linux/arm64" },
+  55: { java: 21, node: 22, platforms: "linux/amd64,linux/arm64" },
 };
 
 export const getBuildRequirements = (version: string) => {
@@ -312,9 +367,10 @@ export function getLastReleaseFromTags({
   ignorePreReleases?: boolean;
 }) {
   return tags
-    .map(tag => tag.ref.replace("refs/tags/", ""))
-    .filter(ignorePreReleases ? tag => !isPreReleaseVersion(tag) : () => true)
-    .filter(ignorePatches ? v => !isPatchVersion(v) : () => true)
+    .map((tag) => tag.ref.replace("refs/tags/", ""))
+    .filter((tag) => !tag.includes(".x"))
+    .filter(ignorePreReleases ? (tag) => !isPreReleaseVersion(tag) : () => true)
+    .filter(ignorePatches ? (v) => !isPatchVersion(v) : () => true)
     .sort(versionSort)
     .reverse()[0];
 }
