@@ -14,11 +14,28 @@
     {
     devShells.default = pkgs.mkShell {
       nativeBuildInputs = with pkgs.buildPackages; [
-      yarn
-      jdk11
-      clojure
-      git-credential-manager
-      (postgresql.withPackages (p: [ p.postgis ]))
+        # Node.js and package managers
+        nodejs_22  # Matches package.json requirement ">=22"
+        yarn
+
+        # Java and Clojure
+        jdk11
+        clojure
+
+        # Database
+        (postgresql.withPackages (p: [ p.postgis ]))
+
+        # Build tools and utilities
+        git-credential-manager
+        python3  # Required for native module compilation
+        gcc      # C compiler for native modules
+        gnumake  # Make for building native dependencies
+        pkg-config  # For finding libraries during compilation
+
+        # Additional tools that may be needed
+        which
+        curl
+        unzip
       ];
 
       # Note: installPhrase appears to be commented out in original
