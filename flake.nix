@@ -49,7 +49,7 @@
       # '';
 
       shellHook = ''
-      # export JAVA_TOOL_OPTIONS="-Djdk.tls.disabledAlgorithms=SSLv3 -Djdk.tls.client.protocols=TLSv1"
+      export JAVA_TOOL_OPTIONS="-Djdk.tls.disabledAlgorithms=SSLv3 -Dhttps.protocols=TLSv1,TLSv1.1,TLSv1.2 -Djdk.tls.client.protocols=TLSv1,TLSv1.1,TLSv1.2 -Djsse.enableSNIExtension=false"
       export PG=$PWD/.dev_postgres/
       export PGDATA=$PG/data
       export PGPORT=5432
