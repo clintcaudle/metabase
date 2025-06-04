@@ -39,14 +39,14 @@
       ];
 
       # Note: installPhrase appears to be commented out in original
-      # installPhase = ''
-      #   # Find path to java.security in jdk11
-      #   JAVA_SECURITY_PATH=$(dirname $(dirname $(readlink -f $(which java))))/conf/security/java.security
-      #   echo $JAVA_SECURITY_PATH
-      #
-      #   # Modify java.security file (example: enabling unlimited cryptography policy)
-      #   sed -i 's/^jdk.tls.disabledAlgorithms=SSLv3, TLSv1, TLSv1.1,/jdk.tls.disabledAlgorithms=/' "$JAVA_SECURITY_PATH"
-      # '';
+      installPhase = ''
+        # Find path to java.security in jdk11
+        JAVA_SECURITY_PATH=$(dirname $(dirname $(readlink -f $(which java))))/conf/security/java.security
+        echo $JAVA_SECURITY_PATH
+
+        # Modify java.security file (example: enabling unlimited cryptography policy)
+        sed -i 's/^jdk.tls.disabledAlgorithms=SSLv3, TLSv1, TLSv1.1,/jdk.tls.disabledAlgorithms=/' "$JAVA_SECURITY_PATH"
+      '';
 
       shellHook = ''
       export JAVA_TOOL_OPTIONS="-Djdk.tls.disabledAlgorithms=SSLv3 -Dhttps.protocols=TLSv1,TLSv1.1,TLSv1.2 -Djdk.tls.client.protocols=TLSv1,TLSv1.1,TLSv1.2 -Djsse.enableSNIExtension=false"
@@ -68,8 +68,6 @@
         pg_start &&
         createdb
       }
-      ./bin/build-driver.sh sqlserver
-      yarn dev
       '';
     };
     });

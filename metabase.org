@@ -136,3 +136,10 @@ ClientConnectionId:1a1f9e7b-5b6a-4123-9360-6951e9ee378a
   git fetch upstream
   git merge -X theirs upstream/master
 #+end_src
+
+
+* set disabledAlgorithms for openjdk11
+#+begin_src bash
+grep jdk.tls.disabledAlgorithms /nix/store/2cmvk7jlpkwks1al541c28gsbvns3bq3-openjdk-11.0.26+4/lib/openjdk/conf/security/java.security
+echo $JAVA_SECURITY_PATH
+#+end_src
