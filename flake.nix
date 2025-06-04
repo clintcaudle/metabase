@@ -68,6 +68,8 @@
         pg_start &&
         createdb
       }
+      ./bin/build-driver.sh sqlserver
+      yarn dev
       '';
     };
     });
