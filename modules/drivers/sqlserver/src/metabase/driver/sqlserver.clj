@@ -116,37 +116,23 @@
     :xml              :type/*
     (keyword "int identity") :type/Integer} column-type)) ; auto-incrementing integer (ie pk) field
 
+;; Replace the original SQL Server driver method with jTDS version
 (defmethod sql-jdbc.conn/connection-details->spec :sqlserver
   [_ {:keys [user password db host port instance domain ssl]
       :or   {user "dbuser", password "dbpassword", db "", host "localhost"}
       :as   details}]
   (-> {:applicationName    config/mb-version-and-process-identifier
-       :subprotocol        "sqlserver"
-       ;; it looks like the only thing that actually needs to be passed as the `subname` is the host; everything else
-       ;; can be passed as part of the Properties
-       :subname            (str "//" host)
-       ;; everything else gets passed as `java.util.Properties` to the JDBC connection.  (passing these as Properties
-       ;; instead of part of the `:subname` is preferable because they support things like passwords with special
-       ;; characters)
-       :database           db
-       :password           password
-       ;; Wait up to 10 seconds for connection success. If we get no response by then, consider the connection failed
-       :loginTimeout       10
-       ;; apparently specifying `domain` with the official SQLServer driver is done like `user:domain\user` as opposed
-       ;; to specifying them seperately as with jTDS see also:
-       ;; https://social.technet.microsoft.com/Forums/sqlserver/en-US/bc1373f5-cb40-479d-9770-da1221a0bc95/connecting-to-sql-server-in-a-different-domain-using-jdbc-driver?forum=sqldataaccess
+       :subprotocol        "jtds:sqlserver"  ; Use jTDS driver instead of Microsoft driver
+       :subname            (str "//" host (when port (str ":" port)) "/" db)
        :user               (str (when domain (str domain "\\"))
                                 user)
-       :instanceName       instance
-       :encrypt            false
-       :trustServerCertificate  true
-       ;; can only do one of "TLS, TLSv1, TLSv1.1, TLSv1.2"
-       ;; :sslProtocol  "TLS"
-       ;; only crazy people would want this. See https://docs.microsoft.com/en-us/sql/connect/jdbc/configuring-how-java-sql-time-values-are-sent-to-the-server?view=sql-server-ver15
+       :password           password
+       :instance           instance
+       ;; jTDS specific TLS 1.0 settings
+       :ssl                "off"  ; or "require" if SSL is mandatory
+       :sslProtocol        "TLS"      ; jTDS uses this for TLS protocol
+       :loginTimeout       10
        :sendTimeAsDatetime false}
-      ;; only include `port` if it is specified; leave out for dynamic port: see
-      ;; https://github.com/metabase/metabase/issues/7597
-      (merge (when port {:port port}))
       (sql-jdbc.common/handle-additional-options details, :seperator-style :semicolon)))
 
 (def ^:private ^:dynamic *field-options*
@@ -895,12 +881,6 @@
           (catch IllegalArgumentException _
             s))))
     ((get-method sql-jdbc.execute/read-column-thunk [:sql-jdbc java.sql.Types/CHAR]) driver rs rsmeta i)))
-
-;; instead of default `microsoft.sql.DateTimeOffset`
-(defmethod sql-jdbc.execute/read-column-thunk [:sqlserver microsoft.sql.Types/DATETIMEOFFSET]
-  [_ ^ResultSet rs _ ^Integer i]
-  (fn []
-    (.getObject rs i OffsetDateTime)))
 
 ;; SQL Server doesn't really support boolean types so use bits instead (#11592)
 (defmethod driver.sql/->prepared-substitution [:sqlserver Boolean]

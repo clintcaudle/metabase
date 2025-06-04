@@ -1,5 +1,4 @@
 {:paths
  ["src" "resources"]
-
  :deps
- {com.microsoft.sqlserver/mssql-jdbc {:mvn/version "12.10.0.jre11"}}}
+ {net.sourceforge.jtds/jtds {:mvn/version "1.3.1"}}}
