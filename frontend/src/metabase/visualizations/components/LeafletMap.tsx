@@ -43,6 +43,9 @@ type MapSettings = Pick<
   | "map.center_latitude"
   | "map.center_longitude"
   | "map.zoom"
+  | "map.show_network_range"
+  | "map.plot_range_for_depth"
+  | "map.show_layer_control"
 >;
 
 export interface LeafletMapProps<TPoint extends AnyLeafletMapPoint = Point> {

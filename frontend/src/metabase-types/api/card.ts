@@ -535,6 +535,11 @@ export type VisualizationSettings = {
   "map.center_longitude"?: number;
   "map.zoom"?: number;
 
+  /** Carina fork map settings */
+  "map.show_network_range"?: boolean;
+  "map.plot_range_for_depth"?: number;
+  "map.show_layer_control"?: boolean;
+
   /** Columns selected for custom list view. */
   "list.columns"?: ListViewColumns;
 

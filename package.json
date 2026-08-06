@@ -123,6 +123,8 @@
     "kbar": "0.1.0-beta.45",
     "leaflet": "^1.2.0",
     "leaflet-draw": "^0.4.9",
+    "leaflet-groupedlayercontrol": "^0.6.1",
+    "leaflet.markercluster": "^1.5.3",
     "lodash.debounce": "^4.0.8",
     "lodash.orderby": "^4.6.0",
     "marked": "18.0.6",
@@ -177,6 +179,8 @@
     "underscore": "^1.13.8",
     "url": "^0.11.4",
     "use-sync-external-store": "^1.6.0",
+    "util": "^0.12.5",
+    "wkx": "^0.5.0",
     "yup": "^0.32.11"
   },
   "devDependencies": {

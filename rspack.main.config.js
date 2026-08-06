@@ -249,6 +249,8 @@ const config = {
       url: require.resolve("url/"),
       events: require.resolve("events/"),
       querystring: require.resolve("querystring-es3"),
+      // wkx (used for the_geom WKB/WKT parsing on pin maps) needs util.inherits
+      util: require.resolve("util/"),
     },
   },
   optimization: {

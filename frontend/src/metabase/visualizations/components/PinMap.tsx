@@ -31,6 +31,8 @@ const WORLD_BOUNDS: L.LatLngTuple[] = [
   [90, 180],
 ];
 
+const HOP_DEPTH_VALUES = [0, 1, 2, 3, 4, 5, 6];
+
 // The child map classes declare narrower prop types than PinMapChildProps.
 const MAP_COMPONENTS_BY_TYPE = {
   markers: LeafletMarkerPinMap,
@@ -230,7 +232,14 @@ export function PinMap(props: PinMapProps) {
 
   const disableUpdateButton = lat == null && lng == null && zoom == null;
 
-  const pinType = settings["map.pin_type"];
+  const showLayerControl = Boolean(settings["map.show_layer_control"]);
+  const showNetworkRange = Boolean(settings["map.show_network_range"]);
+  const plotRangeForDepth = settings["map.plot_range_for_depth"] ?? 0;
+
+  // the layer control clusters markers per icon type, so it only works on the
+  // marker pin map
+  const pinType = showLayerControl ? "markers" : settings["map.pin_type"];
+  const isMarkerPinMap = pinType === "markers";
   const MapComponent = pinType ? MAP_COMPONENTS_BY_TYPE[pinType] : undefined;
 
   const mapProps = { ...props };
@@ -249,6 +258,7 @@ export function PinMap(props: PinMapProps) {
         CS.relative,
         CS.hoverParent,
         CS.hoverVisibility,
+        { "utility-map-container": showLayerControl },
       )}
       onMouseDownCapture={(e) => e.stopPropagation() /* prevent dragging */}
     >
@@ -294,6 +304,48 @@ export function PinMap(props: PinMapProps) {
           CS.hoverChild,
         )}
       >
+        {isMarkerPinMap && !isStaticEmbedding ? (
+          <>
+            <div
+              className={cx(
+                "PinMapNetworkRangeButton",
+                ButtonsS.Button,
+                ButtonsS.ButtonSmall,
+                ButtonsS.ButtonWhite,
+                S.pinMapButton,
+              )}
+              onClick={() =>
+                onUpdateVisualizationSettings({
+                  "map.show_network_range": !showNetworkRange,
+                })
+              }
+            >
+              {showNetworkRange ? t`Hide network range` : t`Show network range`}
+            </div>
+            {showNetworkRange ? (
+              <select
+                className={cx(
+                  ButtonsS.Button,
+                  ButtonsS.ButtonSmall,
+                  ButtonsS.ButtonWhite,
+                  S.pinMapButton,
+                )}
+                value={plotRangeForDepth}
+                onChange={(e) =>
+                  onUpdateVisualizationSettings({
+                    "map.plot_range_for_depth": parseInt(e.target.value, 10),
+                  })
+                }
+              >
+                {HOP_DEPTH_VALUES.map((depth) => (
+                  <option key={depth} value={depth}>
+                    {t`Hop depth`}: {depth}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </>
+        ) : null}
         {shouldShowDefaultViewChangeButton ? (
           <div
             className={cx(

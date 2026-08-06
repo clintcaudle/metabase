@@ -6,6 +6,7 @@ import { ColorRangeSelector } from "metabase/common/components/ColorRangeSelecto
 import { Flex } from "metabase/ui";
 import { getAccentColors, getPreferredColor } from "metabase/ui/colors/groups";
 import MetabaseSettings from "metabase/utils/settings";
+import { hasIconColumn } from "metabase/visualizations/components/CarinaLayerConfig";
 import MapSkeleton from "metabase/visualizations/components/skeletons/MapSkeleton/MapSkeleton";
 import {
   getDefaultMapDimension,
@@ -36,13 +37,26 @@ import {
   isNumeric,
   isState,
 } from "metabase-lib/v1/types/utils/isa";
-import type { CustomGeoJSONMap } from "metabase-types/api";
+import type {
+  CustomGeoJSONMap,
+  VisualizationSettings,
+} from "metabase-types/api";
 
 import { CustomMapFooter } from "./CustomMapFooter";
 import { getColorplethColorScale } from "./map-color-scale";
 import { isMapSensible, isPinMapType } from "./utils";
 
 const MAP_DISPLAY_ALIASES = ["state", "country", "pin_map"] as const;
+
+const HOP_DEPTH_OPTIONS = [0, 1, 2, 3, 4, 5, 6].map((depth) => ({
+  name: String(depth),
+  value: depth,
+}));
+
+const isMarkerPinMapSettings = (vizSettings: VisualizationSettings) =>
+  isPinMapType(vizSettings["map.type"]) &&
+  (vizSettings["map.pin_type"] === "markers" ||
+    Boolean(vizSettings["map.show_layer_control"]));
 
 // Leaflet (and the map renderer that uses it) is loaded lazily so it stays out
 // of the initial bundle for the majority of users who never open a map.
@@ -168,16 +182,21 @@ const MAP_VIZ_DEFINITION: VisualizationDefinition = {
           { name: "Grid", value: "grid" },
         ],
       }),
-      getDefault: ([{ data }], vizSettings) =>
-        vizSettings["map.type"] === "heat"
-          ? "heat"
-          : vizSettings["map.type"] === "grid"
-            ? "grid"
-            : data.rows.length >= 1000
-              ? "tiles"
-              : "markers",
+      getDefault: ([{ data }], vizSettings) => {
+        if (vizSettings["map.type"] === "heat") {
+          return "heat";
+        }
+        if (vizSettings["map.type"] === "grid") {
+          return "grid";
+        }
+        if (hasIconColumn(data.cols) || vizSettings["map.show_layer_control"]) {
+          return "markers";
+        }
+        return data.rows.length >= 1000 ? "tiles" : "markers";
+      },
       getHidden: (_series, vizSettings) =>
         !isPinMapType(vizSettings["map.type"]),
+      readDependencies: ["map.show_layer_control"],
     },
     ...fieldSetting("map.latitude_column", {
       get title() {
@@ -207,6 +226,38 @@ const MAP_VIZ_DEFINITION: VisualizationDefinition = {
         (vizSettings["map.pin_type"] !== "heat" &&
           vizSettings["map.pin_type"] !== "grid"),
     }),
+    "map.show_network_range": {
+      get title() {
+        return t`Show network range`;
+      },
+      widget: "toggle",
+      inline: true,
+      getDefault: () => false,
+      getHidden: (_series, vizSettings) => !isMarkerPinMapSettings(vizSettings),
+    },
+    "map.plot_range_for_depth": {
+      get title() {
+        return t`Hop depth`;
+      },
+      widget: "select",
+      getProps: () => ({ options: HOP_DEPTH_OPTIONS }),
+      getDefault: () => 0,
+      getHidden: (_series, vizSettings) =>
+        !isMarkerPinMapSettings(vizSettings) ||
+        !vizSettings["map.show_network_range"],
+      readDependencies: ["map.show_network_range"],
+    },
+    "map.show_layer_control": {
+      get title() {
+        return t`Show layer control`;
+      },
+      widget: "toggle",
+      inline: true,
+      getDefault: ([{ data }]) => hasIconColumn(data.cols),
+      getHidden: (series, vizSettings) =>
+        !isPinMapType(vizSettings["map.type"]) ||
+        !hasIconColumn(series[0]?.data?.cols ?? []),
+    },
     "map.region": {
       get title() {
         return t`Region map`;

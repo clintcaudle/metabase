@@ -549,6 +549,9 @@ export type VisualizationSettingsDefinitions = {
   "map.heat.blur"?: SeriesSettingDefinition<Value, Props>;
   "map.heat.min-opacity"?: SeriesSettingDefinition<Value, Props>;
   "map.heat.max-zoom"?: SeriesSettingDefinition<Value, Props>;
+  "map.show_network_range"?: SeriesSettingDefinition<Value, Props>;
+  "map.plot_range_for_depth"?: SeriesSettingDefinition<Value, Props>;
+  "map.show_layer_control"?: SeriesSettingDefinition<Value, Props>;
   markdown_template?: DatasetColumnSettingDefinition<Value, Props>;
   number_separators?: DatasetColumnSettingDefinition<Value, Props>;
   number_style?: DatasetColumnSettingDefinition<Value, Props>;
