@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { useMount, usePrevious } from "react-use";
-import { jt, t } from "ttag";
+import { t } from "ttag";
 import _ from "underscore";
 
 import ErrorBoundary from "metabase/ErrorBoundary";
@@ -17,46 +17,43 @@ import {
   useGetRemappedDashboardParameterValueQuery,
   useGetRemappedParameterValueQuery,
 } from "metabase/api";
-import ExplicitSize from "metabase/components/ExplicitSize";
-import LoadingSpinner from "metabase/components/LoadingSpinner";
-import TokenField, { parseStringValue } from "metabase/components/TokenField";
-import type { LayoutRendererArgs } from "metabase/components/TokenField/TokenField";
+import { ExplicitSize } from "metabase/common/components/ExplicitSize";
+import { MultiAutocompleteWithTranslation } from "metabase/common/components/MultiAutocomplete";
+import { useTranslateContent } from "metabase/content-translation/hooks";
+import type { ContentTranslationFunction } from "metabase/content-translation/types";
 import CS from "metabase/css/core/index.css";
-import Fields from "metabase/entities/fields";
-import { parseNumber } from "metabase/lib/number";
-import { connect, useDispatch } from "metabase/lib/redux";
-import { isNotNull } from "metabase/lib/types";
+import { useEmbeddingEntityContext } from "metabase/embedding/context";
 import {
   fetchCardParameterValues,
   fetchDashboardParameterValues,
   fetchParameterValues,
 } from "metabase/parameters/actions";
-import { addRemappings } from "metabase/redux/metadata";
+import { connect, useDispatch } from "metabase/redux";
+import { addRemappings } from "metabase/redux/remappings";
+import type { State } from "metabase/redux/store";
+import { getMetadata } from "metabase/selectors/metadata";
 import {
-  type ComboboxItem,
+  Autocomplete,
   Loader,
-  MultiAutocomplete,
   MultiAutocompleteOption,
   MultiAutocompleteValue,
 } from "metabase/ui";
-import type Question from "metabase-lib/v1/Question";
-import type Field from "metabase-lib/v1/metadata/Field";
-import { getSourceType } from "metabase-lib/v1/parameters/utils/parameter-source";
+import { parseNumber } from "metabase/utils/number";
+import { isNotNull } from "metabase/utils/types";
+import Field from "metabase-lib/v1/metadata/Field";
+import { hasRemappedParameterValues } from "metabase-lib/v1/parameters/utils/parameter-source";
 import { normalizeParameter } from "metabase-lib/v1/parameters/utils/parameter-values";
 import type {
   CardId,
-  Dashboard,
   DashboardId,
   FieldValue,
   Parameter,
   ParameterValueOrArray,
   RowValue,
 } from "metabase-types/api";
-import type { State } from "metabase-types/store";
 
-import ValueComponent from "../Value";
+import { Value as ValueComponent } from "../Value";
 
-import { OptionsMessage, StyledEllipsified } from "./FieldValuesWidget.styled";
 import { ListField } from "./ListField";
 import SingleSelectListField from "./SingleSelectListField";
 import type { LoadingStateType, ValuesMode } from "./types";
@@ -72,9 +69,8 @@ import {
   hasList,
   isExtensionOfPreviousSearch,
   isNumeric,
-  isSearchable,
+  parseStringValue,
   shouldList,
-  showRemapping,
 } from "./utils";
 
 const MAX_SEARCH_RESULTS = 100;
@@ -82,16 +78,13 @@ const COMBOBOX_WIDTH = 364;
 const DROPDOWN_WIDTH = 314;
 
 function mapStateToProps(state: State, { fields = [] }: { fields: Field[] }) {
+  const metadata = getMetadata(state);
   return {
-    fields: fields.map(
-      (field) =>
-        Fields.selectors.getObject(state, { entityId: field.id }) || field,
-    ),
+    fields: fields.map((field) => metadata.field(field.id) || field),
   };
 }
 
 export interface IFieldValuesWidgetProps {
-  color?: "brand";
   maxResults?: number;
   style?: StyleHTMLAttributes<HTMLDivElement>;
   formatOptions?: Record<string, any>;
@@ -104,14 +97,12 @@ export interface IFieldValuesWidgetProps {
   disableList?: boolean;
   disableSearch?: boolean;
   disablePKRemappingForSearch?: boolean;
-  alwaysShowOptions?: boolean;
-  showOptionsInPopover?: boolean;
 
   parameter: Parameter;
-  parameters?: Parameter[];
+  parameters?: Parameter[]; // linked parameters with values
   fields: Field[];
-  dashboard?: Dashboard | null;
-  question?: Question;
+  dashboardId?: DashboardId;
+  cardId?: CardId;
 
   value: RowValue[];
   onChange: (value: RowValue[]) => void;
@@ -122,9 +113,7 @@ export interface IFieldValuesWidgetProps {
   placeholder?: string;
   checkedColor?: string;
 
-  valueRenderer?: (value: string | number) => JSX.Element;
   optionRenderer?: (option: FieldValue) => JSX.Element;
-  layoutRenderer?: (props: LayoutRendererArgs) => JSX.Element;
 }
 
 export const FieldValuesWidgetInner = forwardRef<
@@ -132,10 +121,7 @@ export const FieldValuesWidgetInner = forwardRef<
   IFieldValuesWidgetProps
 >(function FieldValuesWidgetInner(
   {
-    color,
     maxResults = MAX_SEARCH_RESULTS,
-    alwaysShowOptions = true,
-    style = {},
     formatOptions = {},
     containerWidth,
     maxWidth = 500,
@@ -144,12 +130,11 @@ export const FieldValuesWidgetInner = forwardRef<
     disableList = false,
     disableSearch = false,
     disablePKRemappingForSearch,
-    showOptionsInPopover = false,
     parameter,
     parameters,
     fields,
-    dashboard,
-    question,
+    dashboardId,
+    cardId,
     value,
     onChange,
     multi,
@@ -157,9 +142,7 @@ export const FieldValuesWidgetInner = forwardRef<
     className,
     placeholder,
     checkedColor,
-    valueRenderer,
     optionRenderer,
-    layoutRenderer,
   },
   ref,
 ) {
@@ -176,8 +159,12 @@ export const FieldValuesWidgetInner = forwardRef<
   );
   const [isExpanded, setIsExpanded] = useState(false);
   const dispatch = useDispatch();
+  const tc = useTranslateContent();
 
   const previousWidth = usePrevious(width);
+
+  const { uuid, token } = useEmbeddingEntityContext();
+  const entityIdentifier = uuid ?? token ?? null;
 
   useMount(() => {
     if (shouldList({ parameter, fields, disableSearch })) {
@@ -202,11 +189,11 @@ export const FieldValuesWidgetInner = forwardRef<
     let newOptions: FieldValue[] = [];
     let hasMoreOptions = false;
     try {
-      if (canUseDashboardEndpoints(dashboard)) {
+      if (canUseDashboardEndpoints(dashboardId)) {
         const result = await dispatchFetchDashboardParameterValues(query);
         newOptions = result.values;
         hasMoreOptions = result.has_more_values;
-      } else if (canUseCardEndpoints(question)) {
+      } else if (canUseCardEndpoints(cardId)) {
         const result = await dispatchFetchCardParameterValues(query);
         newOptions = result.values;
         hasMoreOptions = result.has_more_values;
@@ -239,8 +226,6 @@ export const FieldValuesWidgetInner = forwardRef<
   };
 
   const dispatchFetchCardParameterValues = async (query?: string) => {
-    const cardId = question?.id();
-
     if (!isNotNull(cardId) || !parameter) {
       return { has_more_values: false, values: [] };
     }
@@ -248,6 +233,7 @@ export const FieldValuesWidgetInner = forwardRef<
     return dispatch(
       fetchCardParameterValues({
         cardId,
+        entityIdentifier,
         parameter,
         query,
       }),
@@ -255,8 +241,6 @@ export const FieldValuesWidgetInner = forwardRef<
   };
 
   const dispatchFetchDashboardParameterValues = async (query?: string) => {
-    const dashboardId = dashboard?.id;
-
     if (!isNotNull(dashboardId) || !parameter || !parameters) {
       return { has_more_values: false, values: [] };
     }
@@ -264,6 +248,7 @@ export const FieldValuesWidgetInner = forwardRef<
     return dispatch(
       fetchDashboardParameterValues({
         dashboardId,
+        entityIdentifier,
         parameter,
         parameters,
         query,
@@ -273,9 +258,12 @@ export const FieldValuesWidgetInner = forwardRef<
 
   // ? this may rely on field mutations
   const updateRemappings = (options: FieldValue[]) => {
-    if (showRemapping(fields)) {
-      const [field] = fields;
-      dispatch(addRemappings(field.id, options));
+    if (Field.remappedField(fields) != null) {
+      fields.forEach((field) => {
+        if (typeof field.id === "number") {
+          dispatch(addRemappings(field.id, options));
+        }
+      });
     }
   };
 
@@ -317,23 +305,6 @@ export const FieldValuesWidgetInner = forwardRef<
     search.current(value);
   };
 
-  if (!valueRenderer) {
-    valueRenderer = (value: string | number) => {
-      const option = options.find((option) => getValue(option) === value);
-      return renderValue({
-        fields,
-        formatOptions,
-        value,
-        parameter,
-        cardId: question?.id(),
-        dashboardId: dashboard?.id,
-        autoLoad: true,
-        compact: false,
-        displayValue: option?.[1],
-      });
-    };
-  }
-
   if (!optionRenderer) {
     optionRenderer = (option: FieldValue) =>
       renderValue({
@@ -341,41 +312,11 @@ export const FieldValuesWidgetInner = forwardRef<
         formatOptions,
         value: option[0],
         parameter,
-        cardId: question?.id(),
-        dashboardId: dashboard?.id,
+        cardId,
+        dashboardId,
         autoLoad: false,
         displayValue: option[1],
       });
-  }
-
-  if (!layoutRenderer) {
-    layoutRenderer = showOptionsInPopover
-      ? undefined
-      : ({
-          optionsList,
-          isFocused,
-          isAllSelected,
-          isFiltered,
-          valuesList,
-        }: LayoutRendererArgs) => (
-          <div>
-            {valuesList}
-            {renderOptions({
-              alwaysShowOptions,
-              parameter,
-              fields,
-              disableSearch,
-              disablePKRemappingForSearch,
-              loadingState,
-              options,
-              valuesMode,
-              optionsList,
-              isFocused,
-              isAllSelected,
-              isFiltered,
-            })}
-          </div>
-        );
   }
 
   const tokenFieldPlaceholder = getTokenFieldPlaceholder({
@@ -416,6 +357,15 @@ export const FieldValuesWidgetInner = forwardRef<
       : parseStringValue(value);
   };
 
+  const parseValue = (value: string) =>
+    parseFreeformValue(value)?.toString() ?? null;
+
+  const commitValues = (values: string[]) =>
+    onChange(isNumericParameter ? values.map(parseNumericValue) : values);
+
+  const fieldValues = value.filter(isNotNull).map(String);
+  const optionsData = options.map(getOption).filter(isNotNull);
+
   return (
     <ErrorBoundary ref={ref}>
       <div
@@ -450,12 +400,9 @@ export const FieldValuesWidgetInner = forwardRef<
             checkedColor={checkedColor}
           />
         ) : multi ? (
-          <MultiAutocomplete
-            value={value.filter(isNotNull).map((value) => String(value))}
-            data={options
-              .filter((option) => getValue(option) != null)
-              .map((option) => getOption(option))
-              .filter(isNotNull)}
+          <MultiAutocompleteWithTranslation
+            value={fieldValues}
+            data={optionsData}
             placeholder={tokenFieldPlaceholder}
             rightSection={isLoading ? <Loader size="xs" /> : undefined}
             nothingFoundMessage={getNothingFoundMessage({
@@ -470,68 +417,46 @@ export const FieldValuesWidgetInner = forwardRef<
               position: "bottom-start",
             }}
             data-testid="token-field"
-            parseValue={(value) => {
-              if (isNumericParameter) {
-                const number = parseNumber(value);
-                return number != null ? String(number) : null;
-              } else {
-                const string = value.trim();
-                return string.length > 0 ? string : null;
-              }
-            }}
+            parseValue={parseValue}
             renderValue={({ value }) => (
               <RemappedValue
                 parameter={parameter}
                 fields={fields}
-                dashboardId={dashboard?.id}
-                cardId={question?.id()}
+                dashboardId={dashboardId}
+                cardId={cardId}
                 value={isNumericParameter ? parseNumericValue(value) : value}
+                tc={tc}
               />
             )}
             renderOption={({ option }) => (
-              <RemappedOption option={option} fields={fields} />
+              <RemappedOption option={option} fields={fields} tc={tc} />
             )}
-            onChange={(values) => {
-              if (isNumericParameter) {
-                onChange(values.map(parseNumericValue));
-              } else {
-                onChange(values);
-              }
-            }}
+            onChange={commitValues}
             onSearchChange={onInputChange}
           />
         ) : (
-          <TokenField
-            value={value.filter((v) => v != null)}
-            onChange={onChange}
+          <Autocomplete
+            value={fieldValues[0] ?? ""}
+            data={optionsData}
             placeholder={tokenFieldPlaceholder}
-            updateOnInputChange
-            // forwarded props
-            multi={multi}
+            rightSection={isLoading ? <Loader size="xs" /> : undefined}
             autoFocus={autoFocus}
-            color={color}
-            style={{ ...style, minWidth: "inherit" }}
             className={className}
-            optionsStyle={
-              !parameter && !showOptionsInPopover ? { maxHeight: "none" } : {}
-            }
-            // end forwarded props
-            options={options}
-            valueKey="0"
-            valueRenderer={valueRenderer}
-            optionRenderer={optionRenderer}
-            layoutRenderer={layoutRenderer}
-            filterOption={(option, filterString) => {
-              const lowerCaseFilterString = filterString.toLowerCase();
-              return option?.some?.(
-                (value) =>
-                  value != null &&
-                  String(value).toLowerCase().includes(lowerCaseFilterString),
-              );
+            w={COMBOBOX_WIDTH}
+            comboboxProps={{
+              withinPortal: false,
+              floatingStrategy: "fixed",
+              width: DROPDOWN_WIDTH,
+              position: "bottom-start",
             }}
-            onInputChange={onInputChange}
-            parseFreeformValue={parseFreeformValue}
-            updateOnInputBlur
+            data-testid="token-field"
+            selectFirstOptionOnChange
+            renderOption={({ option }) => (
+              <RemappedOption option={option} fields={fields} tc={tc} />
+            )}
+            parseValue={parseValue}
+            onSearchChange={onInputChange}
+            onChange={(value) => commitValues(value !== "" ? [value] : [])}
           />
         )}
       </div>
@@ -553,7 +478,7 @@ const LoadingState = () => (
     className={cx(CS.flex, CS.layoutCentered, CS.alignCenter)}
     style={{ minHeight: 82 }}
   >
-    <LoadingSpinner size={16} />
+    <Loader size="xs" />
   </div>
 );
 
@@ -575,97 +500,6 @@ function getNothingFoundMessage({
     return t`No matching ${searchField?.display_name} found.`;
   } else {
     return t`No matching result`;
-  }
-}
-
-const NoMatchState = ({ fields }: { fields: (Field | null)[] }) => {
-  if (fields.length === 1 && !!fields[0]) {
-    const [{ display_name }] = fields;
-
-    return (
-      <OptionsMessage>
-        {jt`No matching ${(
-          <StyledEllipsified key={display_name}>
-            {display_name}
-          </StyledEllipsified>
-        )} found.`}
-      </OptionsMessage>
-    );
-  }
-
-  return <OptionsMessage>{t`No matching result`}</OptionsMessage>;
-};
-
-const EveryOptionState = () => (
-  <OptionsMessage>{t`Including every option in your filter probably won’t do much…`}</OptionsMessage>
-);
-
-interface RenderOptionsProps {
-  alwaysShowOptions: boolean;
-  parameter?: Parameter;
-  fields: Field[];
-  disableSearch: boolean;
-  disablePKRemappingForSearch?: boolean;
-  loadingState: LoadingStateType;
-  options: FieldValue[];
-  valuesMode: ValuesMode;
-  optionsList: React.ReactNode;
-  isFocused: boolean;
-  isAllSelected: boolean;
-  isFiltered: boolean;
-}
-
-function renderOptions({
-  alwaysShowOptions,
-  parameter,
-  fields,
-  disableSearch,
-  disablePKRemappingForSearch,
-  loadingState,
-  options,
-  valuesMode,
-  optionsList,
-  isFocused,
-  isAllSelected,
-  isFiltered,
-}: RenderOptionsProps) {
-  if (alwaysShowOptions || isFocused) {
-    if (optionsList) {
-      return optionsList;
-    } else if (
-      hasList({
-        parameter,
-        fields,
-        disableSearch,
-        options,
-      }) &&
-      valuesMode === "list"
-    ) {
-      if (isAllSelected) {
-        return <EveryOptionState />;
-      }
-    } else if (
-      isSearchable({
-        parameter,
-        fields,
-        disableSearch,
-        disablePKRemappingForSearch,
-        valuesMode,
-      })
-    ) {
-      if (loadingState === "LOADING") {
-        return <LoadingState />;
-      } else if (loadingState === "LOADED" && isFiltered) {
-        return (
-          <NoMatchState
-            fields={fields.map(
-              (field) =>
-                field.searchField(disablePKRemappingForSearch) as Field | null,
-            )}
-          />
-        );
-      }
-    }
   }
 }
 
@@ -698,7 +532,7 @@ function renderValue({
       cardId={cardId}
       dashboardId={dashboardId}
       maximumFractionDigits={20}
-      remap={displayValue || showRemapping(fields)}
+      remap={displayValue || Field.remappedField(fields) != null}
       displayValue={displayValue}
       {...formatOptions}
       autoLoad={autoLoad}
@@ -713,6 +547,7 @@ type RemappedValueProps = {
   value: ParameterValueOrArray | null;
   dashboardId?: DashboardId;
   cardId?: CardId;
+  tc: ContentTranslationFunction;
 };
 
 function RemappedValue({
@@ -721,17 +556,19 @@ function RemappedValue({
   value,
   dashboardId,
   cardId,
+  tc,
 }: RemappedValueProps) {
-  const field = fields[0];
-  const isRemapped =
-    (showRemapping(fields) && field?.remappedField() != null) ||
-    getSourceType(parameter) === "static-list";
+  const { uuid, token } = useEmbeddingEntityContext();
+  const entityIdentifier = uuid ?? token ?? null;
+
+  const isRemapped = hasRemappedParameterValues(parameter, fields);
 
   const { data: dashboardData } = useGetRemappedDashboardParameterValueQuery(
     dashboardId != null && value != null && isRemapped
       ? {
-          dashboard_id: dashboardId,
-          parameter_id: parameter.id,
+          dashId: dashboardId,
+          ...(entityIdentifier && { entityIdentifier }),
+          paramId: parameter.id,
           value,
         }
       : skipToken,
@@ -740,8 +577,9 @@ function RemappedValue({
   const { data: cardData } = useGetRemappedCardParameterValueQuery(
     cardId != null && value != null && isRemapped
       ? {
-          card_id: cardId,
-          parameter_id: parameter.id,
+          cardId,
+          ...(entityIdentifier && { entityIdentifier }),
+          paramId: parameter.id,
           value,
         }
       : skipToken,
@@ -759,34 +597,36 @@ function RemappedValue({
 
   const remappedData = dashboardData ?? cardData ?? parameterData;
   if (remappedData == null) {
-    return value;
+    return tc(value);
   }
 
   const remappedValue = getValue(remappedData);
   const remappedLabel = getLabel(remappedData);
   if (remappedLabel == null) {
-    return value;
+    return tc(value);
   }
 
   return (
     <MultiAutocompleteValue
       value={String(remappedValue)}
-      label={String(remappedLabel ?? remappedValue)}
+      label={tc(String(remappedLabel ?? remappedValue))}
     />
   );
 }
 
 type RemappedOptionProps = {
-  option: ComboboxItem;
+  option: { value: string; label?: string };
   fields: Field[];
+  tc: ContentTranslationFunction;
 };
 
-function RemappedOption({ option, fields }: RemappedOptionProps) {
-  const field = fields[0];
-  const isRemapped = showRemapping(fields) && field?.remappedField() != null;
+function RemappedOption({ option, fields, tc }: RemappedOptionProps) {
+  const isRemapped = Field.remappedField(fields) != null;
+  const label = tc(option.label ?? option.value);
+
   if (!isRemapped) {
-    return option.label;
+    return label;
   }
 
-  return <MultiAutocompleteOption value={option.value} label={option.label} />;
+  return <MultiAutocompleteOption value={option.value} label={label} />;
 }

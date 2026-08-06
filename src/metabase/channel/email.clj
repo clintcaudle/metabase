@@ -1,7 +1,14 @@
 (ns metabase.channel.email
   (:require
-   [metabase.analytics.core :as analytics]
+   [clojure.data :as data]
+   [clojure.set :as set]
+   [clojure.string :as str]
+   [metabase.analytics-interface.core :as analytics]
    [metabase.channel.settings :as channel.settings]
+   [metabase.permissions.core :as perms]
+   [metabase.premium-features.core :as premium-features]
+   [metabase.settings.core :as setting]
+   [metabase.util :as u]
    [metabase.util.i18n :refer [tru]]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
@@ -50,9 +57,31 @@
             (throttle/check email-throttler true))
           (catch Exception _e
             (log/warn "Email throttling is enabled and the number of recipients exceeds the rate limit per second. Skip throttling."
-                      {:email-subject  (:subject email)
-                       :recipients     (count recipients)
+                      {:recipients     (count recipients)
                        :max-recipients throttle-threshold})))))))
+
+(defn partition-recipients
+  "Split `recipients` into batches no larger than `max-per-message`, so a single email never exceeds an SMTP
+  provider's per-message recipient cap (e.g. Amazon SES rejects any message addressed to more than 50
+  recipients). Returns a sequence of recipient sequences; each batch is sent as its own message.
+
+  When `max-per-message` is nil or non-positive, batching is disabled and all recipients are returned as a
+  single batch. The cap is a transport-level concern, applied at the email send boundary
+  ([[send-message-or-throw!]]) so it covers every email path uniformly."
+  [recipients max-per-message]
+  (cond
+    (empty? recipients)                                []
+    (or (nil? max-per-message) (<= max-per-message 0)) [recipients]
+    :else                                              (partition-all max-per-message recipients)))
+
+(defn- add-mail-args
+  "Adds any additionally needed mail properties needed for sending mail to the given map of args."
+  [args]
+  (let [trust (System/getProperty "mail.smtps.ssl.trust")
+        debug-enabled? (= "true" (System/getProperty "mail.debug"))]
+    (cond-> args
+      trust (assoc :ssl.trust trust)
+      debug-enabled? (assoc :debug true))))
 
 ;; ## PUBLIC INTERFACE
 
@@ -60,10 +89,10 @@
   "Internal function used to send messages. Should take 2 args - a map of SMTP credentials, and a map of email details.
   Provided so you can swap this out with an \"inbox\" for test purposes.
 
-  If email-rate-limit-per-second is set, this function will throttle the email sending based on the total number of recipients."
+  Throttling is applied once per logical message in [[send-message-or-throw!]], not here, so that a message split
+  into multiple recipient batches is throttled as a unit rather than per batch."
   [smtp-credentials email-details]
-  (check-email-throttle email-details)
-  (postal/send-message smtp-credentials email-details))
+  (postal/send-message (add-mail-args smtp-credentials) email-details))
 
 (defn- add-ssl-settings [m ssl-setting]
   (merge
@@ -76,11 +105,21 @@
      {})))
 
 (defn- smtp-settings []
-  (-> {:host (channel.settings/email-smtp-host)
-       :user (channel.settings/email-smtp-username)
-       :pass (channel.settings/email-smtp-password)
-       :port (channel.settings/email-smtp-port)}
-      (add-ssl-settings (channel.settings/email-smtp-security))))
+  (merge (if (and (channel.settings/smtp-override-enabled) (premium-features/is-hosted?))
+           (-> {:host         (channel.settings/email-smtp-host-override)
+                :user         (channel.settings/email-smtp-username-override)
+                :pass         (channel.settings/email-smtp-password-override)
+                :port         (channel.settings/email-smtp-port-override)
+                :from-address (channel.settings/email-from-address-override)}
+               (add-ssl-settings (channel.settings/email-smtp-security-override)))
+           (-> {:host         (channel.settings/email-smtp-host)
+                :user         (channel.settings/email-smtp-username)
+                :pass         (channel.settings/email-smtp-password)
+                :port         (channel.settings/email-smtp-port)
+                :from-address (channel.settings/email-from-address)}
+               (add-ssl-settings (channel.settings/email-smtp-security))))
+         {:reply-to  (channel.settings/email-reply-to)
+          :from-name (channel.settings/email-from-name)}))
 
 (def ^:private EmailMessage
   [:and
@@ -98,30 +137,44 @@
         (string? message)))]])
 
 (defn send-message-or-throw!
-  "Send an email to one or more `recipients`. Upon success, this returns the `message` that was just sent. This function
-  does not catch and swallow thrown exceptions, it will bubble up. Should prefer to use [[send-email-retrying!]] unless
-  the caller has its own retry logic."
+  "Send an email to one or more `recipients`. This function does not catch and swallow thrown exceptions, it will
+  bubble up. Should prefer to use [[send-email-retrying!]] unless the caller has its own retry logic.
+
+  When there are more recipients than [[channel.settings/email-max-recipients-per-message]], the email is split
+  into multiple messages of at most that many recipients each (see [[partition-recipients]]), so a single message
+  never exceeds an SMTP provider's per-message recipient cap (e.g. Amazon SES rejects messages with >50
+  recipients). This is a transport concern handled here, mirroring how [[metabase.channel.impl.slack/send!]]
+  chunks Slack blocks at its own send boundary. If a later batch throws after earlier batches succeeded, the
+  caller's retry will resend the earlier batches — at-least-once per batch, matching the existing retry
+  semantics in [[send-email-retrying!]]."
   [{:keys [subject recipients message-type message bcc?] :as _email}]
   (try
     (when-not (channel.settings/email-smtp-host)
       (throw (ex-info (tru "SMTP host is not set.") {:cause :smtp-host-not-set})))
     ;; Now send the email
-    (let [to-type (if bcc? :bcc :to)]
-      (send-email! (smtp-settings)
-                   (merge
-                    {:from    (if-let [from-name (channel.settings/email-from-name)]
-                                (str from-name " <" (channel.settings/email-from-address) ">")
-                                (channel.settings/email-from-address))
-                     ;; FIXME: postal doesn't accept recipients if it's a set, need to fix this from upstream
-                     to-type  (seq recipients)
-                     :subject subject
-                     :body    (case message-type
-                                :attachments message
-                                :text        message
-                                :html        [{:type    "text/html; charset=utf-8"
-                                               :content message}])}
-                    (when-let [reply-to (channel.settings/email-reply-to)]
-                      {:reply-to reply-to}))))
+    (let [to-type       (if bcc? :bcc :to)
+          smtp-settings (smtp-settings)
+          base-message  (merge
+                         {:from    (if-let [from-name (:from-name smtp-settings)]
+                                     (str from-name " <" (:from-address smtp-settings) ">")
+                                     (:from-address smtp-settings))
+                          :subject subject
+                          :body    (case message-type
+                                     :attachments message
+                                     :text        message
+                                     :html        [{:type    "text/html; charset=utf-8"
+                                                    :content message}])}
+                         (when-let [reply-to (:reply-to smtp-settings)]
+                           {:reply-to reply-to}))]
+      ;; Throttle once for the whole logical message, before splitting it into batches. Batching
+      ;; ([[partition-recipients]]) turns one notification into several SMTP messages; if we threw on a later
+      ;; batch after earlier ones had already been sent, the caller's retry would resend those earlier batches
+      ;; and recipients would get duplicates. Checking here means the throttle can only throw before anything is
+      ;; sent, so a retry is safe.
+      (check-email-throttle {to-type recipients})
+      (doseq [batch (partition-recipients recipients (channel.settings/email-max-recipients-per-message))]
+        ;; FIXME: postal doesn't accept recipients if it's a set, need to fix this from upstream
+        (send-email! smtp-settings (assoc base-message to-type (seq batch)))))
     (catch Throwable e
       (analytics/inc! :metabase-email/message-errors)
       (when (not= :smtp-host-not-set (:cause (ex-data e)))
@@ -132,7 +185,8 @@
 (mu/defn send-email-retrying!
   "Like [[send-message-or-throw!]] but retries sending on errors according to the retry settings."
   [email :- EmailMessage]
-  ((retry/decorate send-message-or-throw!) email))
+  (retry/with-retry (channel.settings/retry-configuration)
+    (send-message-or-throw! email)))
 
 (def ^:private SMTPStatus
   "Schema for the response returned by various functions in [[metabase.channel.email]]. Response will be a map with the key
@@ -157,7 +211,7 @@
   (try
     (send-email-retrying! msg-args)
     (catch Throwable e
-      (log/warn e "Failed to send email")
+      (log/warnf "Failed to send email: %s" (ex-message e))
       {::error e})))
 
 (def ^:private SMTPSettings
@@ -184,13 +238,13 @@
                              :connectiontimeout "1000"
                              :timeout "4000")
                       (add-ssl-settings security))
-          session (doto (Session/getInstance (make-props sender details))
+          session (doto (Session/getInstance (make-props sender (add-mail-args details)))
                     (.setDebug false))]
       (with-open [transport (.getTransport session proto)]
         (.connect transport host port user pass)))
     {::error nil}
     (catch Throwable e
-      (log/error e "Error testing SMTP connection")
+      (log/errorf "Error testing SMTP connection: %s" (ex-message e))
       {::error e})))
 
 (def ^:private email-security-order [:tls :starttls :ssl])
@@ -238,3 +292,99 @@
       (if-let [working-security-type (guess-smtp-security details)]
         (assoc details :security working-security-type)
         initial-attempt))))
+
+(defn- smtp->mb-setting
+  "Convert a SMTP setting to a Metabase setting name."
+  [smtp-setting mb-to-smtp-map]
+  (get (set/map-invert mb-to-smtp-map) smtp-setting))
+
+(defn humanize-error-messages
+  "Convert raw error message responses from our email functions into our normal api error response structure."
+  [mb-to-smtp-map {::keys [error]}]
+  (when error
+    (let [conn-error  {:errors {(smtp->mb-setting :host mb-to-smtp-map) "Wrong host or port"
+                                (smtp->mb-setting :port mb-to-smtp-map) "Wrong host or port"}}
+          creds-error {:errors {(smtp->mb-setting :user mb-to-smtp-map) "Wrong username or password"
+                                (smtp->mb-setting :pass mb-to-smtp-map) "Wrong username or password"}}
+          exceptions  (u/full-exception-chain error)
+          message     (str/join ": " (map ex-message exceptions))
+          match-error (fn match-error [regex-or-exception-class [message exceptions]]
+                        (cond (instance? java.util.regex.Pattern regex-or-exception-class)
+                              (re-find regex-or-exception-class message)
+
+                              (class? regex-or-exception-class)
+                              (some (partial instance? regex-or-exception-class) exceptions)))]
+      (log/warn "Problem connecting to mail server:" message)
+      (condp match-error [message exceptions]
+        ;; bad host = "Unknown SMTP host: foobar"
+        #"^Unknown SMTP host:.*$"
+        conn-error
+
+        ;; host seems valid, but host/port failed connection = "Could not connect to SMTP host: localhost, port: 123"
+        #".*Could(?: not)|(?:n't) connect to (?:SMTP )?host.*"
+        conn-error
+
+        ;; seen this show up on mandrill
+        #"^Invalid Addresses$"
+        creds-error
+
+        ;; seen this show up on mandrill using TLS with bad credentials
+        #"^failed to connect, no password specified\?$"
+        creds-error
+
+        ;; madrill authentication failure
+        #"^435 4.7.8 Error: authentication failed:.*$"
+        creds-error
+
+        javax.mail.AuthenticationFailedException
+        creds-error
+
+        ;; everything else :(
+        {:message (str "Sorry, something went wrong. Please try again. Error: " message)}))))
+
+(defn- humanize-email-corrections
+  "Formats warnings when security settings are autocorrected."
+  [corrections mb-to-smtp-map]
+  (into
+   {}
+   (for [[k v] corrections]
+     [k (tru "{0} was autocorrected to {1}"
+             (name (mb-to-smtp-map k))
+             (u/upper-case-en v))])))
+
+(defn check-and-update-settings
+  "Check the provided settings against the SMTP server and update the Metabase settings if the connection is successful."
+  [settings mb-to-smtp-map current-smtp-password]
+  (perms/check-has-application-permission :setting)
+  (let [smtp-settings (-> settings
+                          (select-keys (keys mb-to-smtp-map))
+                          (set/rename-keys mb-to-smtp-map))
+        ;; the frontend has access to an obfuscated version of the password. Watch for whether it sent us a new password or
+        ;; the obfuscated version
+        obfuscated? (and (:pass smtp-settings) current-smtp-password
+                         (= (:pass smtp-settings) (setting/obfuscate-value current-smtp-password)))
+        smtp-settings         (cond-> smtp-settings
+                                obfuscated?
+                                (assoc :pass current-smtp-password))
+        smtp-settings         (cond-> smtp-settings
+                                (string? (:port smtp-settings))     (update :port #(Long/parseLong ^String %))
+                                (string? (:security smtp-settings)) (update :security keyword)
+                                ;; if keys were not provided, clear them out
+                                (nil? (:port smtp-settings)) (assoc :port nil)
+                                (nil? (:security smtp-settings)) (assoc :security nil)
+                                (nil? (:host smtp-settings)) (assoc :host nil)
+                                (nil? (:user smtp-settings)) (assoc :user nil)
+                                (nil? (:pass smtp-settings)) (assoc :pass nil))
+        response         (test-smtp-connection smtp-settings)]
+    (if-not (::error response)
+      ;; test was good, save our settings
+      (let [[_ corrections] (data/diff smtp-settings response)
+            new-settings    (set/rename-keys response (set/map-invert mb-to-smtp-map))]
+        (setting/set-many! new-settings)
+        (cond-> (assoc new-settings :with-corrections (-> corrections
+                                                          (set/rename-keys (set/map-invert mb-to-smtp-map))
+                                                          (humanize-email-corrections mb-to-smtp-map)))
+          obfuscated? (update (smtp->mb-setting :pass mb-to-smtp-map) setting/obfuscate-value)))
+      ;; test failed, return response message
+      {:status 400
+       :body   (humanize-error-messages mb-to-smtp-map response)})))

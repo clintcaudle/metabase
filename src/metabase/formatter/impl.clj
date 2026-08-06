@@ -63,16 +63,14 @@
   ([value decimal]
    (if (zero? value)
      0
-     (let [val-string (-> (condp = (type value)
-                            java.math.BigDecimal (.toPlainString ^BigDecimal value)
-                            java.lang.Double     (format "%.20f" value)
-                            java.lang.Float      (format "%.20f" value)
+     (let [val-string (-> (if (instance? java.math.BigDecimal value)
+                            (.toPlainString ^BigDecimal value)
                             (str value))
                           (strip-trailing-zeroes (str decimal)))
            decimal-idx (str/index-of val-string decimal)]
-       (if decimal-idx
-         (- (count val-string) decimal-idx 1)
-         0)))))
+       (min 20 (if decimal-idx
+                 (- (count val-string) decimal-idx 1)
+                 0))))))
 
 (defn- sig-figs-after-decimal
   "Count the number of significant figures after the decimal point in a number.
@@ -117,7 +115,8 @@
   format string once and then apply it over many values."
   [{:keys  [semantic_type effective_type base_type]
     col-id :id field-ref :field_ref col-name :name col-settings :settings :as col}
-   viz-settings]
+   viz-settings
+   & [scalar?]]
   (let [global-type-settings (try
                                (streaming.common/global-type-settings col viz-settings)
                                (catch Exception _e
@@ -127,28 +126,20 @@
         column-settings      (-> (get viz-settings ::mb.viz/column-settings)
                                  (update-keys #(select-keys % [::mb.viz/field-id ::mb.viz/column-name])))
         column-settings      (merge
+                              global-type-settings
                               (when (= :field ref-type)
                                 (get column-settings {::mb.viz/field-id col-id-or-name}))
                               (or (get column-settings {::mb.viz/column-name col-name})
                                   (get column-settings {::mb.viz/column-name col-id-or-name}))
-                              (qualify-keys col-settings)
-                              global-type-settings)
-        global-settings      (merge
-                              global-type-settings
-                              (::mb.viz/global-column-settings viz-settings))
-        currency?            (boolean (or (= (::mb.viz/number-style column-settings) "currency")
-                                          (= (::mb.viz/number-style viz-settings) "currency")
-                                          (and (nil? (::mb.viz/number-style column-settings))
-                                               (or
-                                                (::mb.viz/currency-style column-settings)
-                                                (::mb.viz/currency column-settings)))))
+                              (qualify-keys col-settings))
+        global-settings      (streaming.common/viz-settings-for-col col viz-settings)
+        ;; Shared with the XLSX export path so both agree on what counts as currency (GDGT-2398). The extra
+        ;; viz-settings check covers a number-style set at the global/viz level rather than on the column itself.
+        currency?            (or (streaming.common/currency-settings? column-settings)
+                                 (= (::mb.viz/number-style viz-settings) "currency"))
 
         {::mb.viz/keys [number-separators decimals scale number-style
-                        prefix suffix currency-style currency]} (merge
-                                                                 (when currency?
-                                                                   (:type/Currency global-settings))
-                                                                 (:type/Number global-settings)
-                                                                 column-settings)
+                        prefix suffix currency-style currency]} global-settings
         currency           (when currency?
                              (keyword (or currency "USD")))
         integral?          (and (isa? (or effective_type base_type) :type/Integer) (integer? (or scale 1)))
@@ -197,7 +188,9 @@
                                       fmtr))]
           (->NumericWrapper
            (let [inline-currency? (and currency?
-                                       (false? (::mb.viz/currency-in-header column-settings)))
+                                       (or
+                                        scalar?
+                                        (false? (::mb.viz/currency-in-header column-settings))))
                  sb               (StringBuilder.)]
              ;; Using explicit StringBuilder to avoid touching the slow `clojure.core/str` multi-arity.
              (when prefix (.append sb prefix))
@@ -220,7 +213,7 @@
            value))
         value))))
 
-(mu/defn format-number :- (ms/InstanceOfClass NumericWrapper)
+(mu/defn format-scalar-number :- (ms/InstanceOfClass NumericWrapper)
   "Format a number `n` and return it as a NumericWrapper; this type is used to do special formatting in other
   `pulse.render` namespaces."
   ([n :- number?]
@@ -228,7 +221,7 @@
                          :num-value n}))
 
   ([value column viz-settings]
-   (let [fmttr (number-formatter column viz-settings)]
+   (let [fmttr (number-formatter column viz-settings true)]
      (fmttr value))))
 
 (defn graphing-column-row-fns
@@ -300,7 +293,8 @@
    (cond
      ;; for numbers, return a format function that has already computed the differences.
      ;; todo: do the same for temporal strings
-     (and apply-formatting? (types/temporal-field? col))
+     (and apply-formatting?
+          #_{:clj-kondo/ignore [:deprecated-var]} (types/temporal-field? col)) ; legacy usage -- do not use going forward
      (datetime/make-temporal-str-formatter timezone-id col visualization-settings)
 
      (and apply-formatting? (isa? (:semantic_type col) :type/Coordinate))
@@ -321,6 +315,42 @@
        (fn [value]
          (->TextWrapper (str value) value))
        identity))))
+
+(defn get-formatter
+  "Returns a memoized fn that builds a column formatter (via [[create-formatter]]) for a column."
+  [timezone settings format-rows?]
+  (memoize
+   (fn [column]
+     (create-formatter timezone column settings format-rows?))))
+
+(defn- create-formatters
+  "Value formatters for the columns at `indexes`; each formats a raw value via
+  [[metabase.query-processor.streaming.common/format-value]] then the column's formatter."
+  [columns indexes timezone settings format-rows?]
+  (let [formatter-fn (get-formatter timezone settings format-rows?)]
+    (mapv (fn [idx]
+            (let [formatter (formatter-fn (nth columns idx))]
+              (fn [value]
+                (formatter (streaming.common/format-value value)))))
+          indexes)))
+
+(mu/defn make-formatters :- [:map
+                             [:row-formatters [:sequential ifn?]]
+                             [:col-formatters [:sequential ifn?]]
+                             [:val-formatters [:sequential ifn?]]]
+  "Row/col/measure value formatters for a pivot export, keyed by `:row-formatters`/`:col-formatters`/`:val-formatters`.
+  Shared by the CSV export and static-viz pivot render paths. `row-indexes`/`col-indexes`/`val-indexes` are column
+  indexes into `columns`."
+  [columns      :- [:sequential :map]
+   row-indexes  :- [:maybe [:sequential :int]]
+   col-indexes  :- [:maybe [:sequential :int]]
+   val-indexes  :- [:maybe [:sequential :int]]
+   settings     :- [:maybe :map]
+   timezone     :- [:maybe :string]
+   format-rows? :- :boolean]
+  {:row-formatters (create-formatters columns row-indexes timezone settings format-rows?)
+   :col-formatters (create-formatters columns col-indexes timezone settings format-rows?)
+   :val-formatters (create-formatters columns val-indexes timezone settings format-rows?)})
 
 (defn NumericWrapper?
   "Is `x` an instance of `NumericWrapper`?"

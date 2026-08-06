@@ -1,14 +1,15 @@
 import { type ReactNode, forwardRef } from "react";
 
-import { type IconName, Tooltip } from "metabase/ui";
+import { Tooltip } from "metabase/ui";
+import type { IconName } from "metabase-types/api";
 
 import { Root, ShortMessage, StyledIcon } from "./ErrorView.styled";
 
 interface ErrorViewProps {
   error: ReactNode;
   icon?: IconName;
-  isDashboard: boolean;
-  isSmall: boolean;
+  isDashboard?: boolean;
+  isSmall?: boolean;
 }
 
 export const ErrorView = forwardRef<HTMLDivElement, ErrorViewProps>(

@@ -1,6 +1,7 @@
 (ns metabase.pulse.send-test
   "These are mostly Alerts test, dashboard subscriptions could be found in
   [[metabase.pulse.dashboard-subscription-test]]."
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.pulse.send-test]}}}}}}
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -8,7 +9,8 @@
    [metabase.channel.core :as channel]
    [metabase.channel.impl.http-test :as channel.http-test]
    [metabase.channel.render.body :as body]
-   [metabase.channel.render.core :as channel.render]
+   [metabase.lib.core :as lib]
+   [metabase.lib.metadata :as lib.metadata]
    [metabase.notification.test-util :as notification.tu]
    [metabase.pulse.models.pulse :as models.pulse]
    [metabase.pulse.send :as pulse.send]
@@ -22,8 +24,28 @@
 (use-fixtures :each
   (fn warn-possible-rebuild
     [thunk]
-    (testing "[PRO TIP] If this test fails, you may need to rebuild the bundle with `yarn build-static-viz`\n\n"
+    (testing "[PRO TIP] If this test fails, you may need to rebuild the bundle with `bun run build-static-viz`\n\n"
       (thunk))))
+
+(deftest channel-recipients-includes-channel-id-test
+  (testing "Slack channel-recipients includes channel_id when present in pulse_channel details"
+    (is (= [{:type    :notification-recipient/raw-value
+             :details {:value "#my-channel" :channel_id "C0ABC123"}}]
+           (#'pulse.send/channel-recipients
+            {:channel_type "slack"
+             :details      {:channel "#my-channel" :channel_id "C0ABC123"}}))))
+  (testing "Slack channel-recipients omits channel_id when absent from pulse_channel details"
+    (is (= [{:type    :notification-recipient/raw-value
+             :details {:value "#my-channel"}}]
+           (#'pulse.send/channel-recipients
+            {:channel_type "slack"
+             :details      {:channel "#my-channel"}}))))
+  (testing "Email recipients are unaffected"
+    (is (= [{:type    :notification-recipient/raw-value
+             :details {:value "test@example.com"}}]
+           (#'pulse.send/channel-recipients
+            {:channel_type "email"
+             :recipients   [{:email "test@example.com"}]})))))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                               Util Fns & Macros                                                |
@@ -43,6 +65,18 @@
                            ;; alert always includes result as csv
                            pulse.test-util/csv-attachment]}
          data))
+
+(defn- default-slack-blocks
+  [card-id include-image?]
+  (cond->
+   [{:type "header" :text {:type "plain_text" :text "🔔 Test card" :emoji true}}
+    {:type "section"
+     :text
+     {:type "mrkdwn" :text (format "<https://testmb.com/question/%d|Test card>" card-id) :verbatim true}}]
+    include-image?
+    (conj {:type "image"
+           :slack_file {:id "Test card.png"}
+           :alt_text "Test card"})))
 
 (defn do-with-pulse-for-card
   "Creates a Pulse and other relevant rows for a `card` (using `pulse` and `pulse-card` properties if specified), then
@@ -115,29 +149,30 @@
     (assert (fn? f))
     (testing (format "sent to %s channel" channel-type)
       (notification.tu/with-notification-testing-setup!
-        (mt/with-temp [:model/Card {card-id :id} (merge {:name    pulse.test-util/card-name
-                                                         :display (or display :line)}
-                                                        card)]
-          (with-pulse-for-card [{pulse-id :id}
-                                {:card          card-id
-                                 :pulse         pulse
-                                 :channel       channel
-                                 :pulse-card    pulse-card
-                                 :pulse-channel channel-type}]
-            (letfn [(thunk* []
-                      (f {:card-id card-id, :pulse-id pulse-id}
-                         ((keyword "channel" (name channel-type))
-                          (pulse.test-util/with-captured-channel-send-messages!
-                            (mt/with-temporary-setting-values [site-url "https://testmb.com"]
-                              (notification.tu/with-javascript-visualization-stub
-                                (pulse.send/send-pulse! (t2/select-one :model/Pulse pulse-id))))))))
-                    (thunk []
-                      (if fixture
-                        (fixture {:card-id card-id, :pulse-id pulse-id} thunk*)
-                        (thunk*)))]
-              (case channel-type
-                (:http :email) (thunk)
-                :slack (pulse.test-util/slack-test-setup! (thunk))))))))))
+        (notification.tu/with-channel-fixtures [(keyword "channel" (name channel-type))]
+          (mt/with-temp [:model/Card {card-id :id} (merge {:name    pulse.test-util/card-name
+                                                           :display (or display :line)}
+                                                          card)]
+            (with-pulse-for-card [{pulse-id :id}
+                                  {:card          card-id
+                                   :pulse         pulse
+                                   :channel       channel
+                                   :pulse-card    pulse-card
+                                   :pulse-channel channel-type}]
+              (letfn [(thunk* []
+                        (f {:card-id card-id, :pulse-id pulse-id}
+                           ((keyword "channel" (name channel-type))
+                            (pulse.test-util/with-captured-channel-send-messages!
+                              (mt/with-temporary-setting-values [site-url "https://testmb.com"]
+                                (notification.tu/with-javascript-visualization-stub
+                                  (pulse.send/send-pulse! (t2/select-one :model/Pulse pulse-id))))))))
+                      (thunk []
+                        (if fixture
+                          (fixture {:card-id card-id, :pulse-id pulse-id} thunk*)
+                          (thunk*)))]
+                (case channel-type
+                  (:http :email) (thunk)
+                  :slack (pulse.test-util/slack-test-setup! (thunk)))))))))))
 
 (defn- tests!
   "Convenience for writing multiple tests using `do-test`. `common` is a map of shared properties as passed to `do-test`
@@ -160,13 +195,7 @@
     (testing message
       (do-test! (merge-with merge common m)))))
 
-#_(def ^:private test-card-result {pulse.test-util/card-name true})
 (def ^:private test-card-regex (re-pattern pulse.test-util/card-name))
-
-(defn- produces-bytes? [{:keys [rendered-info]}]
-  (when rendered-info
-    (pos? (alength (or (channel.render/png-from-render-info rendered-info 500)
-                       (byte-array 0))))))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                     Tests                                                      |
@@ -187,17 +216,10 @@
               (mt/summarize-multipart-single-email email test-card-regex))))
 
      :slack
-     (fn [{:keys [card-id]} [pulse-results]]
-       (is (= {:channel-id "#general"
-               :attachments
-               [{:blocks [{:type "header", :text {:type "plain_text", :text "🔔 Test card", :emoji true}}]}
-                {:title           pulse.test-util/card-name
-                 :rendered-info   {:attachments false
-                                   :content     true}
-                 :title_link      (str "https://testmb.com/question/" card-id)
-                 :attachment-name "image.png"
-                 :fallback        pulse.test-util/card-name}]}
-              (pulse.test-util/thunk->boolean pulse-results))))
+     (fn [{:keys [card-id]} [message]]
+       (is (=? {:channel "#general"
+                :blocks (default-slack-blocks card-id true)}
+               message)))
 
      :http
      (fn [{:keys [card-id pulse-id]} [request]]
@@ -243,27 +265,18 @@
                       #"<a href=\"https://testmb.com/dashboard/"))))
 
             :slack
-            (fn [{:keys [card-id]} [pulse-results]]
+            (fn [{:keys [card-id]} [message]]
               (testing "\"more results in attachment\" text should not be present for Slack Pulses"
                 (testing "Pulse results"
-                  (is (= {:channel-id "#general"
-                          :attachments
-                          [{:blocks
-                            [{:type "header", :text {:type "plain_text", :text "🔔 Test card", :emoji true}}]}
-                           {:title           pulse.test-util/card-name
-                            :rendered-info   {:attachments false
-                                              :content     true}
-                            :title_link      (str "https://testmb.com/question/" card-id)
-                            :attachment-name "image.png"
-                            :fallback        pulse.test-util/card-name}]}
-                         (pulse.test-util/thunk->boolean pulse-results))))
+                  (is (=? {:channel "#general"
+                           :blocks (default-slack-blocks card-id true)}
+                          message)))
                 (testing "attached-results-text should be invoked exactly once"
                   (is (= 1
                          (count (pulse.test-util/input @#'body/attached-results-text)))))
                 (testing "attached-results-text should return nil since it's a slack message"
                   (is (= [nil]
                          (pulse.test-util/output @#'body/attached-results-text))))))}}
-
           "11 rows in the results no longer causes a CSV attachment per issue #36441."
           {:card (pulse.test-util/checkins-query-card {:aggregation nil, :limit 11})
 
@@ -387,18 +400,10 @@
                        (mt/summarize-multipart-single-email email test-card-regex #"More results have been included"))))
 
               :slack
-              (fn [{:keys [card-id]} [result]]
-                (is (= {:channel-id  "#general",
-                        :attachments [{:blocks [{:type "header", :text {:type "plain_text", :text "🔔 Test card", :emoji true}}]}
-                                      {:title           pulse.test-util/card-name
-                                       :rendered-info   {:attachments false
-                                                         :content     true}
-                                       :title_link      (str "https://testmb.com/question/" card-id)
-                                       :attachment-name "image.png"
-                                       :fallback        pulse.test-util/card-name}]}
-                       (pulse.test-util/thunk->boolean result)))
-                (is (every? produces-bytes? (rest (:attachments result)))))}}
-
+              (fn [{:keys [card-id]} [message]]
+                (is (=? {:channel "#general"
+                         :blocks (default-slack-blocks card-id true)}
+                        message)))}}
             "with no data"
             {:card
              (pulse.test-util/checkins-query-card {:filter   [:> $date "2017-10-24"]
@@ -407,7 +412,6 @@
              {:email
               (fn [_ emails]
                 (is (empty? emails)))}}
-
             "too much data"
             {:card
              (pulse.test-util/checkins-query-card {:limit 21, :aggregation nil})
@@ -451,7 +455,6 @@
                                                        pulse.test-util/csv-attachment]})
                        (mt/summarize-multipart-single-email email test-card-regex
                                                             #"This question has reached its goal of 5\.9\."))))}}
-
             "no data"
             {:card
              (merge (pulse.test-util/checkins-query-card {:filter   [:between $date "2014-02-01" "2014-04-01"]
@@ -466,7 +469,6 @@
              {:email
               (fn [_ emails]
                 (is (empty? emails)))}}
-
             "with progress bar"
             {:card
              (merge (pulse.test-util/venues-query-card "max")
@@ -507,7 +509,6 @@
                                                        pulse.test-util/csv-attachment]})
                        (mt/summarize-multipart-single-email email test-card-regex
                                                             #"This question has gone below its goal of 1\.1\."))))}}
-
             "with no satisfying data"
             {:card
              (merge (pulse.test-util/checkins-query-card {:filter   [:between $date "2014-02-10" "2014-02-12"]
@@ -522,7 +523,6 @@
              {:email
               (fn [_ emails]
                 (is (empty? emails)))}}
-
             "with progress bar"
             {:card
              (merge (pulse.test-util/venues-query-card "min")
@@ -589,10 +589,10 @@
       (with-pulse-for-card [{pulse-id :id} {:card card-id, :pulse {:alert_condition  "goal"
                                                                    :alert_first_only false
                                                                    :alert_above_goal true}}]
-        (let [channel-messsages (pulse.test-util/with-captured-channel-send-messages!
-                                  (pulse.send/send-pulse! (models.pulse/retrieve-notification pulse-id)))]
+        (let [channel-messages (pulse.test-util/with-captured-channel-send-messages!
+                                 (pulse.send/send-pulse! (models.pulse/retrieve-notification pulse-id)))]
           (is (= (rasta-alert-message {:subject "Alert: Test card has reached its goal"})
-                 (mt/summarize-multipart-single-email (-> channel-messsages :channel/email first) test-card-regex))))))))
+                 (mt/summarize-multipart-single-email (-> channel-messages :channel/email first) test-card-regex))))))))
 
 (deftest nonuser-email-test
   (testing "Both users and Nonusers get an email, with unsubscribe text for nonusers"
@@ -631,7 +631,7 @@
          :model/PulseChannel _              {:pulse_id     pulse-id
                                              :channel_type "slack"
                                              :details      {:channel "#general"}}]
-        (let [original-render-noti (var-get #'channel/render-notification)]
+        (let [original-render-noti (mt/original-fn #'channel/render-notification)]
           (with-redefs [channel/render-notification (fn [& args]
                                                       (if (= :channel/slack (first args))
                                                         (throw (ex-info "Slack failed" {}))
@@ -652,32 +652,33 @@
                       (swap! requests conj req)
                       {:status 200
                        :body   "ok"}))]
-      (notification.tu/with-notification-testing-setup!
-        (channel.http-test/with-server [url [endpoint]]
-          (mt/with-temp
-            [:model/Card         card           {:dataset_query (mt/mbql-query orders {:aggregation [[:count]]})}
-             :model/Channel      channel        {:type    :channel/http
-                                                 :details {:url         (str url "/test")
-                                                           :auth-method :none}}
-             :model/Pulse        {pulse-id :id} {:name "Test Pulse"
-                                                 :alert_condition "rows"}
-             :model/PulseCard    _              {:pulse_id pulse-id
-                                                 :card_id  (:id card)}
-             :model/PulseChannel _              {:pulse_id pulse-id
-                                                 :channel_type "http"
-                                                 :channel_id   (:id channel)}]
-            (pulse.send/send-pulse! (t2/select-one :model/Pulse pulse-id))
-            (is (=? {:body {:alert_creator_id   (mt/user->id :rasta)
-                            :alert_creator_name "Rasta Toucan"
-                            :alert_id           pulse-id
-                            :data               {:question_id   (:id card)
-                                                 :question_name (mt/malli=? string?)
-                                                 :question_url  (mt/malli=? string?)
-                                                 :raw_data      {:cols ["count"], :rows [[18760]]},
-                                                 :type          "question"
-                                                 :visualization (mt/malli=? [:fn #(str/starts-with? % "data:image/png;base64,")])}
-                            :type               "alert"}}
-                    (first @requests)))))))))
+      (mt/with-temporary-setting-values [http-channel-host-strategy :allow-all]
+        (notification.tu/with-notification-testing-setup!
+          (channel.http-test/with-server [url [endpoint]]
+            (mt/with-temp
+              [:model/Card         card           {:dataset_query (mt/mbql-query orders {:aggregation [[:count]]})}
+               :model/Channel      channel        {:type    :channel/http
+                                                   :details {:url         (str url "/test")
+                                                             :auth-method :none}}
+               :model/Pulse        {pulse-id :id} {:name "Test Pulse"
+                                                   :alert_condition "rows"}
+               :model/PulseCard    _              {:pulse_id pulse-id
+                                                   :card_id  (:id card)}
+               :model/PulseChannel _              {:pulse_id pulse-id
+                                                   :channel_type "http"
+                                                   :channel_id   (:id channel)}]
+              (pulse.send/send-pulse! (t2/select-one :model/Pulse pulse-id))
+              (is (=? {:body {:alert_creator_id   (mt/user->id :rasta)
+                              :alert_creator_name "Rasta Toucan"
+                              :alert_id           pulse-id
+                              :data               {:question_id   (:id card)
+                                                   :question_name (mt/malli=? string?)
+                                                   :question_url  (mt/malli=? string?)
+                                                   :raw_data      {:cols ["count"], :rows [[18760]]},
+                                                   :type          "question"
+                                                   :visualization (mt/malli=? [:fn #(str/starts-with? % "data:image/png;base64,")])}
+                              :type               "alert"}}
+                      (first @requests))))))))))
 
 (deftest do-not-send-alert-with-archived-card-test
   (mt/with-temp
@@ -693,3 +694,36 @@
     (is (empty? (-> (pulse.test-util/with-captured-channel-send-messages!
                       (pulse.send/send-pulse! (models.pulse/retrieve-notification pulse-id)))
                     :channel/email)))))
+
+(deftest send-pulse-with-no-self-service-creator-test
+  (testing "A dashboard subscription still sends successfully when its creator has no data permissions on the underlying table (#18009)"
+    (let [mp (mt/metadata-provider)]
+      (mt/with-temp [:model/Dashboard {dash-id :id} {}
+                     :model/Card      {card-id :id} {:dataset_query (-> (lib/query mp (lib.metadata/table mp (mt/id :orders)))
+                                                                        (lib/aggregate (lib/count)))}
+                     :model/DashboardCard {dc-id :id} {:dashboard_id dash-id :card_id card-id}]
+        (mt/with-no-data-perms-for-all-users!
+          (with-pulse-for-card [{pulse-id :id}
+                                {:card       card-id
+                                 :pulse      {:dashboard_id dash-id :creator_id (mt/user->id :rasta)}
+                                 :pulse-card {:dashboard_card_id dc-id}}]
+            (mt/with-fake-inbox
+              (let [results (pulse.test-util/with-captured-channel-send-messages!
+                              (mt/with-temporary-setting-values [site-url "https://testmb.com"]
+                                (pulse.send/send-pulse! (t2/select-one :model/Pulse pulse-id))))]
+                (is (seq (:channel/email results)))))))))))
+
+(deftest send-skip-alert-test
+  (testing "alerts are skipped (#63189)"
+    (let [pulse-sent-called? (atom false)]
+      (mt/with-dynamic-fn-redefs [pulse.send/send-pulse!* (fn [& _args])]
+        (mt/with-temp [:model/Pulse {pulse-id :id
+                                     :as pulse}   {:creator_id      (mt/user->id :rasta)
+                                                   :name            (mt/random-name)
+                                                   :alert_condition "rows"}
+                       :model/PulseChannel _      {:pulse_id       pulse-id
+                                                   :channel_type   :slack
+                                                   :enabled        true
+                                                   :details        {:channel "#random"}}]
+          (pulse.send/send-pulse! pulse)
+          (is (false? @pulse-sent-called?)))))))

@@ -1,11 +1,12 @@
 (ns metabase.driver.oracle
+  (:refer-clojure :exclude [mapv])
   (:require
    [clojure.java.jdbc :as jdbc]
    [clojure.string :as str]
    [honey.sql :as sql]
    [java-time.api :as t]
-   [metabase.config.core :as config]
    [metabase.driver :as driver]
+   [metabase.driver-api.core :as driver-api]
    [metabase.driver.common :as driver.common]
    [metabase.driver.impl :as driver.impl]
    [metabase.driver.sql :as driver.sql]
@@ -16,36 +17,54 @@
    [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
    [metabase.driver.sql-jdbc.sync.common :as sql-jdbc.sync.common]
    [metabase.driver.sql-jdbc.sync.describe-table :as sql-jdbc.describe-table]
+   [metabase.driver.sql.pivot :as sql.pivot]
    [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.driver.sql.query-processor.boolean-to-comparison :as sql.qp.boolean-to-comparison]
    [metabase.driver.sql.query-processor.empty-string-is-null :as sql.qp.empty-string-is-null]
+   [metabase.driver.sql.query-processor.util :as sql.qp.u]
    [metabase.driver.sql.util :as sql.u]
-   [metabase.query-processor.timezone :as qp.timezone]
-   [metabase.secrets.core :as secret]
    [metabase.util.date-2 :as u.date]
    [metabase.util.honey-sql-2 :as h2x]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
-   [metabase.util.malli.registry :as mr])
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.performance :refer [mapv]])
   (:import
    (com.mchange.v2.c3p0 C3P0ProxyConnection)
    (java.security KeyStore)
-   (java.sql Connection DatabaseMetaData ResultSet SQLException Types)
-   (java.time Instant LocalDateTime OffsetDateTime ZonedDateTime)
+   (java.sql
+    Connection
+    DatabaseMetaData
+    ResultSet
+    SQLException
+    Types)
+   (java.time
+    Instant
+    LocalDateTime
+    OffsetDateTime
+    ZonedDateTime)
    (oracle.jdbc OracleConnection OracleTypes)
    (oracle.sql TIMESTAMPTZ)))
 
 (set! *warn-on-reflection* true)
 
-(driver/register! :oracle, :parent #{:sql-jdbc
-                                     ::sql.qp.empty-string-is-null/empty-string-is-null})
+(driver/register! :oracle, :parent #{:sql-jdbc ::sql.qp.empty-string-is-null/empty-string-is-null})
 
-(doseq [[feature supported?] {:datetime-diff           true
-                              :expression-literals     true
-                              :now                     true
-                              :identifiers-with-spaces true
-                              :convert-timezone        true
-                              :expressions/date        false}]
+(doseq [[feature supported?] {:convert-timezone                 true
+                              :database-routing                 false
+                              :datetime-diff                    true
+                              :describe-default-expr            true
+                              :describe-is-generated            true
+                              :describe-is-nullable             true
+                              :expression-literals              true
+                              :expressions/date                 false
+                              :identifiers-with-spaces          true
+                              :native-pivot-tables              true
+                              :now                              true
+                              ;; these don't seem to ERROR on Oracle but they don't work as expected either, see
+                              ;; https://github.com/metabase/metabase/pull/66982#issuecomment-3667113995
+                              :regex/lookaheads-and-lookbehinds false
+                              :table-privileges                true}]
   (defmethod driver/database-supports? [:oracle feature] [_driver _feature _db] supported?))
 
 (mr/def ::details
@@ -145,8 +164,8 @@
       "JKS")))
 
 (mu/defn- handle-keystore-options [details :- ::details]
-  (let [keystore (secret/value-as-file! :oracle details "ssl-keystore")
-        password (secret/value-as-string :oracle details "ssl-keystore-password")]
+  (let [keystore (driver-api/secret-value-as-file! :oracle details "ssl-keystore")
+        password (driver-api/secret-value-as-string :oracle details "ssl-keystore-password")]
     (-> details
         (assoc :javax.net.ssl.keyStoreType (guess-keystore-type keystore password)
                :javax.net.ssl.keyStore keystore
@@ -155,8 +174,8 @@
                 :ssl-keystore-created-at :ssl-keystore-password-created-at))))
 
 (mu/defn- handle-truststore-options [details :- ::details]
-  (let [truststore (secret/value-as-file! :oracle details "ssl-truststore")
-        password (secret/value-as-string :oracle details "ssl-truststore-password")]
+  (let [truststore (driver-api/secret-value-as-file! :oracle details "ssl-truststore")
+        password (driver-api/secret-value-as-string :oracle details "ssl-truststore-password")]
     (-> details
         (assoc :javax.net.ssl.trustStoreType (guess-keystore-type truststore password)
                :javax.net.ssl.trustStore truststore
@@ -183,7 +202,7 @@
         finish-fn (partial (if (:ssl details) ssl-spec non-ssl-spec) details)
         ;; the v$session.program value has a max length of 48 (see T4Connection), so we have to make it more terse than
         ;; the usual config/mb-version-and-process-identifier string and ensure we truncate to a length of 48
-        prog-nm   (as-> (format "MB %s %s" (config/mb-version-info :tag) config/local-process-uuid) s
+        prog-nm   (as-> (format "MB %s %s" (driver-api/mb-version-info :tag) driver-api/local-process-uuid) s
                     (subs s 0 (min 48 (count s))))]
     (-> (merge spec details)
         (assoc prog-name-property prog-nm)
@@ -233,6 +252,11 @@
   (let [t (h2x/->timestamp v)]
     (h2x/->integer [:floor [::h2x/extract :second t]])))
 
+;; Oracle's `GROUPING()` is single-arg only. `GROUPING_ID(a, b, ...)` is its multi-arg counterpart.
+(defmethod sql.pivot/pivot-grouping-hsql :oracle
+  [_driver exprs]
+  (into [::sql.pivot/grouping-id-fn] exprs))
+
 (defmethod sql.qp/date [:oracle :minute]           [_ _ v] (trunc :mi v))
 ;; you can only extract minute + hour from TIMESTAMPs, even though DATEs still have them (WTF), so cast first
 (defmethod sql.qp/date [:oracle :minute-of-hour]   [_ _ v] [::h2x/extract :minute (h2x/->timestamp v)])
@@ -266,12 +290,14 @@
                 2)
          3))
 
-;; subtract number of days between today and first day of week, then add one since first day of week = 1
+;; Use locale-independent Julian day arithmetic instead of TO_CHAR(date, 'D') which depends on NLS_TERRITORY (#57794).
+;; MOD(TO_NUMBER(TO_CHAR(date, 'J')), 7) gives: Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
+;; We add 1 and remap so Sunday=1 to match the AMERICA convention that db-start-of-week :sunday expects.
 (defmethod sql.qp/date [:oracle :day-of-week]
   [driver _ v]
   (sql.qp/adjust-day-of-week
    driver
-   (h2x/->integer [:to_char v (h2x/literal :d)])
+   (h2x/+ [::mod (h2x/+ [:to_number [:to_char v (h2x/literal :J)]] [:inline 1]) [:inline 7]] [:inline 1])
    (driver.common/start-of-week-offset driver)
    (fn mod-fn [& args]
      (into [::mod] args))))
@@ -281,13 +307,14 @@
   (h2x/with-database-type-info [:raw "CURRENT_TIMESTAMP"] "timestamp with time zone"))
 
 (defmethod sql.qp/->honeysql [:oracle :convert-timezone]
-  [driver [_ arg target-timezone source-timezone]]
+  [driver [_ _opts arg target-timezone source-timezone]]
   (let [expr          (sql.qp/->honeysql driver arg)
-        has-timezone? (h2x/is-of-type? expr #"timestamp(\(\d\))? with time zone")]
+        has-timezone? (or (sql.qp.u/field-with-tz? arg)
+                          (h2x/is-of-type? expr #"timestamp(\(\d\))? with time zone"))]
     (sql.u/validate-convert-timezone-args has-timezone? target-timezone source-timezone)
     (-> (if has-timezone?
           expr
-          [:from_tz expr (or source-timezone (qp.timezone/results-timezone-id))])
+          [:from_tz expr (or source-timezone (driver-api/results-timezone-id))])
         (h2x/at-time-zone target-timezone)
         h2x/->timestamp)))
 
@@ -307,13 +334,13 @@
     (driver.impl/truncate-alias s legacy-max-identifier-length)))
 
 (defmethod sql.qp/->honeysql [:oracle :substring]
-  [driver [_ arg start length]]
+  [driver [_ _opts arg start length]]
   (if length
     [:substr (sql.qp/->honeysql driver arg) (sql.qp/->honeysql driver start) (sql.qp/->honeysql driver length)]
     [:substr (sql.qp/->honeysql driver arg) (sql.qp/->honeysql driver start)]))
 
 (defmethod sql.qp/->honeysql [:oracle :concat]
-  [driver [_ & args]]
+  [driver [_ _opts & args]]
   (transduce
    (map (partial sql.qp/->honeysql driver))
    (completing
@@ -326,7 +353,7 @@
    args))
 
 (defmethod sql.qp/->honeysql [:oracle :regex-match-first]
-  [driver [_ arg pattern]]
+  [driver [_ _opts arg pattern]]
   [:regexp_substr (sql.qp/->honeysql driver arg) (sql.qp/->honeysql driver pattern)])
 
 (defn- num-to-ds-interval [unit v]
@@ -397,6 +424,16 @@
   [_driver _coercion-strategy expr]
   [:to_timestamp expr "YYYYMMDDHH24miSS"])
 
+(defmethod sql.qp/cast-temporal-byte [:oracle :Coercion/YYYYMMDDHHMMSSBytes->Temporal]
+  [driver _coercion-strategy expr]
+  (sql.qp/cast-temporal-string driver :Coercion/YYYYMMDDHHMMSSString->Temporal
+                               [:utl_raw.cast_to_varchar2 expr]))
+
+(defmethod sql.qp/cast-temporal-byte [:oracle :Coercion/ISO8601Bytes->Temporal]
+  [driver _coercion-strategy expr]
+  (sql.qp/cast-temporal-string driver :Coercion/ISO8601->DateTime
+                               [:utl_raw.cast_to_varchar2 expr]))
+
 (defmethod sql.qp/unix-timestamp->honeysql [:oracle :milliseconds]
   [driver _ field-or-value]
   (sql.qp/unix-timestamp->honeysql driver :seconds (h2x// field-or-value [:inline 1000])))
@@ -411,7 +448,7 @@
   [unit x]
   (let [x (cond-> x
             (h2x/is-of-type? x #"(?i)timestamp(\(\d\))? with time zone")
-            (h2x/at-time-zone (qp.timezone/results-timezone-id)))]
+            (h2x/at-time-zone (driver-api/results-timezone-id)))]
     (trunc unit x)))
 
 (defmethod sql.qp/datetime-diff [:oracle :year]
@@ -521,7 +558,12 @@
 (defmethod sql.qp/apply-top-level-clause [:oracle :filter]
   [driver _ honeysql-form query]
   (->> (update query :filter boolean->comparison)
-       ((get-method sql.qp/apply-top-level-clause [:sql-jdbc :filter]) driver :filter honeysql-form)))
+       ((get-method sql.qp/apply-top-level-clause [:sql :filter]) driver :filter honeysql-form)))
+
+(defmethod sql.qp/apply-top-level-clause [:oracle :filters]
+  [driver _ honeysql-form query]
+  (->> (update query :filters #(mapv boolean->comparison %))
+       ((get-method sql.qp/apply-top-level-clause [:sql :filters]) driver :filters honeysql-form)))
 
 ;; Oracle doesn't support `TRUE`/`FALSE`; use `1`/`0`, respectively; convert these booleans to numbers.
 (defmethod sql.qp/->honeysql [:oracle Boolean]
@@ -531,34 +573,35 @@
 (defmethod sql.qp/->honeysql [:oracle :and]
   [driver clause]
   (->> (mapv boolean->comparison clause)
-       ((get-method sql.qp/->honeysql [:sql-jdbc :and]) driver)))
+       ((get-method sql.qp/->honeysql [:sql :and]) driver)))
 
 (defmethod sql.qp/->honeysql [:oracle :or]
   [driver clause]
   (->> (mapv boolean->comparison clause)
-       ((get-method sql.qp/->honeysql [:sql-jdbc :or]) driver)))
+       ((get-method sql.qp/->honeysql [:sql :or]) driver)))
 
 (defmethod sql.qp/->honeysql [:oracle :not]
   [driver clause]
   (->> (mapv boolean->comparison clause)
-       ((get-method sql.qp/->honeysql [:sql-jdbc :not]) driver)))
+       ((get-method sql.qp/->honeysql [:sql :not]) driver)))
 
 (defmethod sql.qp/->honeysql [:oracle :case]
   [driver clause]
   (->> (sql.qp.boolean-to-comparison/case-boolean->comparison clause boolean-field-types)
-       ((get-method sql.qp/->honeysql [:sql-jdbc :case]) driver)))
+       ((get-method sql.qp/->honeysql [:sql :case]) driver)))
 
 (defmethod sql.qp/->honeysql [:oracle ::sql.qp/cast-to-text]
-  [driver [_ expr]]
-  (sql.qp/->honeysql driver [::sql.qp/cast expr "varchar2(256)"]))
+  [driver [_ _opts expr]]
+  (sql.qp/->honeysql driver [::sql.qp/cast {} expr "varchar2(256)"]))
 
 (defmethod driver/humanize-connection-error-message :oracle
-  [_ message]
+  [_ messages]
   ;; if the connection error message is caused by the assertion above checking whether sid or service-name is set,
   ;; return a slightly nicer looking version. Otherwise just return message as-is
-  (if (str/includes? message "(or sid service-name)")
-    "You must specify the SID and/or the Service Name."
-    message))
+  (let [message (first messages)]
+    (if (str/includes? message "(or sid service-name)")
+      "You must specify the SID and/or the Service Name."
+      message)))
 
 (defn- remove-rownum-column
   "Remove the `:__rownum__` column from results, if present."
@@ -592,7 +635,7 @@
 (defmethod sql-jdbc.sync/excluded-schemas :oracle
   [_]
   #{"ANONYMOUS"
-    ;; TODO - are there othere APEX tables we want to skip? Maybe we should make this a pattern instead? (#"^APEX_")
+    ;; TODO - are there other APEX tables we want to skip? Maybe we should make this a pattern instead? (#"^APEX_")
     "APEX_040200"
     "APPQOSSYS"
     "AUDSYS"
@@ -644,7 +687,7 @@
       (try
         (.setFetchDirection stmt ResultSet/FETCH_FORWARD)
         (catch Throwable e
-          (log/debug e "Error setting result set fetch direction to FETCH_FORWARD")))
+          (log/debugf "Error setting result set fetch direction to FETCH_FORWARD: %s" (ex-message e))))
       (sql-jdbc.execute/set-parameters! driver stmt params)
       stmt
       (catch Throwable e
@@ -661,7 +704,7 @@
       (try
         (.setFetchDirection stmt ResultSet/FETCH_FORWARD)
         (catch Throwable e
-          (log/debug e "Error setting result set fetch direction to FETCH_FORWARD")))
+          (log/debugf "Error setting result set fetch direction to FETCH_FORWARD: %s" (ex-message e))))
       stmt
       (catch Throwable e
         (.close stmt)
@@ -728,3 +771,60 @@
 (defmethod sql-jdbc/impl-table-known-to-not-exist? :oracle
   [_ ^SQLException e]
   (= (.getErrorCode e) 942))
+
+(defmethod driver/llm-sql-dialect-resource :oracle [_]
+  "metabot/prompts/dialects/oracle.md")
+
+(defmethod sql-jdbc.sync/current-user-table-privileges :oracle
+  [_driver conn-spec & {:as _options}]
+  ;; ALL_TABLES/ALL_VIEWS are user-scoped views that only show objects accessible to the current user.
+  ;; Write privileges come from three sources: ownership, ALL_TAB_PRIVS (includes role/PUBLIC grants),
+  ;; and system privileges (e.g. INSERT ANY TABLE) via SESSION_PRIVS.
+  (->> (jdbc/query
+        conn-spec
+        (str/join
+         "\n"
+         ["WITH accessible_objects AS ("
+          "  SELECT owner, table_name FROM all_tables"
+          "  UNION ALL"
+          "  SELECT owner, view_name AS table_name FROM all_views"
+          "),"
+          "sys_privs AS ("
+          "  SELECT privilege FROM session_privs"
+          "  WHERE privilege IN ('INSERT ANY TABLE', 'UPDATE ANY TABLE', 'DELETE ANY TABLE')"
+          ")"
+          "SELECT"
+          "  NULL AS \"role\","
+          "  ao.owner AS \"schema\","
+          "  ao.table_name AS \"table\","
+          "  1 AS \"select\","
+          "  CASE WHEN ao.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')"
+          "       OR EXISTS (SELECT 1 FROM sys_privs WHERE privilege = 'INSERT ANY TABLE')"
+          "       OR EXISTS (SELECT 1 FROM all_tab_privs p"
+          "                  WHERE p.table_schema = ao.owner AND p.table_name = ao.table_name"
+          "                    AND p.privilege = 'INSERT')"
+          "       THEN 1 ELSE 0 END AS \"insert\","
+          "  CASE WHEN ao.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')"
+          "       OR EXISTS (SELECT 1 FROM sys_privs WHERE privilege = 'UPDATE ANY TABLE')"
+          "       OR EXISTS (SELECT 1 FROM all_tab_privs p"
+          "                  WHERE p.table_schema = ao.owner AND p.table_name = ao.table_name"
+          "                    AND p.privilege = 'UPDATE')"
+          "       THEN 1 ELSE 0 END AS \"update\","
+          "  CASE WHEN ao.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')"
+          "       OR EXISTS (SELECT 1 FROM sys_privs WHERE privilege = 'DELETE ANY TABLE')"
+          "       OR EXISTS (SELECT 1 FROM all_tab_privs p"
+          "                  WHERE p.table_schema = ao.owner AND p.table_name = ao.table_name"
+          "                    AND p.privilege = 'DELETE')"
+          "       THEN 1 ELSE 0 END AS \"delete\""
+          "FROM accessible_objects ao"]))
+       ;; Oracle SQL has no BOOLEAN type before 23c, so CASE returns 1/0
+       (map (fn [row]
+              (-> row
+                  (update :select pos?)
+                  (update :update pos?)
+                  (update :insert pos?)
+                  (update :delete pos?))))))
+
+(defmethod sql.qp/transform-literal-like-pattern-honeysql :oracle
+  [_driver like-rhs-honeysql]
+  [:escape like-rhs-honeysql [:raw "CHR(92)"]])

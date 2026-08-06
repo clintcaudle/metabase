@@ -65,7 +65,7 @@
                   :user                    (tx/db-test-env-var :oracle :user)
                   :password                (tx/db-test-env-var :oracle :password)
                   :sid                     (tx/db-test-env-var :oracle :sid)
-                  :service-name            (tx/db-test-env-var :oracle :service-name (when-not (tx/db-test-env-var :oracle :sid) "XEPDB1"))
+                  :service-name            (tx/db-test-env-var :oracle :service-name (tx/db-test-env-var :oracle :sid "FREEPDB1"))
                   :ssl                     (Boolean/parseBoolean (tx/db-test-env-var :oracle :ssl "false"))
                   :schema-filters-type     "inclusion"
                   :schema-filters-patterns session-schema}
@@ -102,6 +102,10 @@
 (defmethod tx/sorts-nil-first? :oracle [_ _] false)
 
 (defmethod driver/database-supports? [:oracle :test/time-type]
+  [_driver _feature _database]
+  false)
+
+(defmethod driver/database-supports? [:oracle :test/date-type]
   [_driver _feature _database]
   false)
 
@@ -305,10 +309,10 @@
 
 (defonce ^:private ^{:arglists '([driver database])}
   original-describe-database
-  (get-method driver/describe-database :oracle))
+  (get-method driver/describe-database* :oracle))
 
 ;; For test databases, only sync the tables that are qualified by the db name
-(defmethod driver/describe-database :oracle
+(defmethod driver/describe-database* :oracle
   [driver database]
   (if *override-describe-database-to-filter-by-db-name?*
     (let [r                (original-describe-database driver database)

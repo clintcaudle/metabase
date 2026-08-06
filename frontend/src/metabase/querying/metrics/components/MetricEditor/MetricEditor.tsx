@@ -1,8 +1,7 @@
 import { forwardRef, useState } from "react";
 
-import { LeaveConfirmationModalContent } from "metabase/components/LeaveConfirmationModal";
-import Modal from "metabase/components/Modal";
-import { SaveQuestionModal } from "metabase/containers/SaveQuestionModal";
+import { LeaveConfirmModal } from "metabase/common/components/LeaveConfirmModal";
+import { SaveQuestionModal } from "metabase/common/components/SaveQuestionModal";
 import { Flex } from "metabase/ui";
 import * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
@@ -30,7 +29,7 @@ type MetricEditorProps = {
 };
 
 export const MetricEditor = forwardRef<HTMLDivElement, MetricEditorProps>(
-  function MetricEditorInner(
+  function MetricEditor(
     {
       question,
       result,
@@ -63,7 +62,7 @@ export const MetricEditor = forwardRef<HTMLDivElement, MetricEditorProps>(
       await onSave(question.setDefaultDisplay());
     };
 
-    const handleCancel = () => {
+    const handleConfirmCancel = () => {
       onCancel(question);
     };
 
@@ -71,7 +70,7 @@ export const MetricEditor = forwardRef<HTMLDivElement, MetricEditorProps>(
       if (question.isSaved() && isDirty) {
         setModalType("leave");
       } else {
-        handleCancel();
+        handleConfirmCancel();
       }
     };
 
@@ -80,7 +79,7 @@ export const MetricEditor = forwardRef<HTMLDivElement, MetricEditorProps>(
     };
 
     return (
-      <Flex h="100%" direction="column" bg="white" ref={ref}>
+      <Flex h="100%" direction="column" bg="background_page-primary" ref={ref}>
         <MetricEditorHeader
           question={question}
           isDirty={isDirty}
@@ -119,12 +118,11 @@ export const MetricEditor = forwardRef<HTMLDivElement, MetricEditorProps>(
           />
         )}
         {modalType === "leave" && (
-          <Modal isOpen>
-            <LeaveConfirmationModalContent
-              onAction={handleCancel}
-              onClose={handleModalClose}
-            />
-          </Modal>
+          <LeaveConfirmModal
+            opened
+            onConfirm={handleConfirmCancel}
+            onClose={handleModalClose}
+          />
         )}
       </Flex>
     );

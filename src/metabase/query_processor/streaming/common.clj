@@ -1,15 +1,17 @@
 (ns metabase.query-processor.streaming.common
   "Shared util fns for various export (download) streaming formats."
+  (:refer-clojure :exclude [mapv select-keys not-empty get-in])
   (:require
    [clojure.string :as str]
    [java-time.api :as t]
    [metabase.appearance.core :as appearance]
    [metabase.driver :as driver]
    [metabase.models.visualization-settings :as mb.viz]
-   [metabase.query-processor.store :as qp.store]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.query-processor.store :as qp.store]
    [metabase.query-processor.timezone :as qp.timezone]
    [metabase.util.currency :as currency]
-   [metabase.util.date-2 :as u.date])
+   [metabase.util.date-2 :as u.date]
+   [metabase.util.performance :as perf :refer [mapv select-keys not-empty get-in]])
   (:import
    (clojure.lang ISeq)
    (java.time LocalDate LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime)))
@@ -31,6 +33,8 @@
   [t]
   (u.date/with-time-zone-same-instant
    t
+   ;; existing usage -- don't use going forward
+   #_{:clj-kondo/ignore [:deprecated-var]}
    (qp.store/cached ::results-timezone (t/zone-id (qp.timezone/results-timezone-id)))))
 
 (defprotocol FormatValue
@@ -99,6 +103,12 @@
         ;; Fall back to using code if symbol isn't supported on the Metabase frontend
         currency-code)
 
+      "narrowSymbol"
+      (if (currency/supports-symbol? currency-code)
+        (get-in currency/currency [(keyword currency-code) :symbol_native])
+        ;; Fall back to using code if symbol_native isn't supported on the Metabase frontend
+        currency-code)
+
       "code"
       currency-code
 
@@ -125,7 +135,7 @@
 (defn normalize-keys
   "Update map keys to remove namespaces from keywords and convert from snake to kebab case."
   [m]
-  (update-keys m (fn [k] (some-> k name (str/replace #"_" "-") keyword))))
+  (perf/update-keys m (fn [k] (some-> k name (str/replace #"_" "-") keyword))))
 
 (def col-type
   "The dispatch function logic for format format-timestring.
@@ -165,13 +175,33 @@
 (defmethod global-type-settings :default [_ _viz-settings]
   {})
 
+(defn currency-settings?
+  "Whether a column's viz `settings` indicate it should be formatted as currency.
+
+  True when `number-style` is explicitly \"currency\", or when a currency / currency label style is set without any
+  `number-style`. The latter case matters because the column-formatting UI hides the style dropdown for
+  currency-semantic columns, so `number-style` is frequently never persisted -- the currency options are then the only
+  signal. Both the CSV (`metabase.formatter.impl`) and XLSX export paths share this predicate so they agree on what
+  counts as currency; when they diverged, CSV showed the symbol while XLSX dropped it (GDGT-2398)."
+  [settings]
+  (let [number-style (::mb.viz/number-style settings)]
+    (boolean
+     (or (= number-style "currency")
+         ;; No explicit number-style, but the user picked a currency or a currency label style -- treat as currency.
+         (and (nil? number-style)
+              (or (::mb.viz/currency-style settings)
+                  (::mb.viz/currency settings)))))))
+
 (defn- column-setting-defaults
   "Look up the setting defaults based on any information in the column-settings. This is the case when a column has no
   special type (e.g. a number) but the user has specified that the type is currency. We prefer the currency defaults to
   the number defaults."
   [global-column-settings column-settings]
-  (case (::mb.viz/number-style column-settings)
-    "currency" (:type/Currency global-column-settings)
+  (if (currency-settings? column-settings)
+    ;; Inject number-style "currency" so consumers that key off it (e.g. the XLSX writer) treat the column as currency
+    ;; even when the user never persisted an explicit number-style.
+    (merge {::mb.viz/number-style "currency"}
+           (:type/Currency global-column-settings))
     {}))
 
 (defn- ensure-global-viz-settings
@@ -199,7 +229,7 @@
                                         ;; update the keys so that they will have only the :field-id or :column-name
                                         ;; and not have any metadata. Since we don't know the metadata, we can never
                                         ;; match a key with metadata, even if we do have the correct name or id
-                                        (update-keys #(select-keys % [::mb.viz/field-id ::mb.viz/column-name])))
+                                        (perf/update-keys #(select-keys % [::mb.viz/field-id ::mb.viz/column-name])))
         ;; field_ref can be a few different things, i.e.:
         ;;   [:field <col_id> _]
         ;;   [:field <col_name> _]

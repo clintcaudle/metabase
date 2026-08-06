@@ -1,17 +1,19 @@
-import type { ChangeEvent } from "react";
 import { useState } from "react";
 import { t } from "ttag";
 
-import { useAdminSetting } from "metabase/api/utils";
+import { InputWithSelectPrefix } from "metabase/common/components/InputWithSelectPrefix";
 import { useHasTokenFeature } from "metabase/common/hooks";
-import InputWithSelectPrefix from "metabase/components/InputWithSelectPrefix";
-import type { GenericErrorResponse } from "metabase/lib/errors";
+import { useAdminSetting } from "metabase/settings";
 import { Box, Text } from "metabase/ui";
+import type { GenericErrorResponse } from "metabase/utils/errors";
 
 import { SettingHeader } from "../SettingHeader";
 
+import { SetByEnvVarWrapper } from "./AdminSettingInput";
+
 export function SiteUrlWidget() {
-  const { value, updateSetting, description } = useAdminSetting("site-url");
+  const { value, updateSetting, description, isLoading, settingDetails } =
+    useAdminSetting("site-url");
   const isHosted = useHasTokenFeature("hosting");
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -23,6 +25,7 @@ export function SiteUrlWidget() {
       setErrorMessage("");
       if (response?.error) {
         const message =
+          // Unjustified type cast. FIXME
           (response.error as { data: GenericErrorResponse })?.data?.message ||
           t`Error saving Site URL`;
         setErrorMessage(message);
@@ -30,7 +33,7 @@ export function SiteUrlWidget() {
     });
   };
 
-  if (isHosted) {
+  if (isHosted || isLoading) {
     return null;
   }
 
@@ -38,7 +41,7 @@ export function SiteUrlWidget() {
     <Box data-testid="site-url-setting">
       <SettingHeader
         id="site-url"
-        title={t`Site Url`}
+        title={t`Site url`}
         description={
           <>
             <strong>{t`Only change this if you know what you're doing!`}</strong>{" "}
@@ -46,22 +49,20 @@ export function SiteUrlWidget() {
           </>
         }
       />
-      <InputWithSelectPrefix
-        id="site-url"
-        value={value}
-        onChange={(e: ChangeEvent<HTMLInputElement>) =>
-          handleChange(e.target.value)
-        }
-        prefixes={["https://", "http://"]}
-        defaultPrefix="http://"
-        caseInsensitivePrefix={true}
-        placeholder={"http://example.com"}
-      />
-      {errorMessage && (
-        <Text size="sm" color="danger" mt="sm">
-          {errorMessage}
-        </Text>
-      )}
+      <SetByEnvVarWrapper settingKey="site-url" settingDetails={settingDetails}>
+        <InputWithSelectPrefix
+          value={value || ""}
+          onChange={(newValue: string) => handleChange(newValue)}
+          prefixes={["https://", "http://"]}
+          defaultPrefix="http://"
+          placeholder={"http://example.com"}
+        />
+        {errorMessage && (
+          <Text size="sm" color="feedback-negative" mt="sm">
+            {errorMessage}
+          </Text>
+        )}
+      </SetByEnvVarWrapper>
     </Box>
   );
 }

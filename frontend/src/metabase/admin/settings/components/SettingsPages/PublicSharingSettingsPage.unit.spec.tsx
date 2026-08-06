@@ -1,23 +1,23 @@
 import userEvent from "@testing-library/user-event";
-import { act } from "react-dom/test-utils";
 
 import {
   findRequests,
   setupListPublicActionsEndpoint,
   setupListPublicCardsEndpoint,
   setupListPublicDashboardsEndpoint,
+  setupListPublicDocumentsEndpoint,
   setupPropertiesEndpoints,
   setupSettingsEndpoints,
   setupUpdateSettingEndpoint,
 } from "__support__/server-mocks";
 import { renderWithProviders, screen, waitFor } from "__support__/ui";
-import { UndoListing } from "metabase/containers/UndoListing";
+import { UndoListing } from "metabase/common/components/UndoListing";
+import { createMockSettingsState } from "metabase/redux/store/mocks";
 import type { SettingKey } from "metabase-types/api";
 import {
   createMockSettingDefinition,
   createMockSettings,
 } from "metabase-types/api/mocks";
-import { createMockSettingsState } from "metabase-types/store/mocks";
 
 import { PublicSharingSettingsPage } from "./PublicSharingSettingsPage";
 
@@ -31,6 +31,7 @@ const setup = async (enablePublicSharing = false) => {
   setupUpdateSettingEndpoint();
   setupSettingsEndpoints(
     Object.entries(settings).map(([key, value]) =>
+      // Unjustified type cast. FIXME
       createMockSettingDefinition({ key: key as SettingKey, value }),
     ),
   );
@@ -56,6 +57,13 @@ const setup = async (enablePublicSharing = false) => {
       public_uuid: "16a4568d-c328-4306-9c4b-ec8fbd6e4c8e",
     },
   ]);
+  setupListPublicDocumentsEndpoint([
+    {
+      name: "Test Document",
+      id: 4,
+      public_uuid: "3a9a7c46-ff19-4935-bfbe-4932d315732a",
+    },
+  ]);
 
   renderWithProviders(
     <div>
@@ -68,36 +76,42 @@ const setup = async (enablePublicSharing = false) => {
       },
     },
   );
+
+  await screen.findByText("Enable Public Sharing");
 };
 
 describe("PublicSharingSettingsPage", () => {
   it("should render the PublicSharingSettingsPage with public sharing disabled", async () => {
-    await act(() => setup(false));
-
-    expect(screen.getByText("Enable Public Sharing")).toBeInTheDocument();
+    await setup(false);
 
     [
-      "Shared Dashboards",
-      "Shared Questions",
-      "Shared Action Forms",
+      "Shared dashboards",
+      "Shared questions",
+      "Shared action forms",
+      "Shared documents",
       "Test Action",
       "Test Dashboard",
       "Test Question",
+      "Test Document",
     ].forEach((text) => {
       expect(screen.queryByText(text)).not.toBeInTheDocument();
     });
   });
 
   it("should render the PublicSharingSettingsPage with public sharing enabled", async () => {
-    await act(() => setup(true));
+    await setup(true);
+
+    // Each list loads from its own endpoint, so await one row per list.
+    expect(await screen.findByText("Test Action")).toBeInTheDocument();
+    expect(await screen.findByText("Test Dashboard")).toBeInTheDocument();
+    expect(await screen.findByText("Test Question")).toBeInTheDocument();
+    expect(await screen.findByText("Test Document")).toBeInTheDocument();
+
     [
-      "Enable Public Sharing",
-      "Shared Dashboards",
-      "Shared Questions",
-      "Shared Action Forms",
-      "Test Action",
-      "Test Dashboard",
-      "Test Question",
+      "Shared dashboards",
+      "Shared questions",
+      "Shared action forms",
+      "Shared documents",
     ].forEach((text) => {
       expect(screen.getByText(text)).toBeInTheDocument();
     });
@@ -108,9 +122,10 @@ describe("PublicSharingSettingsPage", () => {
     expect(screen.queryByText("Shared Dashboards")).not.toBeInTheDocument();
     expect(screen.queryByText("Shared Questions")).not.toBeInTheDocument();
     expect(screen.queryByText("Shared Action Forms")).not.toBeInTheDocument();
+    expect(screen.queryByText("Shared Documents")).not.toBeInTheDocument();
 
     // Toggle public sharing on
-    const toggle = await screen.findByRole("switch");
+    const toggle = screen.getByRole("switch");
     await userEvent.click(toggle);
 
     await waitFor(async () => {

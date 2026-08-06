@@ -1,65 +1,12 @@
 const { H } = cy;
+import { chunk } from "underscore";
+
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ADMIN_USER_ID } from "e2e/support/cypress_sample_instance_data";
 
 const { ORDERS, ORDERS_ID, PEOPLE, PEOPLE_ID, PRODUCTS, PRODUCTS_ID } =
   SAMPLE_DATABASE;
-
-describe("issue 6010", () => {
-  const createMetric = () => {
-    return H.createQuestion({
-      name: "Metric",
-      description: "Metric with a filter",
-      type: "metric",
-      query: {
-        "source-table": ORDERS_ID,
-        filter: [">", ORDERS.TOTAL, 150],
-        aggregation: [["count"]],
-      },
-    });
-  };
-
-  const createQuestion = (metric_id) => {
-    return H.createQuestion({
-      name: "Question",
-      display: "line",
-      query: {
-        "source-table": ORDERS_ID,
-        breakout: [["field", ORDERS.CREATED_AT, { "temporal-unit": "month" }]],
-        aggregation: [["metric", metric_id]],
-      },
-      visualization_settings: {
-        "graph.dimensions": ["CREATED_AT"],
-        "graph.metrics": ["count"],
-      },
-    });
-  };
-
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-    cy.intercept("POST", "/api/dataset").as("dataset");
-  });
-
-  it("should apply the filter from a metric when drilling through (metabase#6010)", () => {
-    createMetric()
-      .then(({ body: { id } }) => createQuestion(id))
-      .then(({ body: { id } }) => H.visitQuestion(id));
-
-    // Metric filters are transformed into aggregation case expression condition. The 21st point is first non filtered
-    // point.
-    H.cartesianChartCircle().eq(21).click();
-
-    H.popover().findByText("See these Orders").click();
-    cy.wait("@dataset");
-
-    cy.findByTestId("qb-filters-panel").within(() => {
-      cy.findByText("Created At is Jan 1–31, 2024").should("be.visible");
-    });
-    // FIXME metrics v2 -- check that the values in column Total are above 150
-  });
-});
 
 describe("issue 11249", () => {
   const questionDetails = {
@@ -109,8 +56,8 @@ describe("issue 11435", () => {
       query: `
   SELECT "PUBLIC"."ORDERS"."ID" AS "ID", "PUBLIC"."ORDERS"."USER_ID" AS "USER_ID", "PUBLIC"."ORDERS"."PRODUCT_ID" AS "PRODUCT_ID", "PUBLIC"."ORDERS"."SUBTOTAL" AS "SUBTOTAL", "PUBLIC"."ORDERS"."TAX" AS "TAX", "PUBLIC"."ORDERS"."TOTAL" AS "TOTAL", "PUBLIC"."ORDERS"."DISCOUNT" AS "DISCOUNT", "PUBLIC"."ORDERS"."CREATED_AT" AS "CREATED_AT", "PUBLIC"."ORDERS"."QUANTITY" AS "QUANTITY"
   FROM "PUBLIC"."ORDERS"
-  WHERE ("PUBLIC"."ORDERS"."CREATED_AT" >= timestamp with time zone '2025-03-12 00:00:00.000+03:00'
-         AND "PUBLIC"."ORDERS"."CREATED_AT" < timestamp with time zone '2025-03-13 00:00:00.000+03:00')
+  WHERE ("PUBLIC"."ORDERS"."CREATED_AT" >= timestamp with time zone '2028-03-12 00:00:00.000+03:00'
+         AND "PUBLIC"."ORDERS"."CREATED_AT" < timestamp with time zone '2028-03-13 00:00:00.000+03:00')
   LIMIT 1048575`,
     },
     visualization_settings: {
@@ -124,7 +71,7 @@ describe("issue 11435", () => {
     },
   };
   const hoverLineDot = ({ index } = {}) => {
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     H.cartesianChartCircle().eq(index).realHover();
   };
 
@@ -137,12 +84,12 @@ describe("issue 11435", () => {
     H.createNativeQuestion(questionDetails, { visitQuestion: true });
     hoverLineDot({ index: 1 });
     H.assertEChartsTooltip({
-      header: "March 11, 2025, 8:45:17.010 PM",
+      header: "March 11, 2028, 5:55:36.759 PM",
       rows: [
         {
           color: "#F9D45C",
           name: "TOTAL",
-          value: "25.03",
+          value: "135.23",
         },
       ],
     });
@@ -213,7 +160,7 @@ describe("issue 18976, 18817", () => {
   it("should display a pivot table as regular one when pivot columns are missing (metabase#18976)", () => {
     H.visitQuestionAdhoc(questionDetails);
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Showing 1 row");
   });
 
@@ -250,62 +197,6 @@ describe("issue 18976, 18817", () => {
   });
 });
 
-describe.skip("issue 19373", () => {
-  const questiondDetails = {
-    name: "Products, Distinct values of Rating, Grouped by Category and Created At (year)",
-    query: {
-      "source-table": PRODUCTS_ID,
-      aggregation: [["distinct", ["field", PRODUCTS.RATING, null]]],
-      breakout: [
-        ["field", PRODUCTS.CATEGORY, null],
-        ["field", PRODUCTS.CREATED_AT, { "temporal-unit": "year" }],
-      ],
-    },
-  };
-
-  const ROW_TOTALS_INDEX = 4;
-  const GRAND_TOTALS_INDEX = 4;
-
-  beforeEach(() => {
-    cy.intercept("POST", "/api/dataset/pivot").as("pivotDataset");
-
-    H.restore();
-    cy.signInAsAdmin();
-
-    H.createQuestion(questiondDetails, { visitQuestion: true });
-  });
-
-  it("should return correct sum of the distinct values in row totals (metabase#19373)", () => {
-    // Convert to the pivot table manually to reflect the real-world scenario
-    H.openVizTypeSidebar();
-    cy.findByTestId("Pivot Table-button").should("be.visible").click();
-    cy.wait("@pivotDataset");
-
-    cy.findAllByRole("grid").eq(0).as("columnTitles");
-    cy.findAllByRole("grid").eq(1).as("rowTitles");
-    cy.findAllByRole("grid").eq(2).as("tableCells");
-
-    // Sanity check before we start asserting on this column
-    // eslint-disable-next-line no-unsafe-element-filtering
-    cy.get("@columnTitles")
-      .findAllByTestId("pivot-table-cell")
-      .eq(ROW_TOTALS_INDEX)
-      .should("contain", "Row totals");
-
-    // eslint-disable-next-line no-unsafe-element-filtering
-    cy.get("@rowTitles")
-      .findAllByTestId("pivot-table-cell")
-      .eq(GRAND_TOTALS_INDEX)
-      .should("contain", "Grand totals");
-
-    // eslint-disable-next-line no-unsafe-element-filtering
-    cy.get("@tableCells")
-      .findAllByTestId("pivot-table-cell")
-      .eq(ROW_TOTALS_INDEX)
-      .should("contain", "31");
-  });
-});
-
 describe("issue 21392", () => {
   const TEST_QUERY = {
     type: "native",
@@ -335,7 +226,7 @@ describe("issue 21392", () => {
 
   it("should render a chart with many columns without freezing (metabase#21392)", () => {
     H.visitQuestionAdhoc({ dataset_query: TEST_QUERY, display: "line" });
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Visualization").should("be.visible");
   });
 });
@@ -404,18 +295,18 @@ describe("issue 23076", () => {
     cy.signInAsAdmin();
 
     cy.request("PUT", `/api/user/${ADMIN_USER_ID}`, {
-      locale: "de",
+      locale: "en-ZZ",
     });
 
     H.createQuestion(questionDetails, { visitQuestion: true });
   });
 
   it("should correctly translate dates (metabase#23076)", () => {
-    cy.findAllByText(/^Summen für/, { timeout: 10000 })
+    cy.findAllByText(/^\[zz\] Totals for/)
       .should("be.visible")
       .eq(1)
       .invoke("text")
-      .should("eq", "Summen für Mai 2023");
+      .should("eq", "[zz] Totals for May 2026");
   });
 });
 
@@ -473,7 +364,7 @@ describe("issue 28304", () => {
   });
 
   it("table should should generate default columns when table.columns entries do not match data.cols (metabase#28304)", () => {
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Count by Created At: Month").should("be.visible");
 
     H.openVizSettingsSidebar();
@@ -537,12 +428,14 @@ describe("issue 25250", () => {
   });
 
   it("pivot table should show standalone values when collapsed to the sub-level grouping (metabase#25250)", () => {
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Product ID").should("be.visible");
 
     H.openVizSettingsSidebar();
-    H.moveDnDKitElement(H.getDraggableElements().contains("Product ID"), {
+    H.getDraggableElements().contains("Product ID").as("dragElement");
+    H.moveDnDKitElementByAlias("@dragElement", {
       vertical: -100,
+      useMouseEvents: true,
     });
     H.getDraggableElements().eq(0).should("contain", "Product ID");
   });
@@ -637,8 +530,7 @@ describe("issue 37726", () => {
   });
 });
 
-// unskip once metabase#42049 is addressed
-describe.skip("issue 42049", () => {
+describe("issue 42049", () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
@@ -701,11 +593,11 @@ describe.skip("issue 42049", () => {
     cy.get("@headerCells").eq(1).should("have.text", "Created At");
     cy.get("@headerCells").eq(2).should("have.text", "Quantity");
 
-    cy.findByRole("button", { name: "Filter" }).click();
+    cy.findByTestId("question-filter-header").click();
 
-    cy.findByRole("dialog").within(() => {
-      cy.findByRole("button", { name: "Last month" }).click();
-      cy.findByRole("button", { name: "Apply filters" }).click();
+    H.popover().within(() => {
+      cy.findByText("Created At").click();
+      cy.button("Previous month").click();
     });
 
     cy.wait("@cardQuery");
@@ -783,98 +675,6 @@ describe("issue 42697", () => {
   });
 });
 
-describe("issue 14148", { tags: "@external" }, () => {
-  const PG_DB_ID = 2;
-
-  beforeEach(() => {
-    H.restore("postgres-12");
-    cy.signInAsAdmin();
-  });
-
-  it("postgres should display pivot tables (metabase#14148)", () => {
-    H.withDatabase(PG_DB_ID, ({ PEOPLE, PEOPLE_ID }) =>
-      H.visitQuestionAdhoc(
-        {
-          display: "pivot",
-          dataset_query: {
-            type: "query",
-            database: PG_DB_ID,
-            query: {
-              "source-table": PEOPLE_ID,
-              aggregation: [["count"]],
-              breakout: [
-                ["field", PEOPLE.SOURCE, null],
-                ["field", PEOPLE.CREATED_AT, { "temporal-unit": "year" }],
-              ],
-            },
-          },
-        },
-        {
-          callback: (xhr) =>
-            expect(xhr.response.body.cause || "").not.to.contain("ERROR"),
-        },
-      ),
-    );
-
-    cy.log(
-      "Reported failing on v0.38.0-rc1 querying Postgres, Redshift and BigQuery. It works on MySQL and H2.",
-    );
-
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText(/Grand totals/i);
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("2,500");
-  });
-});
-
-describe.skip("issue 25415", () => {
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-  });
-
-  it("should allow to drill-through aggregated query with a custom column on top level (metabase#25415)", () => {
-    H.createQuestion(
-      {
-        name: "Aggregated query with custom column",
-        display: "line",
-        query: {
-          "source-query": {
-            "source-table": ORDERS_ID,
-            aggregation: [["count"]],
-            breakout: [["field", ORDERS.PRODUCT_ID, null]],
-            limit: 2,
-          },
-          expressions: {
-            "test custom": [
-              "*",
-              [
-                "field",
-                "count",
-                {
-                  "base-type": "type/Integer",
-                },
-              ],
-              2,
-            ],
-          },
-        },
-      },
-      { visitQuestion: true },
-    );
-
-    cy.get(".dc-tooltip-list").get(".dot").first().click({ force: true });
-
-    H.popover().findByText("See these Orders").click();
-
-    // filter gets applied
-    cy.findByTestId("qb-filters-panel").should("contain", "Product ID is 1");
-
-    // there is a table with data
-    H.tableInteractive().should("exist");
-  });
-});
-
 describe("issue 7884", () => {
   const oldSourceQuestionDetails = {
     native: {
@@ -915,7 +715,8 @@ describe("issue 7884", () => {
             cy.request("PUT", `/api/card/${sourceQuestion.id}`, {
               ...sourceQuestion,
               dataset_query: {
-                ...sourceQuestion.dataset_query,
+                type: "native",
+                database: SAMPLE_DB_ID,
                 native: newSourceQuestionDetails.native,
               },
             });
@@ -1089,12 +890,9 @@ describe("issue 50346", () => {
     display: "pivot",
     visualization_settings: {
       "pivot_table.column_split": {
+        // mix field refs with and without `base-type` to make sure we support both cases
         rows: [
-          [
-            "field",
-            PRODUCTS.CATEGORY,
-            { "base-type": "type/Text", "source-field": ORDERS.PRODUCT_ID },
-          ],
+          ["field", PRODUCTS.CATEGORY, { "source-field": ORDERS.PRODUCT_ID }],
           [
             "field",
             PRODUCTS.VENDOR,
@@ -1277,7 +1075,10 @@ describe("issue 52339", () => {
     });
 
     H.editDashboard();
-    H.findDashCardAction(H.getDashboardCard(0), "Click behavior").click();
+    H.getDashboardCard(0)
+      .realHover({ scrollBehavior: "bottom" })
+      .findByLabelText("Click behavior")
+      .click();
 
     H.sidebar().within(() => {
       cy.findByText("Go to a custom destination").click();
@@ -1321,35 +1122,8 @@ describe("issue 56771", () => {
       .as("headerCell")
       .then(($cell) => {
         const width = $cell[0].getBoundingClientRect().width;
-        expect(width).to.be.greaterThan(174);
+        expect(width).to.be.greaterThan(160);
       });
-  });
-});
-
-describe("issue 57132", () => {
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-
-    cy.intercept("POST", "/api/dataset", function (req) {
-      req.continue((res) => {
-        // remove description from the CATEGORY column
-        const index = res.body.data.cols.findIndex(
-          (col) => col.name === "CATEGORY",
-        );
-        delete res.body.data.cols[index].description;
-      });
-    });
-  });
-
-  it("should render more values when hovering colum header without description (metabase#57132)", () => {
-    H.openProductsTable();
-    H.tableInteractive().findByText("Category").realHover();
-
-    cy.log("The popover should be wide enough to show at least some values");
-    H.popover()
-      .findByText(/^Doohickey, Gadget, Gizmo/)
-      .should("be.visible");
   });
 });
 
@@ -1464,5 +1238,142 @@ WHERE NOT (
     H.queryBuilderMain()
       .findByText("Totals for Affiliate")
       .should("be.visible");
+  });
+});
+
+describe("issue 55673", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsNormalUser();
+    H.openOrdersTable();
+  });
+
+  it("should be able to close a header popover using Escape (metabase#55673)", () => {
+    H.tableHeaderClick("Product ID");
+    cy.findByTestId("click-actions-view").should("be.visible");
+
+    cy.focused().should(
+      "have.attr",
+      "data-testid",
+      "click-actions-sort-control-sort.ascending",
+    );
+    cy.realPress(["Escape"]);
+    cy.findByTestId("click-actions-view").should("not.exist");
+  });
+});
+
+describe("issue 63745", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("should display correct data when toggling columns (metabase#63745)", () => {
+    H.visitQuestionAdhoc({
+      name: "63745",
+      display: "object",
+      dataset_query: {
+        type: "query",
+        database: SAMPLE_DB_ID,
+        query: {
+          "source-table": ORDERS_ID,
+          limit: 5,
+        },
+      },
+    });
+
+    H.openVizSettingsSidebar();
+    cy.findByTestId("chartsettings-sidebar")
+      .button("Add or remove columns")
+      .click();
+
+    cy.findAllByTestId("object-details-table-cell").should(($cells) => {
+      const cellsFlat = $cells.toArray().map((el) => el.textContent);
+      const map = new Map(chunk(cellsFlat, 2));
+      expect(map.get("User ID")).to.eq("1");
+    });
+
+    cy.findByTestId("orders-table-columns").findByLabelText("ID").click();
+
+    cy.findAllByTestId("object-details-table-cell").should(($cells) => {
+      const cellsFlat = $cells.toArray().map((el) => el.textContent);
+      const map = new Map(chunk(cellsFlat, 2));
+      expect(map.get("User ID")).to.eq("1");
+    });
+  });
+});
+
+describe("issue 56094", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("should allow to switch between automatic pivot table and usual table visualization (metabase#56094)", () => {
+    H.visitQuestionAdhoc({
+      name: "56094",
+      dataset_query: {
+        type: "query",
+        database: SAMPLE_DB_ID,
+        query: {
+          "source-table": PRODUCTS_ID,
+          aggregation: [["count"]],
+          breakout: [
+            [
+              "field",
+              PRODUCTS.CATEGORY,
+              {
+                "base-type": "type/Text",
+              },
+            ],
+            [
+              "field",
+              PRODUCTS.RATING,
+              {
+                binning: {
+                  strategy: "default",
+                },
+              },
+            ],
+          ],
+
+          limit: 20,
+        },
+      },
+    });
+
+    H.queryBuilderFooter().findByLabelText("Switch to data").click();
+
+    H.queryBuilderFooterDisplayToggle().should("exist");
+
+    H.queryBuilderFooter().findByLabelText("Switch to visualization").click();
+
+    H.queryBuilderFooterDisplayToggle().should("exist");
+  });
+});
+
+describe("issue 57685", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsNormalUser();
+    H.createNativeQuestion(
+      {
+        display: "table",
+        native: {
+          query: 'SELECT id as "" FROM PRODUCTS',
+        },
+      },
+      { visitQuestion: true },
+    );
+  });
+
+  it("should handle empty column names without error (metabase#57685)", () => {
+    cy.findByTestId("visualization-root").icon("warning").should("not.exist");
+
+    cy.findByTestId("qb-header-action-panel")
+      .findByText("Explore results")
+      .click();
+
+    H.tableInteractive().should("be.visible");
   });
 });

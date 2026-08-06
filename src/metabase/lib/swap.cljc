@@ -1,14 +1,17 @@
 (ns metabase.lib.swap
+  #?(:clj (:refer-clojure :exclude [for get-in]))
   (:require
+   #?(:clj [metabase.util.performance :refer [for get-in]])
    [metabase.lib.options :as lib.options]
+   [metabase.lib.remove-replace :as lib.remove-replace]
    [metabase.lib.util :as lib.util]
    [metabase.util.log :as log]))
 
-(defn- swap-failure-no-match [stage target-clause]
-  (log/warn "No matching clause in swap-clauses" target-clause stage))
+(defn- swap-failure-no-match [_stage _target-clause]
+  (log/warn "No matching clause in swap-clauses"))
 
-(defn- swap-failure-ambiguous [target-clause matches]
-  (log/warn "Ambiguous match for clause in swap-clauses" target-clause matches))
+(defn- swap-failure-ambiguous [_target-clause matches]
+  (log/warnf "Ambiguous match for clause in swap-clauses (%d matches)" (count matches)))
 
 (defn- uuid-match [stage target-clause]
   (let [target-uuid (lib.options/uuid target-clause)
@@ -40,5 +43,6 @@
         source-path (uuid-match stage source-clause)
         target-path (uuid-match stage target-clause)]
     (if (and source-path target-path)
-      (lib.util/update-query-stage query stage-number do-swap source-path target-path source-clause target-clause)
+      (let [swapped (lib.util/update-query-stage query stage-number do-swap source-path target-path source-clause target-clause)]
+        (lib.remove-replace/update-stale-references swapped stage-number query))
       query)))

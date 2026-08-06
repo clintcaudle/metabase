@@ -1,34 +1,34 @@
+import cx from "classnames";
 import { useEffect, useMemo, useState } from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
-import styles from "metabase/css/core/animation.module.css";
-import { useSelector } from "metabase/lib/redux";
+import { MetabotLogo } from "metabase/common/components/MetabotLogo";
+import animationStyles from "metabase/css/core/animation.module.css";
+import { useSelector } from "metabase/redux";
 import { getUser } from "metabase/selectors/user";
-import { Tooltip } from "metabase/ui";
+import { useSetting } from "metabase/settings";
+import { Flex, Tooltip } from "metabase/ui";
 
-import { getHasMetabotLogo } from "../../selectors";
+import S from "./HomeGreeting.module.css";
 
-import {
-  GreetingLogo,
-  GreetingLogoContainer,
-  GreetingMessage,
-  GreetingRoot,
-} from "./HomeGreeting.styled";
-
-export const HomeGreeting = (): JSX.Element => {
+export const HomeGreeting = (): JSX.Element | null => {
   const user = useSelector(getUser);
-  const showLogo = useSelector(getHasMetabotLogo);
+  const showGreeting = useSetting("show-metabot");
   const name = user?.first_name;
   const message = useMemo(() => getMessage(name), [name]);
 
+  if (!showGreeting) {
+    return null;
+  }
+
   return (
-    <GreetingRoot>
-      {showLogo && <MetabotGreeting />}
-      <GreetingMessage data-testid="greeting-message" showLogo={showLogo}>
+    <Flex align="center">
+      <MetabotGreeting />
+      <span data-testid="greeting-message" className={S.greetingMessage}>
         {message}
-      </GreetingMessage>
-    </GreetingRoot>
+      </span>
+    </Flex>
   );
 };
 
@@ -45,37 +45,23 @@ const getMessage = (name: string | null | undefined): string => {
   return _.sample(options) ?? "";
 };
 
-const MetabotGreeting = () => {
+export const MetabotGreeting = () => {
   const [buffer, setBuffer] = useState<string[]>([]);
   const [isCooling, setIsCooling] = useState(false);
   const [isCool, setIsCool] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      setBuffer((prevBuffer) => {
-        const newBuffer = [...prevBuffer, event.key];
-        if (newBuffer.length > 10) {
-          newBuffer.shift();
-        }
-        return newBuffer;
-      });
+      setBuffer((prevBuffer) => [...prevBuffer, event.key].slice(-10));
     };
-
     window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   useEffect(() => {
     if (isCoolEnough(buffer)) {
-      setTimeout(() => {
-        setIsCooling(true);
-      }, 1);
-      setTimeout(() => {
-        setIsCool(true);
-      }, 300);
+      setTimeout(() => setIsCooling(true), 1);
+      setTimeout(() => setIsCool(true), 300);
     }
   }, [buffer]);
 
@@ -84,18 +70,24 @@ const MetabotGreeting = () => {
       label={t`Don't tell anyone, but you're my favorite.`}
       position="bottom"
     >
-      <GreetingLogoContainer>
-        <GreetingLogo
-          isCool={isCool}
-          className={`${styles.SpinOut} ${isCooling ? styles.SpinOutActive : ""}`}
+      <div className={S.greetingLogoContainer}>
+        <MetabotLogo
+          className={cx(S.greetingLogo, animationStyles.SpinOut, {
+            [S.isCool]: isCool,
+            [S.isNotCool]: !isCool,
+            [animationStyles.SpinOutActive]: isCooling,
+          })}
           variant="cool"
         />
-        <GreetingLogo
-          isCool={!isCool}
-          className={`${styles.SpinOut} ${isCooling ? styles.SpinOutActive : ""}`}
+        <MetabotLogo
+          className={cx(S.greetingLogo, animationStyles.SpinOut, {
+            [S.isCool]: !isCool,
+            [S.isNotCool]: isCool,
+            [animationStyles.SpinOutActive]: isCooling,
+          })}
           variant="happy"
         />
-      </GreetingLogoContainer>
+      </div>
     </Tooltip>
   );
 };

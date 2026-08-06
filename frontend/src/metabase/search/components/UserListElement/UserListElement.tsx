@@ -1,7 +1,7 @@
-import { Text } from "metabase/ui";
+import { Button, Text } from "metabase/ui";
 import type { UserListResult } from "metabase-types/api";
 
-import { UserElement } from "./UserListElement.styled";
+import Styles from "./UserListElement.module.css";
 
 export type UserListElementProps = {
   value: UserListResult;
@@ -14,17 +14,21 @@ export const UserListElement = ({
   isSelected,
   onClick,
 }: UserListElementProps) => (
-  <UserElement
+  <Button
     data-testid="user-list-element"
     onClick={() => onClick(value)}
     data-is-selected={isSelected}
     px="sm"
     py="xs"
     variant="subtle"
-    bg={isSelected ? "brand" : undefined}
+    bg={isSelected ? "core-brand" : undefined}
+    justify="start"
+    classNames={{
+      root: Styles.Root,
+    }}
   >
-    <Text fw={700} color={isSelected ? "brand" : undefined} truncate>
+    <Text fw={700} color={isSelected ? "core-brand" : undefined} truncate>
       {value.common_name}
     </Text>
-  </UserElement>
+  </Button>
 );

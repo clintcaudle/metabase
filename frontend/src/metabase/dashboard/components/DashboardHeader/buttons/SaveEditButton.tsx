@@ -1,21 +1,25 @@
-import cx from "classnames";
 import { msgid, ngettext, t } from "ttag";
 
-import ActionButton from "metabase/components/ActionButton";
-import ButtonsS from "metabase/css/components/buttons.module.css";
-import {
-  setEditingDashboard,
-  updateDashboardAndCards,
-} from "metabase/dashboard/actions";
+import { ActionButton } from "metabase/common/components/ActionButton";
+import { useDashboardContext } from "metabase/dashboard/context/context";
 import { getMissingRequiredParameters } from "metabase/dashboard/selectors";
-import { useDispatch, useSelector } from "metabase/lib/redux";
 import { useRegisterShortcut } from "metabase/palette/hooks/useRegisterShortcut";
+import { useDispatch, useSelector } from "metabase/redux";
 import { dismissAllUndo } from "metabase/redux/undo";
+import { useMaybeLocation } from "metabase/router";
 import { Tooltip } from "metabase/ui";
 import type { UiParameter } from "metabase-lib/v1/parameters/types";
 
-export const SaveEditButton = (props: { onDoneEditing: () => void }) => {
+export const SaveEditButton = () => {
   const dispatch = useDispatch();
+  // The SDK renders the dashboard header outside the app router, and has no URL
+  // hash to strip, so leaving edit mode there simply skips the navigation.
+  const location = useMaybeLocation() ?? undefined;
+  const {
+    setEditingDashboard,
+    updateDashboardAndCards,
+    onRefreshPeriodChange,
+  } = useDashboardContext();
 
   const missingRequiredParameters = useSelector(getMissingRequiredParameters);
 
@@ -25,15 +29,15 @@ export const SaveEditButton = (props: { onDoneEditing: () => void }) => {
   const isSaveDisabled = missingRequiredParameters.length > 0;
 
   const handleDoneEditing = () => {
-    props.onDoneEditing();
-    dispatch(setEditingDashboard(null));
+    onRefreshPeriodChange(null);
+    setEditingDashboard(null, location);
   };
 
   const onSave = async () => {
     // optimistically dismissing all the undos before the saving has finished
     // clicking on them wouldn't do anything at this moment anyway
     dispatch(dismissAllUndo());
-    await dispatch(updateDashboardAndCards());
+    await updateDashboardAndCards(location);
 
     handleDoneEditing();
   };
@@ -50,16 +54,14 @@ export const SaveEditButton = (props: { onDoneEditing: () => void }) => {
       <span>
         <ActionButton
           actionFn={onSave}
-          className={cx(
-            ButtonsS.Button,
-            ButtonsS.ButtonPrimary,
-            ButtonsS.ButtonSmall,
-          )}
+          variant="filled"
+          size="sm"
           normalText={t`Save`}
           activeText={t`Saving…`}
           failedText={t`Save failed`}
           successText={t`Saved`}
           disabled={isSaveDisabled}
+          data-testid="save-edit-button"
         />
       </span>
     </Tooltip>

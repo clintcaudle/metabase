@@ -1,25 +1,33 @@
 import { useMemo } from "react";
-import type { Params } from "react-router/lib/Router";
+import { t } from "ttag";
 
 import {
   skipToken,
   useGetUserQuery,
+  useListPermissionsGroupsQuery,
   useUpdateUserMutation,
 } from "metabase/api";
-import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
+import { UserForm } from "metabase/common/components/UserForm";
 import { Modal } from "metabase/ui";
 import type { User } from "metabase-types/api";
 
-import { UserForm } from "../../forms/UserForm";
-
 interface EditUserModalProps {
   onClose: () => void;
-  params: Params;
+  params: { userId?: string };
+  external?: boolean;
 }
 
-export const EditUserModal = ({ onClose, params }: EditUserModalProps) => {
+export const EditUserModal = ({
+  onClose,
+  params,
+  external = false,
+}: EditUserModalProps) => {
   const userId = params.userId ? parseInt(params.userId) : null;
   const { data: user, isLoading, error } = useGetUserQuery(userId ?? skipToken);
+  const { data: groups } = useListPermissionsGroupsQuery({
+    tenancy: external ? "external" : "internal",
+  });
   const [updateUser] = useUpdateUserMutation();
 
   const initialValues = useMemo(
@@ -27,10 +35,15 @@ export const EditUserModal = ({ onClose, params }: EditUserModalProps) => {
       first_name: user?.first_name,
       last_name: user?.last_name,
       email: user?.email,
-      user_group_memberships: user?.user_group_memberships || [],
+
       login_attributes: user?.login_attributes || {},
+      user_group_memberships: user?.user_group_memberships || [],
+
+      ...(external
+        ? { tenant_id: user?.tenant_id }
+        : { user_group_memberships: user?.user_group_memberships || [] }),
     }),
-    [user],
+    [user, external],
   );
 
   const handleSubmit = async (newValues: Partial<User>) => {
@@ -47,12 +60,16 @@ export const EditUserModal = ({ onClose, params }: EditUserModalProps) => {
   };
 
   return (
-    <Modal opened title="Edit user" padding="xl" onClose={onClose}>
+    <Modal opened title={t`Edit user`} padding="xl" onClose={onClose}>
       <LoadingAndErrorWrapper loading={isLoading} error={error}>
         <UserForm
           onCancel={onClose}
           initialValues={initialValues}
           onSubmit={handleSubmit}
+          external={external}
+          groups={groups}
+          userId={userId}
+          edit
         />
       </LoadingAndErrorWrapper>
     </Modal>

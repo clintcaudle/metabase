@@ -20,7 +20,7 @@
 (use-fixtures :once (fixtures/initialize :test-users))
 
 (deftest has-user-setup-ignores-internal-user-test
-  (mt/with-empty-h2-app-db
+  (mt/with-empty-h2-app-db!
     (is (t2/exists? :model/User :id config/internal-mb-user-id)
         "Sense check the internal user exists")
     (testing "`has-user-setup` should return false for an empty instance with only an internal user"
@@ -58,6 +58,25 @@
       (is (true?
            (setup/has-user-setup)))
       (is (zero? (call-count))))))
+
+(deftest clear-token-test
+  (testing "clear-token! removes the setup token so an unusable value isn't left in (public) Settings (UXW-4359)"
+    (mt/with-temp-empty-app-db [_conn :h2]
+      (mdb/setup-db! :create-sample-content? false)
+      (let [token (setup/create-token!)]
+        (testing "a token exists and validates before it is cleared"
+          (is (string? token))
+          (is (= token (setup/setup-token)))
+          (is (true? (setup/token-match? token))))
+        (testing "after clearing, the token is gone and no longer validates"
+          (setup/clear-token!)
+          (is (nil? (setup/setup-token)))
+          (is (false? (setup/token-match? token))))
+        (testing "create-token! mints a fresh token after clearing"
+          (let [new-token (setup/create-token!)]
+            (is (string? new-token))
+            (is (not= token new-token))
+            (is (= new-token (setup/setup-token)))))))))
 
 (deftest has-example-dashboard-id-setting-test
   (mt/with-temp-empty-app-db [_conn :h2]
@@ -116,7 +135,6 @@
             (is (= "unencrypted" (t2/select-one-fn :value "setting" :key "encryption-check")))
             (is (not (encryption/possibly-encrypted-string? (t2/select-one-fn :details "metabase_database"))))
             (is (= 1 (t2/count :model/QueryCache)))
-
             (testing "Adding encryption encrypts database on restart"
               (encryption-test/with-secret-key "key1"
                 (reset! (:status mdb.connection/*application-db*) ::setup-finished)

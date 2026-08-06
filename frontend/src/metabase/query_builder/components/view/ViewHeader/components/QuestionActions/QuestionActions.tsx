@@ -1,20 +1,22 @@
 import type { ChangeEvent } from "react";
-import { useRef, useState } from "react";
-import { t } from "ttag";
+import { useMemo, useRef, useState } from "react";
+import { c, t } from "ttag";
 
-import { ToolbarButton } from "metabase/components/ToolbarButton";
-import { UploadInput } from "metabase/components/upload";
-import BookmarkToggle from "metabase/core/components/BookmarkToggle";
-import { color } from "metabase/lib/colors";
-import { useDispatch } from "metabase/lib/redux";
+import { skipToken, useListCardsQuery } from "metabase/api";
+import { BookmarkToggle } from "metabase/common/components/BookmarkToggle";
+import { ConfirmModal } from "metabase/common/components/ConfirmModal";
+import { ToolbarButton } from "metabase/common/components/ToolbarButton";
+import { UploadInput } from "metabase/common/components/upload";
 import { useRegisterShortcut } from "metabase/palette/hooks/useRegisterShortcut";
+import { runQuestionQuery } from "metabase/query_builder/actions";
 import { QuestionMoreActionsMenu } from "metabase/query_builder/components/view/ViewHeader/components/QuestionActions/QuestionMoreActionsMenu";
-import type { QueryModalType } from "metabase/query_builder/constants";
+import type { QueryModalType } from "metabase/querying/constants";
+import { useDispatch } from "metabase/redux";
+import type { DatasetEditorTab, QueryBuilderMode } from "metabase/redux/store";
+import { UploadMode } from "metabase/redux/store/upload";
 import { uploadFile } from "metabase/redux/uploads";
 import { Box, Divider, Icon, Menu } from "metabase/ui";
 import type Question from "metabase-lib/v1/Question";
-import type { DatasetEditorTab, QueryBuilderMode } from "metabase-types/store";
-import { UploadMode } from "metabase-types/store/upload";
 
 import ViewTitleHeaderS from "../../ViewTitleHeader.module.css";
 
@@ -62,22 +64,48 @@ export const QuestionActions = ({
   );
 
   const infoButtonColor = isShowingQuestionInfoSidebar
-    ? color("brand")
+    ? "core-brand"
     : undefined;
 
   const hasCollectionPermissions = question.canWrite();
-  const canAppend =
-    hasCollectionPermissions && !!question._card.based_on_upload;
+  const uploadTableId = question._card.based_on_upload;
+  const canAppend = hasCollectionPermissions && !!uploadTableId;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadWarningModalOpen, setIsUploadWarningModalOpen] =
+    useState(false);
+
+  const { data: cardsBasedOnUploadTable, isLoading: isLoadingCards } =
+    useListCardsQuery(
+      typeof uploadTableId === "number"
+        ? { f: "table", model_id: uploadTableId }
+        : skipToken,
+    );
+
+  const otherModelNames = useMemo(
+    () =>
+      (cardsBasedOnUploadTable ?? [])
+        .filter((card) => card.type === "model" && card.id !== question.id())
+        .map((card) => card.name)
+        .join(", "),
+    [cardsBasedOnUploadTable, question],
+  );
 
   const handleUploadClick = (
     newUploadMode: UploadMode.append | UploadMode.replace,
   ) => {
-    if (fileInputRef.current) {
-      setUploadMode(newUploadMode);
-      fileInputRef.current.click();
+    setUploadMode(newUploadMode);
+
+    if (otherModelNames.length > 0) {
+      setIsUploadWarningModalOpen(true);
+    } else {
+      fileInputRef.current?.click();
     }
+  };
+
+  const handleUploadWarningConfirm = () => {
+    setIsUploadWarningModalOpen(false);
+    fileInputRef.current?.click();
   };
 
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
@@ -87,7 +115,7 @@ export const QuestionActions = ({
         uploadFile({
           file,
           tableId: question._card.based_on_upload,
-          reloadQuestionData: true,
+          onUploadComplete: () => dispatch(runQuestionQuery()),
           uploadMode,
         }),
       );
@@ -105,7 +133,6 @@ export const QuestionActions = ({
       {!question.isArchived() && (
         <Box className={ViewTitleHeaderS.ViewHeaderIconButtonContainer}>
           <BookmarkToggle
-            className={ViewTitleHeaderS.ViewHeaderIconButton}
             onCreateBookmark={onToggleBookmark}
             onDeleteBookmark={onToggleBookmark}
             isBookmarked={isBookmarked}
@@ -145,6 +172,7 @@ export const QuestionActions = ({
               <Menu.Dropdown>
                 <Menu.Item
                   leftSection={<Icon name="add" />}
+                  disabled={isLoadingCards}
                   onClick={() => handleUploadClick(UploadMode.append)}
                 >
                   {t`Append data to this model`}
@@ -152,6 +180,7 @@ export const QuestionActions = ({
 
                 <Menu.Item
                   leftSection={<Icon name="refresh" />}
+                  disabled={isLoadingCards}
                   onClick={() => handleUploadClick(UploadMode.replace)}
                 >
                   {t`Replace all data in this model`}
@@ -159,6 +188,17 @@ export const QuestionActions = ({
               </Menu.Dropdown>
             </Menu>
           </Box>
+          <ConfirmModal
+            opened={isUploadWarningModalOpen}
+            title={t`Upload data to this model?`}
+            message={c(
+              "{0} is a comma-separated list of model names sharing the same uploaded table",
+            )
+              .t`This model shares its underlying uploaded table with ${otherModelNames}. This CSV upload will also change the data for those models, along with any other questions or models based on them.`}
+            confirmButtonText={t`Upload anyway`}
+            onConfirm={handleUploadWarningConfirm}
+            onClose={() => setIsUploadWarningModalOpen(false)}
+          />
         </>
       )}
       {!question.isArchived() && (

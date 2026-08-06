@@ -1,14 +1,16 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
-import Button from "metabase/core/components/Button";
-import { useDispatch, useSelector } from "metabase/lib/redux";
-import type { Locale } from "metabase-types/store";
+import { CommunityLocalizationNotice } from "metabase/common/components/CommunityLocalizationNotice";
+import { useDispatch, useSelector } from "metabase/redux";
+import type { Locale } from "metabase/redux/store";
+import { useSetting } from "metabase/settings";
+import { Button, Stack } from "metabase/ui";
 
 import { useStep } from "../..//useStep";
 import { goToNextStep, updateLocale } from "../../actions";
-import { getAvailableLocales, getLocale } from "../../selectors";
+import { getLocale } from "../../selectors";
 import { getLocales } from "../../utils";
 import { ActiveStep } from "../ActiveStep";
 import { InactiveStep } from "../InactiveStep";
@@ -25,16 +27,23 @@ import {
 export const LanguageStep = ({ stepLabel }: NumberedStepProps): JSX.Element => {
   const { isStepActive, isStepCompleted } = useStep("language");
   const locale = useSelector(getLocale);
-  const localeData = useSelector(getAvailableLocales);
+  const localeData = useSetting("available-locales");
   const fieldId = useMemo(() => _.uniqueId(), []);
   const locales = useMemo(() => getLocales(localeData), [localeData]);
   const dispatch = useDispatch();
 
+  const [selectedLocale, setSelectedLocale] = useState<Locale | undefined>(
+    locale,
+  );
+
   const handleLocaleChange = (locale: Locale) => {
-    dispatch(updateLocale(locale));
+    setSelectedLocale(locale);
   };
 
   const handleStepSubmit = () => {
+    if (selectedLocale) {
+      dispatch(updateLocale(selectedLocale));
+    }
     dispatch(goToNextStep());
   };
 
@@ -51,22 +60,25 @@ export const LanguageStep = ({ stepLabel }: NumberedStepProps): JSX.Element => {
   return (
     <ActiveStep title={t`What's your preferred language?`} label={stepLabel}>
       <StepDescription>
-        {t`This language will be used throughout Metabase and will be the default for new users.`}
+        <Stack gap="md">
+          {t`This language will be used throughout Metabase and will be the default for new users.`}
+          <CommunityLocalizationNotice isAdminView />
+        </Stack>
       </StepDescription>
       <LocaleGroup role="radiogroup">
         {locales.map((item) => (
           <LocaleItem
             key={item.code}
             locale={item}
-            checked={item.code === locale?.code}
+            checked={item.code === selectedLocale?.code}
             fieldId={fieldId}
             onLocaleChange={handleLocaleChange}
           />
         ))}
       </LocaleGroup>
       <Button
-        primary={locale != null}
-        disabled={locale == null}
+        variant={selectedLocale != null ? "filled" : "default"}
+        disabled={selectedLocale == null}
         onClick={handleStepSubmit}
       >
         {t`Next`}

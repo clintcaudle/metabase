@@ -13,7 +13,6 @@
    [metabase.test.data.interface :as tx]
    [metabase.test.fixtures :as fixtures]
    [metabase.test.http-client :as client]
-   [metabase.util :as u]
    [metabase.warehouses.models.database :as database]
    [toucan2.core :as t2]))
 
@@ -46,7 +45,7 @@
       (testing "table ID must exist or we get a 404"
         (is (= {:status 404
                 :body   "Not found."}
-               (try (http/post (client/build-url (format "notify/db/%d" (:id (mt/db))) {})
+               (try (http/post (client/build-url (format "notify/db/%d" (mt/id)) {})
                                (merge {:accept       :json
                                        :content-type :json
                                        :form-params  {:table_id Integer/MAX_VALUE}}
@@ -56,7 +55,7 @@
       (testing "table name must exist or we get a 404"
         (is (= {:status 404
                 :body   "Not found."}
-               (try (http/post (client/build-url (format "notify/db/%d" (:id (mt/db))) {})
+               (try (http/post (client/build-url (format "notify/db/%d" (mt/id)) {})
                                (merge {:accept       :json
                                        :content-type :json
                                        :form-params  {:table_name "IncorrectToucanFact"}}
@@ -71,34 +70,34 @@
                        ([payload] (post-api payload 200))
                        ([payload expected-code]
                         (mt/with-temporary-setting-values [api-key "test-api-key"]
-                          (mt/client :post expected-code (format "notify/db/%d" (u/the-id (mt/db)))
+                          (mt/client :post expected-code (format "notify/db/%d" (mt/id))
                                      {:request-options api-headers}
                                      (merge {:synchronous? true}
                                             payload)))))]
       (testing "sync just table when table is provided"
         (let [long-sync-called? (promise), short-sync-called? (promise)]
-          (with-redefs [sync/sync-table!                                 (fn [_table] (deliver long-sync-called? true))
-                        metabase.sync.sync-metadata/sync-table-metadata! (fn [_table] (deliver short-sync-called? true))]
+          (mt/with-dynamic-fn-redefs [sync/sync-table!                                 (fn [_table] (deliver long-sync-called? true))
+                                      metabase.sync.sync-metadata/sync-table-metadata! (fn [_table] (deliver short-sync-called? true))]
             (post {:scan :full, :table_name table-name})
             (is @long-sync-called?)
             (is (not (realized? short-sync-called?))))))
       (testing "only a quick sync when quick parameter is provided"
         (let [long-sync-called? (promise), short-sync-called? (promise)]
-          (with-redefs [sync/sync-table!                                 (fn [_table] (deliver long-sync-called? true))
-                        metabase.sync.sync-metadata/sync-table-metadata! (fn [_table] (deliver short-sync-called? true))]
+          (mt/with-dynamic-fn-redefs [sync/sync-table!                                 (fn [_table] (deliver long-sync-called? true))
+                                      metabase.sync.sync-metadata/sync-table-metadata! (fn [_table] (deliver short-sync-called? true))]
             (post {:scan :schema, :table_name table-name})
             (is (not (realized? long-sync-called?)))
             (is @short-sync-called?))))
       (testing "full db sync by default"
         (let [full-sync? (promise)]
-          (with-redefs [sync/sync-database! (fn [_db] (deliver full-sync? true))]
+          (mt/with-dynamic-fn-redefs [sync/sync-database! (fn [_db] (deliver full-sync? true))]
             (post {})
             (is @full-sync?))))
       (testing "simple sync with params"
         (let [full-sync?   (promise)
               smaller-sync (promise)]
-          (with-redefs [sync/sync-database!                           (fn [_db] (deliver full-sync? true))
-                        metabase.sync.sync-metadata/sync-db-metadata! (fn [_db] (deliver smaller-sync true))]
+          (mt/with-dynamic-fn-redefs [sync/sync-database!                           (fn [_db] (deliver full-sync? true))
+                                      metabase.sync.sync-metadata/sync-db-metadata! (fn [_db] (deliver smaller-sync true))]
             (post {:scan :schema})
             (is (not (realized? full-sync?)))
             (is @smaller-sync))))

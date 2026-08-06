@@ -43,22 +43,22 @@
    {:keys [table-name field-name k]} :- KeypathComponents
    value]
   (boolean
-    ;; ignore legacy entries that try to set field_type since it's no longer part of Field
+   ;; ignore legacy entries that try to set field_type since it's no longer part of Field
    (when-not (= k :field_type)
-      ;; fetch the corresponding Table, then set the Table or Field property
+     ;; fetch the corresponding Table, then set the Table or Field property
      (if table-name
        (when-let [table-id (t2/select-one-pk :model/Table
-                                              ;; TODO: this needs to support schemas
+                                             ;; TODO: this needs to support schemas
                                              :db_id  (u/the-id database)
                                              :name   table-name
                                              :active true)]
          (if field-name
-           (pos? (t2/update! :model/Field {:name field-name, :table_id table-id} {k value}))
-           (pos? (t2/update! :model/Table table-id {k value}))))
-       (pos? (t2/update! :model/Database (u/the-id database) {k value}))))))
+           (t2/update! :model/Field {:name field-name, :table_id table-id} {k value})
+           (t2/update! :model/Table table-id {k value})))
+       (t2/update! :model/Database (u/the-id database) {k value})))))
 
 (mu/defn- sync-metabase-metadata-table!
-  "Databases may include a table named `_metabase_metadata` (case-insentive) which includes descriptions or other
+  "Databases may include a table named `_metabase_metadata` (case-insensitive) which includes descriptions or other
   metadata about the `Tables` and `Fields` it contains. This table is *not* synced normally, i.e. a Metabase `Table`
   is not created for it. Instead, *this* function is called, which reads the data it contains and updates the relevant
   Metabase objects.
@@ -93,17 +93,23 @@
    This table contains information about type information, descriptions, and other properties that
    should be set for Metabase objects like Tables and Fields."
   ([database :- i/DatabaseInstance]
-   (sync-metabase-metadata! database (fetch-metadata/db-metadata database)))
+   ;; Standalone entry point: no `sync-tables` step ran to capture the `_metabase_metadata` table(s),
+   ;; so scan the freshly fetched metadata here and hand the 2-arity the same `:metabase-metadata-tables`
+   ;; holder it gets during a full sync. (`:tables` may be a reduce-only reducible, so reduce, don't `seq`.)
+   (let [db-metadata (fetch-metadata/db-metadata database)
+         captured    (into [] (filter is-metabase-metadata-table?) (:tables db-metadata))]
+     (sync-metabase-metadata! database (assoc db-metadata :metabase-metadata-tables (volatile! captured)))))
 
-  ([database :- i/DatabaseInstance db-metadata]
+  ([database    :- i/DatabaseInstance
+    db-metadata :- i/DatabaseMetadata]
    (sync-util/with-error-handling (format "Error syncing _metabase_metadata table for %s"
                                           (sync-util/name-for-logging database))
      (let [driver (driver.u/database->driver database)]
        ;; `sync-metabase-metadata-table!` relies on `driver/table-rows-seq` being defined
        (when (get-method driver/table-rows-seq driver)
-         ;; If there's more than one metabase metadata table (in different schemas) we'll sync each one in turn.
-         ;; Hopefully this is never the case.
-         (doseq [table (:tables db-metadata)]
-           (when (is-metabase-metadata-table? table)
-             (sync-metabase-metadata-table! driver database table))))
+         ;; The `sync-tables` step captured any `_metabase_metadata` table(s) while streaming `:tables`,
+         ;; so we don't re-scan them here. If there's more than one (in different schemas) we sync each in
+         ;; turn.
+         (doseq [table @(:metabase-metadata-tables db-metadata)]
+           (sync-metabase-metadata-table! driver database table)))
        {}))))

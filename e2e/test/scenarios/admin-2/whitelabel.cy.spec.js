@@ -19,7 +19,7 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
   });
 
   it("smoke UI test", () => {
@@ -31,16 +31,6 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
       .filter(":contains(Appearance)")
       .should("have.text", "Appearance")
       .and("not.have.descendants", ".Icon-gem");
-
-    cy.log("By default shows the branding tab");
-    cy.findByRole("tab", { name: "Branding" }).should(
-      "have.attr",
-      "aria-selected",
-      "true",
-    );
-    cy.findByRole("tab", { name: "Conceal Metabase" })
-      .should("be.visible")
-      .and("have.attr", "aria-selected", "false");
 
     cy.log("Should show the upsell if the feature is missing");
     H.deleteToken();
@@ -55,10 +45,7 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
         "https://www.metabase.com/docs/latest/configuring-metabase/appearance",
       )
       .and("include", "utm_");
-    cy.findByRole("link", { name: "Try for free" })
-      .should("have.attr", "href")
-      .and("include", "https://www.metabase.com/upgrade")
-      .and("include", "utm_");
+    cy.findByRole("button", { name: "Try for free" });
 
     cy.log("Upsell icon should now be visible in the sidebar link");
     cy.findAllByTestId("settings-sidebar-link")
@@ -72,7 +59,7 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
 
     beforeEach(() => {
       cy.visit("/admin/settings/whitelabel/conceal-metabase");
-      cy.findByLabelText("Application Name")
+      cy.findByLabelText("Application name")
         .clear()
         .type(NEW_COMPANY_NAME)
         .blur();
@@ -89,8 +76,9 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
 
     it("should show the new name in the main app", () => {
       cy.visit("/");
-      cy.icon("gear").click();
-      H.popover().findByText(`About ${NEW_COMPANY_NAME}`).click();
+      H.getProfileLink().click();
+      H.popover().findByText("Help").click();
+      H.getHelpSubmenu().findByText(`About ${NEW_COMPANY_NAME}`).click();
       H.modal()
         .findByText(`Thanks for using ${NEW_COMPANY_NAME}!`)
         .should("be.visible");
@@ -175,7 +163,7 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
       describe("login page illustration", () => {
         it(
           "should only allow uploading a valid image files (PNG, JPG, SVG) and display on login page",
-          { tags: "@smoke" },
+          { tags: "@prerelease" },
           () => {
             /**
              * Unfortunately, we couldn't test the browser file selector with Cypress yet.
@@ -474,7 +462,7 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
 
           cy.log("test custom illustration");
 
-          cy.findByRole("navigation").findByText("Exit admin").click();
+          H.goToMainApp();
           H.appBar().findByText("New").click();
           H.popover().findByText("Dashboard").click();
           H.modal().findByTestId("collection-picker-button").click();
@@ -507,7 +495,7 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
           }).click();
           H.selectDropdown().findByText("No illustration").click();
 
-          cy.findByRole("navigation").findByText("Exit admin").click();
+          H.goToMainApp();
           H.appBar().findByText("New").click();
           H.popover().findByText("Dashboard").click();
           H.modal().findByTestId("collection-picker-button").click();
@@ -549,48 +537,56 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
   describe("metabot", () => {
     it("should toggle metabot visibility", () => {
       cy.visit("/");
-      cy.findAllByAltText("Metabot").should("have.length", 2);
+      cy.findAllByRole("img", { name: "Metabot" }).should("have.length", 2);
 
       cy.visit("/admin/settings/whitelabel/conceal-metabase");
       cy.findByRole("main")
-        .findByText("Show links and references to Metabase")
+        .findByText("Display welcome message on the homepage")
         .click();
 
       H.undoToast().findByText("Changes saved").should("be.visible");
 
       cy.visit("/");
-      cy.findByAltText("Metabot").should("not.exist");
+      cy.findByRole("link", { name: /home/ }).should("exist");
+      cy.findByRole("img", { name: "Metabot" }).should("not.exist");
     });
   });
 
   describe("font", () => {
-    const font = "Open Sans";
-
     beforeEach(() => {
       cy.log("Change Application Font");
       cy.signInAsAdmin();
     });
 
     it("should apply correct font", () => {
-      setApplicationFontTo(font);
+      setApplicationFontTo("Open Sans");
       cy.signInAsNormalUser();
       cy.visit("/");
-      cy.get("body").should("have.css", "font-family", `"${font}", sans-serif`);
+      cy.get("body").should(
+        "have.css",
+        "font-family",
+        '"Open Sans", Lato, sans-serif',
+      );
     });
 
     it("should be able to make multiple font changes (metabase#45486)", () => {
       cy.intercept("PUT", "/api/setting/application-font").as("saveFont");
-      const fonts = ["Lora", "Merriweather", "Montserrat", "Lato"];
+      const fontsWithExpectedFallback = [
+        ["Lora", "serif"],
+        ["Merriweather", "Lora, serif"],
+        ["Montserrat", "sans-serif"],
+        ["Lato", "Arial, sans-serif"],
+      ];
       cy.visit("/admin/settings/whitelabel/branding");
 
-      fonts.forEach((newFont) => {
+      fontsWithExpectedFallback.forEach(([newFont, fallback]) => {
         cy.findByLabelText("Font").click();
         H.selectDropdown().findByText(newFont).click();
         cy.wait("@saveFont");
         cy.get("body").should(
           "have.css",
           "font-family",
-          `${newFont}, sans-serif`,
+          `${newFont}, ${fallback}`,
         );
       });
     });
@@ -618,7 +614,8 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
       cy.signInAsNormalUser();
 
       cy.visit("/");
-      openSettingsMenu();
+      H.getProfileLink().click();
+      H.popover().findByText("Help").click();
       helpLink().should("not.exist");
 
       cy.log("Set custom Help link");
@@ -647,7 +644,8 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
 
       cy.signInAsNormalUser();
       cy.visit("/");
-      openSettingsMenu();
+      H.getProfileLink().click();
+      H.popover().findByText("Help").click();
       helpLink().should(
         "have.attr",
         "href",
@@ -666,7 +664,8 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
       cy.wait("@putHelpLink");
 
       cy.visit("/");
-      openSettingsMenu();
+      H.getProfileLink().click();
+      H.popover().findByText("Help").click();
 
       helpLink()
         .should("have.attr", "href")
@@ -674,7 +673,8 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
 
       cy.signInAsNormalUser();
       cy.visit("/");
-      openSettingsMenu();
+      H.getProfileLink().click();
+      H.popover().findByText("Help").click();
 
       helpLink()
         .should("have.attr", "href")
@@ -682,12 +682,12 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
     });
 
     it("should link to metabase help when the whitelabel feature is disabled (eg OSS)", () => {
-      H.setTokenFeatures("none");
+      H.deleteToken();
 
       cy.signInAsNormalUser();
       cy.visit("/");
-      openSettingsMenu();
-
+      H.getProfileLink().click();
+      H.popover().findByText("Help").click();
       helpLink()
         .should("have.attr", "href")
         .and("include", "https://www.metabase.com/help?");
@@ -729,53 +729,70 @@ describe("formatting > whitelabel", { tags: "@EE" }, () => {
       cy.intercept("GET", "/api/setting").as("getSettings");
       cy.signInAsAdmin();
       cy.visit("/admin/settings/general");
+      cy.wait("@getSettings");
     });
 
-    it("should not render the widget when users does not have a valid license", () => {
-      H.setTokenFeatures("none");
+    const urlInput = () =>
+      cy
+        .findByTestId("homepage-setting")
+        .findByLabelText("Landing page custom destination");
+
+    it("should not offer the Custom URL option when the user does not have a valid license", () => {
+      H.activateToken("starter");
       cy.reload();
-      cy.findByLabelText("Landing page custom destination").should("not.exist");
+      cy.wait("@getSettings");
+      // Anchor on a positive signal so the negative assertion can't pass while
+      // the page is still loading.
+      cy.findByTestId("homepage-setting")
+        .findByRole("radio", { name: "Default Metabase home" })
+        .should("be.visible");
+      cy.findByTestId("homepage-setting")
+        .findByRole("radio", { name: "Custom URL" })
+        .should("not.exist");
     });
 
-    it("should allow users to provide internal urls", () => {
-      cy.findByLabelText("Landing page custom destination")
+    it("should validate the URL and persist only same-origin relative paths", () => {
+      // Clicking "Custom URL" fires a PUT to /api/setting (custom-homepage =
+      // false) AND mounts the URL field. On fetch (microtask resolution) the
+      // mount's landing-page read + the PUT response can land while we're in
+      // the middle of typing; LandingPageUrlField's useEffect would then
+      // overwrite the typed value. Wait for the PUT to land first.
+      cy.intercept("PUT", "/api/setting").as("modeChangePut");
+      cy.findByTestId("homepage-setting")
+        .findByRole("radio", { name: "Custom URL" })
+        .click();
+      cy.wait("@modeChangePut");
+
+      urlInput()
         .click()
         .clear()
         .type("/test-1")
+        .should("have.value", "/test-1")
         .blur();
+      cy.wait("@putLandingPage");
       H.undoToast().findByText("Changes saved").should("be.visible");
 
-      cy.findByRole("navigation").findByText("Exit admin").click();
-      cy.url().should("include", "/test-1");
-    });
-
-    it("should not allow users to provide external urls", () => {
-      cy.findByLabelText("Landing page custom destination")
+      // External URLs are rejected and the previous value is preserved.
+      urlInput()
         .click()
         .clear()
-        .type("/test-2")
-        .blur();
-      H.undoToast().findByText("Changes saved").should("be.visible");
-
-      // set to valid value then test invalid value is not persisted
-      cy.findByLabelText("Landing page custom destination")
-        .click()
-        .clear()
+        .should("have.value", "")
         .type("https://google.com")
+        .should("have.value", "https://google.com")
         .blur();
       cy.findByTestId("admin-layout-content")
         .findByText("This field must be a relative URL.")
         .should("be.visible");
 
-      cy.findByRole("navigation").findByText("Exit admin").click();
-      cy.url().should("include", "/test-2");
+      H.goToMainApp();
+      cy.url().should("include", "/test-1");
     });
   });
 });
 
 function changeLoadingMessage(message) {
   cy.visit("/admin/settings/whitelabel");
-  cy.findByLabelText("Loading Message").click();
+  cy.findByLabelText("Loading message").click();
   H.selectDropdown().findByText(message).click();
   cy.wait("@putLoadingMessage");
 }
@@ -784,10 +801,8 @@ function setApplicationFontTo(font) {
   H.updateSetting("application-font", font);
 }
 
-const openSettingsMenu = () =>
-  H.appBar().findByRole("button", { name: "Settings" }).click();
-
-const helpLink = () => H.popover().findByRole("menuitem", { name: "Help" });
+const helpLink = () =>
+  H.getHelpSubmenu().findByRole("menuitem", { name: "Get help" });
 
 const getHelpLinkCustomDestinationInput = () =>
   cy.findByPlaceholderText("Enter a URL it should go to");

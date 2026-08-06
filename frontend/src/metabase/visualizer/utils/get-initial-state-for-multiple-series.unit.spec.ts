@@ -9,7 +9,6 @@ import {
 
 import { getInitialStateForMultipleSeries } from "./get-initial-state-for-multiple-series";
 
-// @ts-expect-error: incompatible prop types with registerVisualization
 registerVisualization(LineChart);
 
 describe("getInitialVisualizerStateForMultipleSeries", () => {
@@ -18,6 +17,7 @@ describe("getInitialVisualizerStateForMultipleSeries", () => {
       id: 1,
       name: "First Series",
       display: "line",
+      description: null,
       visualization_settings: {
         "graph.metrics": ["Revenue"],
         "graph.dimensions": ["Date"],
@@ -28,6 +28,7 @@ describe("getInitialVisualizerStateForMultipleSeries", () => {
       id: 2,
       name: "Second Series",
       display: "line",
+      description: null,
       visualization_settings: {
         "graph.metrics": ["Profit"],
         "graph.dimensions": ["Date"],
@@ -92,7 +93,11 @@ describe("getInitialVisualizerStateForMultipleSeries", () => {
     expect(initialState.settings).toMatchObject({
       "graph.metrics": ["COLUMN_2", "COLUMN_4"],
       "graph.dimensions": ["COLUMN_1", "COLUMN_3"],
-      "card.title": "First Series",
+    });
+
+    expect(initialState.preloadedDatasets).toEqual({
+      [firstCard.id]: rawSeries[0],
+      [secondCard.id]: rawSeries[1],
     });
   });
 });

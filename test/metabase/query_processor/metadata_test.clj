@@ -1,11 +1,11 @@
 (ns metabase.query-processor.metadata-test
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.query-processor.metadata-test]}}}}}}
   (:require
    [clojure.test :refer :all]
    [metabase.driver :as driver]
-   [metabase.lib.core :as lib]
    [metabase.query-processor.metadata :as qp.metadata]
-   [metabase.test :as mt]
-   [metabase.util :as u]))
+   [metabase.query-processor.util :as qp.util]
+   [metabase.test :as mt]))
 
 (deftest ^:parallel mbql-query-metadata-test
   (testing "Should be able to calculate metadata for an MBQL query without going in to driver land"
@@ -43,46 +43,36 @@
 
 (deftest ^:parallel native-query-metadata-test
   (testing "Should be able to get metadata without actually running the query (using the `:sql-jdbc` implementation) (#28195)"
-    (let [eid   (u/generate-nano-id)
-          query (-> (mt/native-query {:query "SELECT * FROM venues WHERE id = ?;", :params [1]})
-                    (assoc-in [:info :card-entity-id] eid))]
+    (let [query (mt/native-query {:query "SELECT * FROM venues WHERE id = ?;", :params [1]})]
       (is (=? [{:lib/type      :metadata/column
                 :name          "ID"
-                :ident         (lib/native-ident "ID" eid)
                 :database-type "BIGINT"
                 :base-type     :type/BigInteger}
                {:lib/type      :metadata/column
                 :name          "NAME"
-                :ident         (lib/native-ident "NAME" eid)
                 :database-type "CHARACTER VARYING"
                 :base-type     :type/Text}
                {:lib/type      :metadata/column
                 :name          "CATEGORY_ID"
-                :ident         (lib/native-ident "CATEGORY_ID" eid)
                 :database-type "INTEGER"
                 :base-type     :type/Integer}
                {:lib/type      :metadata/column
                 :name          "LATITUDE"
-                :ident         (lib/native-ident "LATITUDE" eid)
                 :database-type "DOUBLE PRECISION"
                 :base-type     :type/Float}
                {:lib/type      :metadata/column
                 :name          "LONGITUDE"
-                :ident         (lib/native-ident "LONGITUDE" eid)
                 :database-type "DOUBLE PRECISION"
                 :base-type     :type/Float}
                {:lib/type      :metadata/column
                 :name          "PRICE"
-                :ident         (lib/native-ident "PRICE" eid)
                 :database-type "INTEGER"
                 :base-type     :type/Integer}]
               (qp.metadata/result-metadata query))))))
 
 (deftest ^:parallel native-query-metadata-semantic-type-test
   (testing "Should still infer Semantic type based on column name"
-    (let [eid   (u/generate-nano-id)
-          query (-> (mt/native-query {:query "SELECT id, created_at FROM products LIMIT 5;"})
-                    (assoc-in [:info :card-entity-id] eid))]
+    (let [query (mt/native-query {:query "SELECT id, created_at FROM products LIMIT 5;"})]
       (is (=? [{:name          "ID"
                 :display-name  "ID"
                 :semantic-type :type/PK}
@@ -129,3 +119,25 @@
                 :base_type     :type/Integer
                 :database_type "INTEGER"}]
               ((get-method driver/query-result-metadata :default) :h2 query))))))
+
+(deftest ^:parallel combine-metadata-test
+  #_{:clj-kondo/ignore [:deprecated-var]}
+  (are [old-metadata new-metadata expected] (= expected (qp.util/combine-metadata new-metadata old-metadata))
+    ;; columns get the correct display name after columns with the same name are removed
+    [{:name "id",   :display_name "ID",            :lib/desired-column-alias "id"}
+     {:name "id_2", :display_name "Products → ID", :lib/desired-column-alias "Products__id"}
+     {:name "id_3", :display_name "Reviews → ID",  :lib/desired-column-alias "Reviews__id"}]
+    [{:name "id",   :display_name "ID",            :lib/desired-column-alias "id"}
+     {:name "id_2", :display_name "Reviews → ID",  :lib/desired-column-alias "Reviews__id"}]
+    [{:name "id",   :display_name "ID",            :lib/desired-column-alias "id"}
+     {:name "id_2", :display_name "Reviews → ID",  :lib/desired-column-alias "Reviews__id"}]
+
+    ;; columns get the correct display name after columns with the same name are added
+    [{:name "id",   :display_name "ID",            :lib/desired-column-alias "id"}
+     {:name "id_2", :display_name "Reviews → ID",  :lib/desired-column-alias "Reviews__id"}]
+    [{:name "id",   :display_name "ID",            :lib/desired-column-alias "id"}
+     {:name "id_2", :display_name "Products → ID", :lib/desired-column-alias "Products__id"}
+     {:name "id_3", :display_name "Reviews → ID",  :lib/desired-column-alias "Reviews__id"}]
+    [{:name "id",   :display_name "ID",            :lib/desired-column-alias "id"}
+     {:name "id_2", :display_name "Products → ID", :lib/desired-column-alias "Products__id"}
+     {:name "id_3", :display_name "Reviews → ID",  :lib/desired-column-alias "Reviews__id"}]))

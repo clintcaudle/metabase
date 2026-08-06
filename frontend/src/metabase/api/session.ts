@@ -1,14 +1,77 @@
-import MetabaseSettings from "metabase/lib/settings";
-import { loadSettings } from "metabase/redux/settings";
-import type {
-  EnterpriseSettings,
-  PasswordResetTokenStatus,
-} from "metabase-types/api";
+import type { LoginData } from "metabase/redux/auth";
+import type { MfaMethod, PasswordResetTokenStatus } from "metabase-types/api";
 
 import { Api } from "./api";
 
+export interface SessionResponse {
+  id: string;
+}
+
+export interface MfaChallengeResponse {
+  mfa_required: true;
+  methods: MfaMethod[];
+  challenge_token: string;
+}
+
+export type CreateSessionResponse = SessionResponse | MfaChallengeResponse;
+
+export const isMfaChallenge = (
+  response: CreateSessionResponse,
+): response is MfaChallengeResponse =>
+  "mfa_required" in response && response.mfa_required === true;
+
+export interface GoogleAuthData {
+  token: string;
+  remember?: boolean;
+}
+
+export interface ResetPasswordData {
+  token: string;
+  password: string;
+}
+
+export interface SsoLogoutResponse {
+  "saml-logout-url"?: string;
+}
+
 export const sessionApi = Api.injectEndpoints({
   endpoints: (builder) => ({
+    createSession: builder.mutation<CreateSessionResponse, LoginData>({
+      query: (body) => ({
+        method: "POST",
+        url: "/api/session",
+        body,
+      }),
+    }),
+    createSessionWithGoogleAuth: builder.mutation<
+      SessionResponse,
+      GoogleAuthData
+    >({
+      query: (body) => ({
+        method: "POST",
+        url: "/api/session/google_auth",
+        body,
+      }),
+    }),
+    deleteSession: builder.mutation<void, void>({
+      query: () => ({
+        method: "DELETE",
+        url: "/api/session",
+      }),
+    }),
+    logoutSso: builder.mutation<SsoLogoutResponse, void>({
+      query: () => ({
+        method: "POST",
+        url: "/auth/sso/logout",
+      }),
+    }),
+    resetPassword: builder.mutation<void, ResetPasswordData>({
+      query: (body) => ({
+        method: "POST",
+        url: "/api/session/reset_password",
+        body,
+      }),
+    }),
     getPasswordResetTokenStatus: builder.query<
       PasswordResetTokenStatus,
       string
@@ -26,29 +89,23 @@ export const sessionApi = Api.injectEndpoints({
         body: { email },
       }),
     }),
-    getSessionProperties: builder.query<EnterpriseSettings, void>({
-      query: () => ({
-        method: "GET",
-        url: "/api/session/properties",
+    checkPassword: builder.mutation<void, { password: string }>({
+      query: (body) => ({
+        method: "POST",
+        url: "/api/session/password-check",
+        body,
       }),
-      providesTags: ["session-properties"],
-      onQueryStarted: async (_, { queryFulfilled, dispatch }) => {
-        const response = await queryFulfilled;
-        if (response.data) {
-          dispatch(loadSettings(response.data));
-          // compatibility layer for legacy settings on the window object
-          MetabaseSettings.setAll(response.data);
-        }
-      },
     }),
   }),
 });
 
 export const {
+  useCreateSessionMutation,
+  useCreateSessionWithGoogleAuthMutation,
+  useDeleteSessionMutation,
+  useLogoutSsoMutation,
+  useResetPasswordMutation,
   useGetPasswordResetTokenStatusQuery,
   useForgotPasswordMutation,
-  useGetSessionPropertiesQuery,
+  useCheckPasswordMutation,
 } = sessionApi;
-
-// alias for easier use
-export const useGetSettingsQuery = useGetSessionPropertiesQuery;

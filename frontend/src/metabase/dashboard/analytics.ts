@@ -1,5 +1,9 @@
-import { trackSchemaEvent, trackSimpleEvent } from "metabase/lib/analytics";
-import type { DashboardId, DashboardWidth } from "metabase-types/api";
+import { trackSchemaEvent, trackSimpleEvent } from "metabase/analytics";
+import type {
+  DashboardId,
+  DashboardWidth,
+  VisualizationDisplay,
+} from "metabase-types/api";
 
 import type { SectionId } from "./sections";
 
@@ -14,27 +18,6 @@ export const trackAutoApplyFiltersDisabled = (dashboardId: DashboardId) => {
   trackSchemaEvent("dashboard", {
     event: "auto_apply_filters_disabled",
     dashboard_id: getDashboardId(dashboardId),
-  });
-};
-
-export type DashboardAccessedVia =
-  | "internal"
-  | "public-link"
-  | "static-embed"
-  | "interactive-iframe-embed"
-  | "sdk-embed";
-
-export const trackExportDashboardToPDF = ({
-  dashboardId,
-  dashboardAccessedVia,
-}: {
-  dashboardId?: DashboardId;
-  dashboardAccessedVia: DashboardAccessedVia;
-}) => {
-  trackSchemaEvent("dashboard", {
-    event: "dashboard_pdf_exported",
-    dashboard_id: getDashboardId(dashboardId),
-    dashboard_accessed_via: dashboardAccessedVia,
   });
 };
 
@@ -148,5 +131,39 @@ export const trackFilterRequired = (dashboardId: DashboardId) => {
   trackSchemaEvent("dashboard", {
     event: "dashboard_filter_required",
     dashboard_id: getDashboardId(dashboardId),
+  });
+};
+
+export const trackFilterCreated = (
+  dashboardId: DashboardId,
+  display: VisualizationDisplay | null,
+  filterType?: string,
+) => {
+  trackSimpleEvent({
+    event: "dashboard_filter_created",
+    target_id: getDashboardId(dashboardId),
+    triggered_from: display,
+    event_detail: filterType ?? null,
+  });
+};
+
+export const trackFilterMoved = (
+  dashboardId: DashboardId,
+  origin: VisualizationDisplay | null,
+  destination: VisualizationDisplay | null,
+) => {
+  trackSimpleEvent({
+    event: "dashboard_filter_moved",
+    target_id: getDashboardId(dashboardId),
+    triggered_from: origin,
+    event_detail: destination,
+  });
+};
+
+export const trackDashboardBookmarked = () => {
+  trackSimpleEvent({
+    event: "bookmark_added",
+    event_detail: "dashboard",
+    triggered_from: "dashboard_header",
   });
 };

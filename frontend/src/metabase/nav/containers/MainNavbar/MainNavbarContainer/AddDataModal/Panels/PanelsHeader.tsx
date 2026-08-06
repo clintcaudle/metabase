@@ -1,31 +1,42 @@
-import { Link } from "react-router";
 import { t } from "ttag";
 
-import * as Urls from "metabase/lib/urls";
+import { Link } from "metabase/common/components/Link";
 import { Box, Group, Modal } from "metabase/ui";
+import * as Urls from "metabase/urls";
 
 import S from "../AddDataModal.module.css";
 
 interface HeaderProps {
-  activeTab: string | null;
-  isAdmin: boolean;
-  onClose: () => void;
+  showDatabasesLink: boolean;
+  showUploadsLink: boolean;
+  showManageImports: boolean;
+  onAddDataModalClose: () => void;
 }
-export const PanelsHeader = ({ activeTab, isAdmin, onClose }: HeaderProps) => {
-  const showDatabasesLink = activeTab === "db" && isAdmin;
+export const PanelsHeader = ({
+  showDatabasesLink,
+  showUploadsLink,
+  showManageImports,
+  onAddDataModalClose,
+}: HeaderProps) => {
+  const HeaderLink = ({ to, text }: { to: string; text: string }) => (
+    <Box component={Link} to={to} fw="bold" c="core-brand">
+      {text}
+    </Box>
+  );
 
   return (
     <Box component="header" className={S.header}>
       <Group ml="auto" align="center" justify="flex-end" gap="lg">
         {showDatabasesLink && (
-          <Box
-            component={Link}
-            to={Urls.viewDatabases()}
-            fw={700}
-            c="brand"
-          >{t`Manage databases`}</Box>
+          <HeaderLink to={Urls.viewDatabases()} text={t`Manage databases`} />
         )}
-        <Modal.CloseButton size="1rem" onClick={onClose} />
+        {showUploadsLink && (
+          <HeaderLink to={Urls.uploadsSettings()} text={t`Manage uploads`} />
+        )}
+        {showManageImports && (
+          <HeaderLink to={Urls.uploadsSettings()} text={t`Manage imports`} />
+        )}
+        <Modal.CloseButton size="1rem" onClick={onAddDataModalClose} />
       </Group>
     </Box>
   );

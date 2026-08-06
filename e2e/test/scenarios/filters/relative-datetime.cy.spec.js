@@ -1,4 +1,6 @@
-import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
+import dayjs from "dayjs";
+
+import "metabase/utils/dayjs";
 
 const { H } = cy;
 
@@ -13,7 +15,7 @@ const STARTING_FROM_UNITS = [
 ];
 
 describe("scenarios > question > relative-datetime", () => {
-  const now = moment().utc();
+  const now = dayjs().utc();
 
   beforeEach(() => {
     H.restore();
@@ -34,7 +36,7 @@ describe("scenarios > question > relative-datetime", () => {
           date([[-30, unit]]),
         ]);
         withStartingFrom("Previous", [10, unit], [10, unit]);
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+        // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
         cy.findByText("Showing 2 rows").should("exist");
       }),
     );
@@ -49,7 +51,7 @@ describe("scenarios > question > relative-datetime", () => {
           date([[30, unit]]),
         ]);
         withStartingFrom("Next", [10, unit], [10, unit]);
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+        // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
         cy.findByText("Showing 2 rows").should("exist");
       }),
     );
@@ -237,7 +239,7 @@ const nativeSQL = (values) => {
   cy.intercept("POST", "/api/dataset").as("dataset");
 
   const queries = values.map((value) => {
-    const date = moment(value).utc();
+    const date = dayjs(value).utc();
     return `SELECT '${date.toISOString()}'::timestamp as "testcol"`;
   });
 
@@ -260,7 +262,9 @@ const openCreatedAt = (tab) => {
   H.popover().within(() => {
     cy.findByText("Filter by this column").click();
     cy.findByText("Relative date range…").click();
-    tab && cy.findByText(tab).click();
+    if (tab) {
+      cy.findByText(tab).click();
+    }
   });
 };
 

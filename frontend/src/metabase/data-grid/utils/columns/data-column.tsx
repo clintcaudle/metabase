@@ -3,7 +3,6 @@ import type {
   ColumnDef,
   ColumnSizingState,
 } from "@tanstack/react-table";
-import type React from "react";
 import { memo } from "react";
 
 import { BodyCell } from "metabase/data-grid/components/BodyCell/BodyCell";
@@ -14,27 +13,32 @@ import type {
   ExpandedColumnsState,
 } from "metabase/data-grid/types";
 
-const getDefaultCellTemplate = <TRow, TValue>(
-  {
-    id,
-    align,
-    getBackgroundColor,
-    formatter,
-    cellVariant,
-    wrap,
-    getCellClassName,
-    getCellStyle,
-  }: ColumnOptions<TRow, TValue>,
-  isTruncated: boolean,
-  onExpand: (columnName: string, content: React.ReactNode) => void,
-) => {
-  return function Cell({
-    getValue,
-    row,
-    isSelected,
-  }: CellContext<TRow, TValue> & { isSelected?: boolean }) {
+const getDefaultCellTemplate = <TRow, TValue>({
+  id,
+  align,
+  getBackgroundColor,
+  formatter,
+  cellVariant,
+  wrap,
+  getCellClassName,
+  getCellStyle,
+  getIsEditing,
+  editingCell: EditingCellComponent,
+}: ColumnOptions<TRow, TValue>) => {
+  return function Cell(
+    props: CellContext<TRow, TValue> & { isSelected?: boolean },
+  ) {
+    const { getValue, row, column, isSelected } = props;
     const value = getValue();
     const backgroundColor = getBackgroundColor?.(value, row?.index);
+    const isEditing = getIsEditing?.(id, row.index);
+    // Read from column meta so the component identity can stay stable across
+    // column width changes (metabase#78557)
+    const { isTruncated = false, onExpand } = column.columnDef.meta ?? {};
+
+    if (isEditing && EditingCellComponent) {
+      return <EditingCellComponent {...props} />;
+    }
 
     return (
       <BodyCell
@@ -49,8 +53,8 @@ const getDefaultCellTemplate = <TRow, TValue>(
         onExpand={onExpand}
         variant={cellVariant}
         wrap={wrap}
-        className={getCellClassName?.(value, row.index)}
-        style={getCellStyle?.(value, row.index)}
+        className={getCellClassName?.(value, row.index, id)}
+        style={getCellStyle?.(value, row.index, id)}
       />
     );
   };
@@ -74,37 +78,60 @@ const getDefaultHeaderTemplate = <TRow, TValue>({
   };
 };
 
+// getDataColumn always sets the id, unlike tanstack's ColumnDef where it is optional
+export type DataColumnDef<TRow, TValue> = ColumnDef<TRow, TValue> & {
+  id: string;
+};
+
+type ColumnTruncationOptions = {
+  columnId: string;
+  columnSizing: ColumnSizingState;
+  measuredColumnSizing: ColumnSizingState;
+  expandedColumns: ExpandedColumnsState;
+  truncateWidth: number;
+};
+
+export const getIsColumnTruncated = ({
+  columnId,
+  columnSizing,
+  measuredColumnSizing,
+  expandedColumns,
+  truncateWidth,
+}: ColumnTruncationOptions) => {
+  const columnWidth = columnSizing[columnId] ?? 0;
+  const measuredColumnWidth = measuredColumnSizing[columnId] ?? 0;
+
+  return (
+    !expandedColumns[columnId] &&
+    columnWidth < measuredColumnWidth &&
+    measuredColumnWidth > truncateWidth
+  );
+};
+
 export const getDataColumn = <TRow, TValue>(
   columnOptions: ColumnOptions<TRow, TValue>,
-  columnSizing: ColumnSizingState,
-  measuredColumnSizing: ColumnSizingState,
-  expandedColumns: ExpandedColumnsState,
-  truncateWidth: number,
-  onExpand: (columnName: string, content: React.ReactNode) => void,
-): ColumnDef<TRow, TValue> => {
-  const { id, accessorFn, wrap, cell, header, headerClickTargetSelector } =
-    columnOptions;
-  const columnWidth = columnSizing[id] ?? 0;
-  const measuredColumnWidth = measuredColumnSizing[id] ?? 0;
+): DataColumnDef<TRow, TValue> => {
+  const {
+    id,
+    accessorFn,
+    wrap,
+    cell,
+    header,
+    headerClickTargetSelector,
+    sortingFn,
+  } = columnOptions;
 
-  const isTruncated =
-    !expandedColumns[id] &&
-    columnWidth < measuredColumnWidth &&
-    measuredColumnWidth > truncateWidth;
-
-  const columnDefinition: ColumnDef<TRow, TValue> = {
+  const columnDefinition: DataColumnDef<TRow, TValue> = {
     accessorFn,
     id,
+    ...(sortingFn != null ? { sortingFn } : {}),
     header:
       typeof header !== "string"
         ? memo(header ?? getDefaultHeaderTemplate(columnOptions))
         : header,
     cell:
       typeof cell !== "string"
-        ? memo(
-            cell ??
-              getDefaultCellTemplate(columnOptions, isTruncated, onExpand),
-          )
+        ? memo(cell ?? getDefaultCellTemplate(columnOptions))
         : cell,
     minSize: MIN_COLUMN_WIDTH,
     enableResizing: true,
@@ -113,6 +140,8 @@ export const getDataColumn = <TRow, TValue>(
       enableReordering: true,
       enableSelection: true,
       headerClickTargetSelector,
+      formatter: columnOptions.formatter,
+      clipboardFormatter: columnOptions.clipboardFormatter,
     },
   };
 

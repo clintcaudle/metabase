@@ -2,21 +2,25 @@ import cx from "classnames";
 import type { ReactNode } from "react";
 import { t } from "ttag";
 
-import { useDocsUrl } from "metabase/common/hooks";
+import {
+  AccordionList,
+  type Section,
+} from "metabase/common/components/AccordionList";
+import { ExternalLink } from "metabase/common/components/ExternalLink";
 import {
   HoverParent,
   TableInfoIcon,
-} from "metabase/components/MetadataInfo/TableInfoIcon/TableInfoIcon";
-import AccordionList from "metabase/core/components/AccordionList";
-import ExternalLink from "metabase/core/components/ExternalLink";
+} from "metabase/common/components/MetadataInfo/TableInfoIcon/TableInfoIcon";
+import { useDocsUrl } from "metabase/common/hooks";
+import { useTranslateContent } from "metabase/content-translation/hooks";
 import CS from "metabase/css/core/index.css";
-import { color } from "metabase/lib/colors";
-import { isSyncCompleted } from "metabase/lib/syncing";
-import { isNotNull } from "metabase/lib/types";
 import { Box, DelayGroup, Flex, Icon, rem } from "metabase/ui";
+import { isSyncCompleted } from "metabase/utils/syncing";
+import { isNotNull } from "metabase/utils/types";
 import type Database from "metabase-lib/v1/metadata/Database";
 import type Schema from "metabase-lib/v1/metadata/Schema";
 import type Table from "metabase-lib/v1/metadata/Table";
+import { getSchemaDisplayName } from "metabase-lib/v1/metadata/utils/schema";
 
 import DataSelectorSectionHeader from "../DataSelectorSectionHeader";
 import { CONTAINER_WIDTH } from "../constants";
@@ -34,6 +38,12 @@ type DataSelectorTablePickerProps = {
   tables: Table[];
   onBack?: () => void;
   onChangeTable: (table: Table) => void;
+};
+
+type Item = {
+  name: string;
+  table: Table;
+  database: Database;
 };
 
 type HeaderProps = Pick<
@@ -55,6 +65,8 @@ const DataSelectorTablePicker = ({
   minTablesToShowSearch = 10,
   hasInitialFocus,
 }: DataSelectorTablePickerProps) => {
+  const tc = useTranslateContent();
+
   // In case DataSelector props get reset
   if (!selectedDatabase) {
     if (onBack) {
@@ -75,11 +87,11 @@ const DataSelectorTablePicker = ({
   );
 
   if (tables.length > 0 || isLoading) {
-    const sections = [
+    const sections: Section<Item>[] = [
       {
         name: header,
         items: tables.filter(isNotNull).map((table) => ({
-          name: table.displayName(),
+          name: tc(table.displayName()),
           table: table,
           database: selectedDatabase,
         })),
@@ -101,8 +113,8 @@ const DataSelectorTablePicker = ({
       <HoverParent>{content}</HoverParent>
     );
 
-    const showSpinner = ({ table }: { table: Table }) =>
-      Boolean(table && !isSyncCompleted(table));
+    const showSpinner = (itemOrSection: Item | Section<Item>) =>
+      "table" in itemOrSection && !isSyncCompleted(itemOrSection.table);
 
     const handleChange = ({ table }: { table: Table }) => onChangeTable(table);
 
@@ -111,7 +123,7 @@ const DataSelectorTablePicker = ({
     return (
       <DelayGroup>
         <Box w={rem(300)} style={{ overflowY: "auto" }}>
-          <AccordionList
+          <AccordionList<Item>
             id="TablePicker"
             key="tablePicker"
             className={CS.textBrand}
@@ -146,7 +158,7 @@ const DataSelectorTablePicker = ({
 };
 
 const LinkToDocsOnReferencingSavedQuestionsInQueries = () => {
-  // eslint-disable-next-line no-unconditional-metabase-links-render -- It's hard to tell if this is still used in the app. Please see https://metaboat.slack.com/archives/C505ZNNH4/p1703243785315819
+  // eslint-disable-next-line metabase/no-unconditional-metabase-links-render -- It's hard to tell if this is still used in the app. Please see https://metaboat.slack.com/archives/C505ZNNH4/p1703243785315819
   const { url: docsUrl } = useDocsUrl(
     "questions/native-editor/referencing-saved-questions-in-queries",
   );
@@ -154,9 +166,9 @@ const LinkToDocsOnReferencingSavedQuestionsInQueries = () => {
     <Box
       p="md"
       ta="center"
-      bg={color("bg-light")}
+      bg={"background_page-secondary"}
       style={{
-        borderTop: "1px solid var(--mb-color-border)",
+        borderTop: "1px solid var(--mb-color-border-neutral)",
       }}
     >
       {t`Is a question missing?`}
@@ -176,27 +188,31 @@ const Header = ({
   schemas,
   selectedDatabase,
   selectedSchema,
-}: HeaderProps) => (
-  <Flex align="center" wrap="wrap">
-    <Flex align="center" style={{ cursor: "pointer" }} onClick={onBack}>
-      {onBack && <Icon name="chevronleft" size={18} />}
-      <Box component="span" ml="sm" data-testid="source-database">
-        {selectedDatabase.name}
-      </Box>
-    </Flex>
+}: HeaderProps) => {
+  const tc = useTranslateContent();
 
-    {selectedSchema?.name && schemas.length > 1 && (
-      <>
-        <Box component="span" mx="sm" c="text-medium">
-          /
+  return (
+    <Flex align="center" wrap="wrap">
+      <Flex align="center" style={{ cursor: "pointer" }} onClick={onBack}>
+        {onBack && <Icon name="chevronleft" size={18} />}
+        <Box component="span" ml="sm" data-testid="source-database">
+          {tc(selectedDatabase.name)}
         </Box>
-        <Box component="span" data-testid="source-schema" c="text-medium">
-          {selectedSchema.displayName()}
-        </Box>
-      </>
-    )}
-  </Flex>
-);
+      </Flex>
+
+      {selectedSchema?.name && schemas.length > 1 && (
+        <>
+          <Box component="span" mx="sm" c="text-secondary">
+            /
+          </Box>
+          <Box component="span" data-testid="source-schema" c="text-secondary">
+            {tc(getSchemaDisplayName(selectedSchema.name))}
+          </Box>
+        </>
+      )}
+    </Flex>
+  );
+};
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage
 export default DataSelectorTablePicker;

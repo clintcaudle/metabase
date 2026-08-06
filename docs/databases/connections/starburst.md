@@ -7,7 +7,7 @@ description: Learn how to connect Metabase to your Starburst or Trino database, 
 
 > This driver also works for connections to a Trino database.
 
-To add a database connection, click on the **gear** icon in the top right, and navigate to **Admin settings** > **Databases** > **Add a database**.
+To add a database connection, click the **grid** icon in the top right, and navigate to **Admin** > **Databases** > **Add a database**.
 
 You can edit these settings at any time. Just remember to save your changes.
 
@@ -20,6 +20,10 @@ Here you can [sync the database schema and rescan field values](../sync-scan.md)
 ## Edit connection details
 
 To access or modify your database connection settings, click the **Edit connection details** button.
+
+### Connection string
+
+Paste a connection string here to pre-fill the remaining fields below.
 
 ### Display name
 
@@ -35,7 +39,7 @@ The database port (e.g., `8080`).
 
 ### Catalog
 
-Starburt catalogs contain schemas and reference data sources via a connector.
+Starburst catalogs contain schemas and reference data sources via a connector.
 
 ### Schema (optional)
 
@@ -73,7 +77,7 @@ connection_timeout=1000&socket_timeout=300000
 
 Turn this option **OFF** if people want to click **Run** (the play button) before applying any [Summarize](../../questions/query-builder/summarizing-and-grouping.md) or filter selections.
 
-By default, Metabase will execute a query as soon as you choose an grouping option from the **Summarize** menu or a filter condition from the [drill-through menu](https://www.metabase.com/learn/metabase-basics/querying-and-dashboards/questions/drill-through). If your database is slow, you may want to disable re-running to avoid loading data on each click.
+By default, Metabase will execute a query as soon as you choose an grouping option from the **Summarize** menu or a filter condition from the [drill-through menu](../../questions/visualizations/drill-through.md). If your database is slow, you may want to disable re-running to avoid loading data on each click.
 
 ### Choose when syncs and scans happen
 
@@ -87,11 +91,17 @@ Turn this option **ON** to scan a sample of values every time Metabase runs a [s
 
 A fingerprinting query examines the first 10,000 rows from each column and uses that data to guesstimate how many unique values each column has, what the minimum and maximum values are for numeric and timestamp columns, and so on. If you leave this option **OFF**, Metabase will only fingerprint your columns once during setup.
 
+## Writable connection
+
+Set up an additional connection used for write operations. See [Writable connections](../writable-connection.md).
+
 ## Model features
 
-There aren't (yet) any model features for ClickHouse.
+There aren't (yet) any model features for Starburst.
 
 ## Database routing
+
+With database routing, an admin can build a question once using one database (data catalog), and the question will run its query against a different data catalog with the same schema depending on who is viewing the question.
 
 See [Database routing](../../permissions/database-routing.md).
 

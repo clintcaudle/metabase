@@ -1,13 +1,14 @@
 import cx from "classnames";
 
-import type { PillSize } from "metabase/core/components/ColorPill";
-import { ColorSelector } from "metabase/core/components/ColorSelector";
+import type { PillSize } from "metabase/common/components/ColorPill";
+import { ColorSelector } from "metabase/common/components/ColorSelector";
 import CS from "metabase/css/core/index.css";
-import { getAccentColors } from "metabase/lib/colors/groups";
-import type { AccentColorOptions } from "metabase/lib/colors/types";
-import { Box, type BoxProps } from "metabase/ui";
+import { isEmbeddingSdk } from "metabase/embedding-sdk/config";
+import { Box } from "metabase/ui";
+import { getAccentColors } from "metabase/ui/colors/groups";
+import type { AccentColorOptions } from "metabase/ui/colors/types";
 
-interface ChartSettingColorPickerProps extends BoxProps {
+interface ChartSettingColorPickerProps {
   className?: string;
   value: string;
   title?: string;
@@ -29,13 +30,17 @@ export const ChartSettingColorPicker = ({
     harmony: false,
     gray: true,
   },
-  ...boxProps
 }: ChartSettingColorPickerProps) => {
+  // For the SDK the ColorSelector is rendered inside a parent Mantine popover,
+  // so as a nested popover it should not be rendered within a portal
+  const withinPortal = !isEmbeddingSdk();
+
   return (
-    <Box className={cx(CS.flex, CS.alignCenter, className)} {...boxProps}>
+    <Box className={cx(CS.flex, CS.alignCenter, className)}>
       <ColorSelector
         value={value}
         colors={getAccentColors(accentColorOptions)}
+        withinPortal={withinPortal}
         onChange={onChange}
         pillSize={pillSize}
       />

@@ -1,2 +1,1 @@
-export * from "./DashboardSubscriptionMenuItem";
-export * from "./QuestionAlertsMenuItem";
+export * from "./CommonNotificationsMenuItem";

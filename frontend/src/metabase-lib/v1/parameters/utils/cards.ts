@@ -14,23 +14,21 @@ export function getCardUiParameters(
   card: Card,
   metadata: Metadata,
   parameterValues: { [key: string]: any } = {},
-  parameters = getParametersFromCard(card),
-  collectionPreview?: boolean,
+  parameters = getParametersFromCard(card, metadata),
 ): UiParameter[] {
   if (!card) {
     return [];
   }
 
-  const valuePopulatedParameters: (Parameter[] | ParameterWithTarget[]) & {
-    value?: any;
-  } = getValuePopulatedParameters({
-    parameters,
-    values: parameterValues,
-    collectionPreview,
-  });
+  const valuePopulatedParameters: Parameter[] | ParameterWithTarget[] =
+    getValuePopulatedParameters({
+      parameters,
+      values: parameterValues,
+    });
   const question = new Question(card, metadata);
 
   return valuePopulatedParameters.map((parameter) => {
+    // Unjustified type cast. FIXME
     const target: ParameterTarget | undefined = (
       parameter as ParameterWithTarget
     ).target;

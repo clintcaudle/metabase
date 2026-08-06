@@ -2,14 +2,16 @@ import { useMemo } from "react";
 import { t } from "ttag";
 import * as Yup from "yup";
 
-import FormCheckBox from "metabase/core/components/FormCheckBox";
-import FormErrorMessage from "metabase/core/components/FormErrorMessage";
-import FormInput from "metabase/core/components/FormInput";
-import FormSubmitButton from "metabase/core/components/FormSubmitButton";
-import { Form, FormProvider } from "metabase/forms";
-import * as Errors from "metabase/lib/errors";
-
-import type { LoginData } from "../../types";
+import {
+  Form,
+  FormCheckbox,
+  FormErrorMessage,
+  FormProvider,
+  FormSubmitButton,
+  FormTextInput,
+} from "metabase/forms";
+import type { LoginData } from "metabase/redux/auth";
+import * as Errors from "metabase/utils/errors";
 
 const LOGIN_SCHEMA = Yup.object().shape({
   username: Yup.string()
@@ -57,26 +59,28 @@ export const LoginForm = ({
       onSubmit={onSubmit}
     >
       <Form>
-        <FormInput
+        <FormTextInput
           name="username"
-          title={
+          label={
             isLdapEnabled ? t`Username or email address` : t`Email address`
           }
           type={isLdapEnabled ? "input" : "email"}
           placeholder="nicetoseeyou@email.com"
           autoFocus
+          mb="1.25rem"
         />
-        <FormInput
+        <FormTextInput
           name="password"
-          title={t`Password`}
+          label={t`Password`}
           type="password"
-          placeholder={t`Shhh...`}
+          placeholder="Shhh..."
+          mb="1.25rem"
         />
         {!hasSessionCookies && (
-          <FormCheckBox name="remember" title={t`Remember me`} />
+          <FormCheckbox name="remember" label={t`Remember me`} mb="1.25rem" />
         )}
-        <FormSubmitButton title={t`Sign in`} primary fullWidth />
-        <FormErrorMessage />
+        <FormSubmitButton label={t`Sign in`} variant="filled" w="100%" />
+        <FormErrorMessage mt="1rem" />
       </Form>
     </FormProvider>
   );

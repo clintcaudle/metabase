@@ -79,13 +79,14 @@ describe("embed reducer", () => {
 
         store.dispatch(
           setInitialUrlOptions({
-            search: "entity_types=model,table",
+            search: "entity_types=model,table,question",
           }),
         );
 
         expect(store.getState().embeddingDataPicker.entityTypes).toEqual([
           "model",
           "table",
+          "question",
         ]);
       });
 
@@ -173,5 +174,6 @@ const createMockStore = () => {
       embeddingDataPicker: embeddingDataPickerReducer,
     },
   });
+  // Unjustified type cast. FIXME
   return store as typeof store & { dispatch: Dispatch };
 };

@@ -94,13 +94,27 @@
   ;; load data all at once
   nil)
 
+(defmethod load-data/do-insert! :mysql
+  [driver conn table-identifier rows]
+  (if-not load-data/*disable-fk-checks*
+    ((get-method load-data/do-insert! :sql-jdbc/test-extensions) driver conn table-identifier rows)
+    ;; Disable FK checks during insert to allow self-referencing FK rows in the same batch
+    ;; (MySQL 9.6+ enforces FK constraints row-by-row during bulk INSERT)
+    (do
+      (jdbc/execute! {:connection conn} ["SET FOREIGN_KEY_CHECKS = 0"])
+      (try
+        ((get-method load-data/do-insert! :sql-jdbc/test-extensions) driver conn table-identifier rows)
+        (finally
+          (jdbc/execute! {:connection conn} ["SET FOREIGN_KEY_CHECKS = 1"]))))))
+
 (defmethod sql.tx/pk-sql-type :mysql [_] "INTEGER NOT NULL AUTO_INCREMENT")
 
 ;;; use one single global lock for all datasets. MySQL needs a global lock to do DDL stuff and blows up if other queries
 ;;; are running at the same time even if they are in different logical databases
 (defmethod test.data.impl.get-or-create/dataset-lock :mysql
-  [driver _dataset-name]
-  ((get-method test.data.impl.get-or-create/dataset-lock :sql-jdbc) driver ""))
+  [driver _dataset]
+  ((get-method test.data.impl.get-or-create/dataset-lock :sql-jdbc)
+   driver {:database-name ""}))
 
 (defmethod sql.tx/create-index-sql :mysql
   ([driver table-name field-names]

@@ -1,11 +1,17 @@
+import { useState } from "react";
 import { P, match } from "ts-pattern";
 import { t } from "ttag";
 
 import { skipToken } from "metabase/api";
-import { useHasTokenFeature, useSetting } from "metabase/common/hooks";
-import { useSelector } from "metabase/lib/redux";
+import { getErrorMessage } from "metabase/api/utils";
+import { useHasTokenFeature } from "metabase/common/hooks";
+import { useSelector } from "metabase/redux";
 import { getUserIsAdmin } from "metabase/selectors/user";
-import { useGetServiceAccountQuery } from "metabase-enterprise/api";
+import { useSetting } from "metabase/settings";
+import {
+  useDeleteGsheetsFolderLinkMutation,
+  useGetServiceAccountQuery,
+} from "metabase-enterprise/api";
 import type { GdrivePayload } from "metabase-types/api";
 
 export type ErrorPayload =
@@ -15,14 +21,18 @@ export type ErrorPayload =
   | { message: string }
   | { error_message: string };
 
-export function useShowGdrive() {
+/**
+ * `isLoading` is reported alongside the flag because a `showGdrive` of `false`
+ * that is only waiting on the service account looks the same as a settled
+ * "Sheets is unavailable here", and callers would flash the wrong one.
+ */
+export function useShowGdrive(): { showGdrive: boolean; isLoading: boolean } {
   const gSheetsEnabled = useSetting("show-google-sheets-integration");
   const hasDwh = useHasTokenFeature("attached_dwh");
   const userIsAdmin = useSelector(getUserIsAdmin);
 
   const shouldGetServiceAccount = gSheetsEnabled && userIsAdmin && hasDwh;
-
-  const { data: serviceAccount } = useGetServiceAccountQuery(
+  const { data: serviceAccount, isLoading } = useGetServiceAccountQuery(
     shouldGetServiceAccount ? undefined : skipToken,
   );
 
@@ -30,7 +40,7 @@ export function useShowGdrive() {
     hasDwh && gSheetsEnabled && userIsAdmin && serviceAccount?.email,
   );
 
-  return showGdrive;
+  return { showGdrive, isLoading };
 }
 
 export const getStatus = ({
@@ -46,30 +56,57 @@ export const getStatus = ({
     .with({ status: P.string.minLength(1) }, ({ status }) => status)
     .otherwise(() => "not-connected");
 
-export const getErrorMessage = (
-  payload: ErrorPayload,
-  // eslint-disable-next-line no-literal-metabase-strings -- admin UI
-  fallback: string = t`Please check that the folder is shared with the Metabase Service Account.`,
-): string => {
-  if (typeof payload === "string") {
-    return payload;
-  }
+/**
+ * Custom hook for deleting Google Drive folder links
+ *
+ * @param options - Optional callbacks for success and error handling
+ * @param options.onSuccess - Callback to execute on successful deletion
+ * @param options.onError - Callback to execute when an error occurs
+ *
+ * @returns Object containing:
+ *   - errorMessage: Current error message state
+ *   - isDeletingFolderLink: Loading state for the delete operation
+ *   - onDelete: Function to trigger the delete operation
+ *
+ * @example
+ * ```tsx
+ * const { errorMessage, isDeletingFolderLink, onDelete } = useDeleteGdriveFolderLink({
+ *   onSuccess: () => console.log('Folder deleted successfully'),
+ *   onError: (error) => console.error('Delete failed:', error),
+ * });
+ *
+ * const handleDelete = () => onDelete();
+ * ```
+ */
+export const useDeleteGdriveFolderLink = (options?: {
+  onSuccess?: () => void;
+  onError?: (error: string) => void;
+}) => {
+  const [errorMessage, setErrorMessage] = useState("");
+  const [deleteFolderLink, { isLoading: isDeletingFolderLink }] =
+    useDeleteGsheetsFolderLinkMutation();
 
-  if (!payload || typeof payload !== "object") {
-    return fallback;
-  }
+  const onDelete = async () => {
+    setErrorMessage("");
+    await deleteFolderLink()
+      .unwrap()
+      .then(() => {
+        options?.onSuccess?.();
+      })
+      .catch((response: unknown) => {
+        const error = getErrorMessage(
+          response,
+          // eslint-disable-next-line metabase/no-literal-metabase-strings -- admin only ui
+          t`Please check that the folder is shared with the Metabase Service Account.`,
+        );
+        setErrorMessage(error);
+        options?.onError?.(error);
+      });
+  };
 
-  if ("message" in payload && typeof payload.message === "string") {
-    return payload.message;
-  }
-
-  if ("error_message" in payload && typeof payload.error_message === "string") {
-    return payload.error_message;
-  }
-
-  if ("data" in payload) {
-    return getErrorMessage(payload.data, fallback);
-  }
-
-  return fallback;
+  return {
+    errorMessage,
+    isDeletingFolderLink,
+    onDelete,
+  };
 };

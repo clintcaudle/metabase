@@ -1,16 +1,22 @@
 import type React from "react";
 
-import type { IconName } from "metabase/ui";
-import type { Mode } from "metabase/visualizations/click-actions/Mode";
+import type { Dispatch, GetState } from "metabase/redux/store";
 import type * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
-import type { ClickActionProps } from "metabase-lib/v1/queries/drills/types";
-import type { Card, Series, VisualizationSettings } from "metabase-types/api";
-import type { Dispatch, GetState } from "metabase-types/store";
+import type {
+  ClickActionProps,
+  ClickObject,
+} from "metabase-lib/v1/queries/drills/types";
+import type {
+  Card,
+  IconName,
+  Series,
+  VisualizationSettings,
+} from "metabase-types/api";
 
 export type ClickActionModeGetter = (data: {
   question: Question;
-}) => QueryClickActionsMode | Mode;
+}) => QueryClickActionsMode | ClickActionsMode;
 
 export type {
   ClickActionProps,
@@ -130,10 +136,16 @@ export type DefaultClickAction = ClickActionBase & {
   default: true;
 } & AlwaysDefaultClickActionSubAction;
 
+type OnClickActionBase = {
+  onClick: (parameters: CustomClickActionContext) => void;
+};
+
 export type AlwaysDefaultClickActionSubAction =
   | QuestionChangeClickActionBase
   | ReduxClickActionBase
-  | UrlClickActionBase;
+  | UrlClickActionBase
+  | CustomClickActionBase
+  | OnClickActionBase;
 
 export type AlwaysDefaultClickAction = {
   name: string;
@@ -161,7 +173,6 @@ export type ClickActionPopoverProps = {
   onClick: (action: RegularClickAction) => void;
   onChangeCardAndRun: OnChangeCardAndRun;
   onUpdateVisualizationSettings: (settings: VisualizationSettings) => void;
-  onResize: (...args: unknown[]) => void;
   onClose: () => void;
 };
 
@@ -195,6 +206,24 @@ export type Drill<
   applyDrill: (drill: Lib.DrillThru, ...args: any[]) => Question;
 }) => ClickAction[];
 
+export interface ClickActionsMode {
+  actionsForClick(
+    clicked: ClickObject,
+    settings?: Record<string, any>,
+    extraData?: Record<string, any>,
+  ): ClickAction[];
+}
+
+export function isClickActionsMode(value: unknown): value is ClickActionsMode {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    "actionsForClick" in value &&
+    // Unjustified type cast. FIXME
+    typeof (value as any).actionsForClick === "function"
+  );
+}
+
 export type QueryClickActionsMode = {
   name: string;
   clickActions: LegacyDrill[];
@@ -212,11 +241,13 @@ export type QueryClickActionsMode = {
 export const isCustomClickAction = (
   clickAction: ClickAction,
 ): clickAction is CustomClickAction =>
+  // Unjustified type cast. FIXME
   (clickAction as CustomClickAction).type === "custom" &&
   !("view" in clickAction);
 
 export const isCustomClickActionWithView = (
   action: ClickAction,
 ): action is CustomClickActionWithCustomView =>
+  // Unjustified type cast. FIXME
   (action as CustomClickActionWithCustomView).type === "custom" &&
   "view" in action;

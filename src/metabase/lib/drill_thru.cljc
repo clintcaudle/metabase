@@ -1,4 +1,5 @@
 (ns metabase.lib.drill-thru
+  (:refer-clojure :exclude [select-keys not-empty #?(:clj for)])
   (:require
    [metabase.lib.drill-thru.automatic-insights :as lib.drill-thru.automatic-insights]
    [metabase.lib.drill-thru.column-extract :as lib.drill-thru.column-extract]
@@ -28,9 +29,9 @@
    [metabase.lib.schema :as lib.schema]
    [metabase.lib.schema.drill-thru :as lib.schema.drill-thru]
    [metabase.lib.schema.id :as lib.schema.id]
-   [metabase.util :as u]
    [metabase.util.log :as log]
-   [metabase.util.malli :as mu]))
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [select-keys not-empty #?(:clj for)]]))
 
 (comment
   lib.drill-thru.fk-details/keep-me
@@ -52,22 +53,22 @@
   "Some drill thru functions are expected to return drills for just the specified `:column`; others are expected to
   ignore that column and return drills for all of the columns specified in `:dimensions`.
   `:return-drills-for-dimensions?` specifies which type we have."
-  [{:f lib.drill-thru.automatic-insights/automatic-insights-drill,             :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.column-filter/column-filter-drill,                       :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.distribution/distribution-drill,                         :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.fk-filter/fk-filter-drill,                               :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.object-details/object-detail-drill,                      :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.pivot/pivot-drill,                                       :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.quick-filter/quick-filter-drill,                         :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.sort/sort-drill,                                         :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.summarize-column/summarize-column-drill,                 :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.summarize-column-by-time/summarize-column-by-time-drill, :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.column-extract/column-extract-drill,                     :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.combine-columns/combine-columns-drill,                   :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.underlying-records/underlying-records-drill,             :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.zoom-in-timeseries/zoom-in-timeseries-drill,             :return-drills-for-dimensions? false}
-   {:f lib.drill-thru.zoom-in-geographic/zoom-in-geographic-drill,             :return-drills-for-dimensions? true}
-   {:f lib.drill-thru.zoom-in-bins/zoom-in-binning-drill,                      :return-drills-for-dimensions? true}])
+  [{:f #'lib.drill-thru.automatic-insights/automatic-insights-drill,             :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.column-filter/column-filter-drill,                       :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.distribution/distribution-drill,                         :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.fk-filter/fk-filter-drill,                               :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.object-details/object-detail-drill,                      :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.pivot/pivot-drill,                                       :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.quick-filter/quick-filter-drill,                         :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.sort/sort-drill,                                         :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.summarize-column/summarize-column-drill,                 :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.summarize-column-by-time/summarize-column-by-time-drill, :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.column-extract/column-extract-drill,                     :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.combine-columns/combine-columns-drill,                   :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.underlying-records/underlying-records-drill,             :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.zoom-in-timeseries/zoom-in-timeseries-drill,             :return-drills-for-dimensions? false}
+   {:f #'lib.drill-thru.zoom-in-geographic/zoom-in-geographic-drill,             :return-drills-for-dimensions? true}
+   {:f #'lib.drill-thru.zoom-in-bins/zoom-in-binning-drill,                      :return-drills-for-dimensions? true}])
 
 (mu/defn- dimension-contexts :- [:maybe [:sequential {:min 1} ::lib.schema.drill-thru/context]]
   "Create new context maps (with updated `:column` and `:value` keys) for each of the `:dimensions` passed in. Some
@@ -81,16 +82,23 @@
          (update :value lib.drill-thru.common/js->drill-value)))))
 
 (mu/defn- context-with-dimensions-or-row-dimensions :- ::lib.schema.drill-thru/context
-  "Return an updated `context` with either the existing `dimensions` or dimensions constructed from the `row`."
+  "Return an updated `context`, supplementing `dimensions` from breakout-sourced `row` entries.
+
+  If no dimensions were provided but the underlying column comes from an aggregation, construct the dimensions from
+  the row data. This is needed in cases where the frontend normally provides dimensions, but will not if it cannot
+  determine that the clicked table cell was from an \"underlying\" aggregation-sourced column. See, e.g. the comment
+  in `getTableCellClickedObject` in `table.js`.
+
+  If dimensions were provided but are missing a breakout-sourced entry that the row has (e.g. a chart whose viz
+  settings only include one of several breakouts as a series breakout — see #73803), append the missing entries so
+  every breakout produced by an earlier stage contributes a filter to the drill output."
   [query                                       :- ::lib.schema/query
    {:keys [column dimensions row] :as context} :- ::lib.schema.drill-thru/context]
-  ;; If no dimensions were provided but the underlying column comes from an aggregation, then construct the dimensions
-  ;; from the row data. This is needed in cases where the frontend normally provides dimensions, but will not if it
-  ;; cannot determine that the clicked table cell was from an "underlying" aggregation-sourced column. See, e.g. the
-  ;; comment in getTableCellClickedObject in table.js.
-  (let [row-dimensions (lib.drill-thru.common/dimensions-from-breakout-columns query column row)]
-    (if (and (empty? dimensions) (seq row-dimensions))
-      (assoc context :dimensions row-dimensions)
+  (let [row-dimensions   (lib.drill-thru.common/dimensions-from-breakout-columns query column row)
+        existing-columns (into #{} (keep :column) dimensions)
+        missing-from-row (remove (comp existing-columns :column) row-dimensions)]
+    (if (seq missing-from-row)
+      (update context :dimensions #(into (vec %) missing-from-row))
       context)))
 
 (mu/defn available-drill-thrus :- [:sequential [:ref ::lib.schema.drill-thru/drill-thru]]
@@ -153,7 +161,6 @@
     card-id      :- [:maybe ::lib.schema.id/card]
     drill        :- ::lib.schema.drill-thru/drill-thru
     & args]
-   (log/debugf "Applying drill thru: %s"
-               (u/pprint-to-str {:query query, :stage-number stage-number, :drill drill, :args args}))
+   (log/debugf "Applying drill thru: %s" (:type drill))
    (let [{:keys [query stage-number]} (lib.query/wrap-native-query-with-mbql query stage-number card-id)]
      (apply lib.drill-thru.common/drill-thru-method query stage-number drill args))))

@@ -2,11 +2,13 @@ import { useState } from "react";
 import { t } from "ttag";
 
 import { useSendProductFeedbackMutation } from "metabase/api/product-feedback";
-import { useSetting } from "metabase/common/hooks";
+import { useHasTokenFeature } from "metabase/common/hooks";
 import { getPlan } from "metabase/common/utils/plan";
-import { useDispatch, useSelector } from "metabase/lib/redux";
+import { PLUGIN_IS_EE_BUILD } from "metabase/plugins";
+import { useDispatch, useSelector } from "metabase/redux";
 import { addUndo } from "metabase/redux/undo";
-import { getDocsUrl, getSetting } from "metabase/selectors/settings";
+import { getDocsUrl } from "metabase/selectors/settings";
+import { getSetting, useSetting } from "metabase/settings";
 import type { EmbeddingHomepageDismissReason } from "metabase-types/api";
 
 import { EmbedHomepageView } from "./EmbedHomepageView";
@@ -16,29 +18,28 @@ import { dismissEmbeddingHomepage } from "./actions";
 export const EmbedHomepage = () => {
   const [feedbackModalOpened, setFeedbackModalOpened] = useState(false);
   const dispatch = useDispatch();
-  const licenseActiveAtSetup = useSetting("setup-license-active-at-setup");
   const exampleDashboardId = useSetting("example-dashboard-id");
   const [sendProductFeedback] = useSendProductFeedbackMutation();
+  const hasEmbeddingFeature = useHasTokenFeature("embedding");
 
-  const interactiveEmbeddingQuickStartUrl = useSelector((state) =>
-    // eslint-disable-next-line no-unconditional-metabase-links-render -- only visible to admins
-    getDocsUrl(state, {
-      page: "embedding/interactive-embedding-quick-start-guide",
-    }),
-  );
   const embeddingDocsUrl = useSelector((state) =>
-    // eslint-disable-next-line no-unconditional-metabase-links-render -- only visible to admins
+    // eslint-disable-next-line metabase/no-unconditional-metabase-links-render -- only visible to admins
     getDocsUrl(state, { page: "embedding/start" }),
   );
 
   const learnMoreInteractiveEmbedding = useSelector((state) =>
-    // eslint-disable-next-line no-unconditional-metabase-links-render -- this is only visible to admins
+    // eslint-disable-next-line metabase/no-unconditional-metabase-links-render -- this is only visible to admins
     getDocsUrl(state, { page: "embedding/interactive-embedding" }),
   );
 
   const learnMoreStaticEmbedding = useSelector((state) =>
-    // eslint-disable-next-line no-unconditional-metabase-links-render -- this is only visible to admins
+    // eslint-disable-next-line metabase/no-unconditional-metabase-links-render -- this is only visible to admins
     getDocsUrl(state, { page: "embedding/static-embedding" }),
+  );
+
+  const embedJsDocsUrl = useSelector((state) =>
+    // eslint-disable-next-line metabase/no-unconditional-metabase-links-render -- this is only visible to admins
+    getDocsUrl(state, { page: "embedding/embedded-analytics-js" }),
   );
 
   const plan = useSelector((state) =>
@@ -77,18 +78,19 @@ export const EmbedHomepage = () => {
     }
   };
 
+  const variant = PLUGIN_IS_EE_BUILD.isEEBuild() ? "ee" : "oss";
+
   return (
     <>
       <EmbedHomepageView
         onDismiss={onDismiss}
         exampleDashboardId={exampleDashboardId}
-        licenseActiveAtSetup={licenseActiveAtSetup}
-        interactiveEmbeddingQuickstartUrl={
-          interactiveEmbeddingQuickStartUrl + utmTags
-        }
+        embedJsDocsUrl={embedJsDocsUrl + utmTags}
+        variant={variant}
+        hasEmbeddingFeature={hasEmbeddingFeature}
         embeddingDocsUrl={embeddingDocsUrl + utmTags}
         analyticsDocsUrl={
-          // eslint-disable-next-line no-unconditional-metabase-links-render -- only visible to admins
+          // eslint-disable-next-line metabase/no-unconditional-metabase-links-render -- only visible to admins
           "https://www.metabase.com/learn/customer-facing-analytics/" + utmTags
         }
         learnMoreInteractiveEmbedUrl={learnMoreInteractiveEmbedding + utmTags}

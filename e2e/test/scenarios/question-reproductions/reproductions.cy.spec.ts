@@ -1,10 +1,16 @@
 const { H } = cy;
+
+import { USER_GROUPS, WRITABLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ORDERS_QUESTION_ID } from "e2e/support/cypress_sample_instance_data";
-import type { NativeQuestionDetails } from "e2e/support/helpers";
+import type {
+  NativeQuestionDetails,
+  StructuredQuestionDetails,
+} from "e2e/support/helpers";
 import type { Filter, LocalFieldReference } from "metabase-types/api";
+import { createMockParameter } from "metabase-types/api/mocks";
 
-const { ORDERS, ORDERS_ID } = SAMPLE_DATABASE;
+const { ORDERS, ORDERS_ID, PRODUCTS, PRODUCTS_ID } = SAMPLE_DATABASE;
 
 describe("issue 39487", () => {
   const CREATED_AT_FIELD: LocalFieldReference = [
@@ -67,17 +73,15 @@ describe("issue 39487", () => {
     },
   );
 
-  // broken after migration away from filter modal
-  // see https://github.com/metabase/metabase/issues/55688
-  it.skip(
-    "calendar has constant size when using date range picker filter (metabase#39487)",
+  it(
+    "calendar has constant size when using date range picker filter, and text inputs are in sync with the calendar inputs (metabase#39487, metabase#64602)",
     { viewportHeight: 1000 },
     () => {
       createTimeSeriesQuestionWithFilter([
         "between",
         CREATED_AT_FIELD,
-        "2024-05-01", // 5 day rows
-        "2024-06-01", // 6 day rows
+        "2027-05-01", // 5 day rows
+        "2027-06-01", // 6 day rows
       ]);
 
       cy.log("timeseries filter button");
@@ -89,20 +93,48 @@ describe("issue 39487", () => {
       cy.findByTestId("filter-pill").click();
       checkDateRangeFilter();
 
-      cy.log("filter modal");
+      cy.log("filter dropdown");
       cy.button(/Filter/).click();
-      H.modal().findByText("May 1 – Jun 1, 2024").click();
+      H.popover().findByText("Created At").click();
+      H.popover().findByText("Fixed date range…").click();
+      H.popover().within(() => {
+        cy.log(
+          "changing text input values should navigate the calendars (metabase#64602)",
+        );
+        cy.findAllByRole("textbox").first().clear().type("2027/05/01");
+        cy.findByText("May 2027").should("be.visible");
+        cy.findByLabelText("1 May 2027").should(
+          "have.attr",
+          "data-first-in-range",
+          "true",
+        );
+
+        cy.findAllByRole("textbox")
+          .should("have.length", 2)
+          .last()
+          .clear()
+          .type("2027/06/01");
+        cy.findAllByLabelText("1 June 2027")
+          .filter(":visible")
+          .should("have.length", 1)
+          .and("have.attr", "data-last-in-range", "true");
+      });
+      previousButton().click();
       checkDateRangeFilter();
-      H.modal().button("Close").click();
+      cy.realPress("Escape");
 
       cy.log("filter drill");
       cy.findByLabelText("Switch to data").click();
       H.tableHeaderClick("Created At: Year");
       H.popover().findByText("Filter by this column").click();
       H.popover().findByText("Fixed date range…").click();
-      H.popover().findAllByRole("textbox").first().clear().type("2024/05/01");
-      // eslint-disable-next-line no-unsafe-element-filtering
-      H.popover().findAllByRole("textbox").last().clear().type("2024/06/01");
+      H.popover().findAllByRole("textbox").first().clear().type("2027/05/01");
+      H.popover()
+        .findAllByRole("textbox")
+        .should("have.length", 2)
+        .last()
+        .clear()
+        .type("2027/06/01");
       previousButton().click();
       checkDateRangeFilter();
 
@@ -166,7 +198,7 @@ describe("issue 39487", () => {
   function checkDateRangeFilter() {
     measureInitialValues();
 
-    nextButton().click(); // go to 2024-07 - 5 day rows
+    nextButton().click(); // go to 2027-07 - 5 day rows
     assertNoLayoutShift();
   }
 
@@ -240,6 +272,39 @@ describe("issue 39487", () => {
   }
 });
 
+describe("issue 14124", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("should not include date when metric is binned by hour of day (metabase#14124)", () => {
+    cy.request("PUT", `/api/field/${ORDERS.CREATED_AT}`, {
+      semantic_type: null,
+    });
+
+    H.createQuestion(
+      {
+        name: "14124",
+        query: {
+          "source-table": ORDERS_ID,
+          aggregation: [["count"]],
+          breakout: [
+            ["field", ORDERS.CREATED_AT, { "temporal-unit": "hour-of-day" }],
+          ],
+        },
+      },
+      { visitQuestion: true },
+    );
+
+    cy.findAllByRole("columnheader", {
+      name: "Created At: Hour of day",
+    }).should("be.visible");
+
+    cy.log("Reported failing in v0.37.2");
+    cy.findAllByRole("gridcell", { name: "3:00 AM" }).should("be.visible");
+  });
+});
 const MONGO_DB_ID = 2;
 
 describe("issue 47793", () => {
@@ -301,7 +366,6 @@ describe("issue 47793", () => {
     },
   );
 });
-
 describe("issue 49270", () => {
   beforeEach(() => {
     H.restore();
@@ -333,8 +397,8 @@ describe("issue 53404", () => {
     H.visitQuestion(ORDERS_QUESTION_ID);
     H.openNotebook();
     H.getNotebookStep("data").button("Join data").click();
-    H.entityPickerModal().within(() => {
-      H.entityPickerModalTab("Collections").click();
+    H.miniPicker().within(() => {
+      cy.findByText("Our analytics").click();
       cy.findByText("Orders").click();
     });
     H.popover().findByText("ID").click();
@@ -432,41 +496,6 @@ describe("issue 46845", () => {
     cy.signInAsNormalUser();
   });
 
-  it("should be able to run a query with an implicit join via a join (metabase#46845)", () => {
-    H.openOrdersTable({ mode: "notebook" });
-
-    cy.log("add a self-join");
-    H.join();
-    H.entityPickerModal().within(() => {
-      H.entityPickerModalTab("Tables").click();
-      cy.findByText("Orders").click();
-    });
-    H.popover().findByText("Product ID").click();
-    H.popover().findByText("User ID").click();
-
-    cy.log("add a filter for an implicit column from the source table");
-    H.filter({ mode: "notebook" });
-    H.popover().within(() => {
-      cy.findAllByText("Product").should("have.length", 2).first().click();
-      cy.findByText("Vendor").click();
-      cy.findByText("Alfreda Konopelski II Group").click();
-      cy.button("Add filter").click();
-    });
-
-    cy.log("add a filter for the column but from the joined table");
-    H.getNotebookStep("filter").icon("add").click();
-    H.popover().within(() => {
-      cy.findAllByText("Product").should("have.length", 2).last().click();
-      cy.findByText("Vendor").click();
-      cy.findByText("Aufderhar-Boehm").click();
-      cy.button("Add filter").click();
-    });
-
-    cy.log("assert query results");
-    H.visualize();
-    H.assertQueryBuilderRowCount(91);
-  });
-
   it("should be able to run a query with multiple implicit joins for a native model (metabase#46845)", () => {
     cy.log("create a native model with 2 FKs to the same table");
     H.createNativeQuestion(
@@ -515,4 +544,473 @@ describe("issue 46845", () => {
     H.visualize();
     H.assertQueryBuilderRowCount(1);
   });
+});
+describe("54205", () => {
+  beforeEach(() => {
+    H.restore("postgres-writable");
+
+    cy.signInAsAdmin();
+
+    H.queryWritableDB("DROP TABLE IF EXISTS products");
+    H.queryWritableDB(
+      "CREATE TABLE IF NOT EXISTS products (id INT PRIMARY KEY, category VARCHAR, name VARCHAR)",
+    );
+    H.queryWritableDB(
+      "INSERT INTO products (id, category, name) VALUES (1, 'A', 'Foo, Bar'), (2, 'B', 'Foo, Baz')",
+    );
+    H.resyncDatabase({ dbId: WRITABLE_DB_ID, tableName: "products" });
+  });
+
+  it("should be able to select a comma separated value", () => {
+    H.getTableId({
+      name: "products",
+    }).then((tableId) => {
+      H.getFieldId({
+        tableId,
+        name: "name",
+      }).then((fieldId) => {
+        cy.request("PUT", `/api/field/${fieldId}`, {
+          has_field_values: "search",
+        });
+      });
+
+      H.createTestQuery({
+        database: WRITABLE_DB_ID,
+        stages: [
+          {
+            source: {
+              type: "table",
+              id: tableId,
+            },
+          },
+        ],
+      }).then((query) => {
+        H.createCard({
+          name: "Q 54205",
+          dataset_query: query,
+        }).then((card) => {
+          cy.wrap(card.id).as("questionId");
+          H.visitQuestion(card.id);
+        });
+      });
+    });
+
+    cy.findByTestId("query-visualization-root").contains("Name").click();
+
+    H.popover().within(() => {
+      cy.findByText("Filter by this column").click();
+      cy.findByPlaceholderText("Search by Name").type("Foo");
+      cy.findByRole("option", { name: "Foo, Bar" }).click();
+      cy.findByRole("list").should("have.text", "Foo, Bar");
+    });
+  });
+});
+describe("issue 55631", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+
+    H.startNewQuestion();
+    H.miniPicker().within(() => {
+      cy.findByText("Sample Database").click();
+      cy.findByText("Orders").click();
+    });
+    cy.intercept("POST", "/api/card").as("cardCreate");
+  });
+
+  it("should not flash the default title when saving the question (metabase#55631)", () => {
+    H.visualize();
+    cy.findByTestId("qb-header").button("Save").click();
+
+    H.modal().within(() => {
+      cy.findByLabelText("Name").clear().type("Custom");
+      cy.findByLabelText("Where do you want to save this?").click();
+    });
+
+    H.pickEntity({ path: ["Our analytics", "First collection"], select: true });
+
+    H.modal().within(() => {
+      cy.button("Save").click();
+      cy.wait("@cardCreate");
+
+      // It is important to have extremely short timeout in order to catch the issue
+      // before the dialog closes.
+      cy.findByDisplayValue("Orders", { timeout: 10 }).should("not.exist");
+    });
+  });
+});
+describe("issue 42723", () => {
+  const questionDetails: StructuredQuestionDetails = {
+    display: "line",
+    query: {
+      "source-table": PRODUCTS_ID,
+      aggregation: [["count"]],
+      breakout: [
+        ["field", PRODUCTS.CREATED_AT, { "base-type": "type/DateTime" }],
+        ["field", PRODUCTS.CATEGORY, { "base-type": "type/Text" }],
+      ],
+    },
+  };
+
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsNormalUser();
+  });
+
+  it("should be able to change the query without loosing the viz type (metabase#42723)", () => {
+    H.createQuestion(questionDetails, { visitQuestion: true });
+    H.queryBuilderFooter().findByLabelText("Switch to data").click();
+    H.tableHeaderClick("Count");
+    H.popover().icon("arrow_up").click();
+    H.tableInteractiveHeader().icon("chevronup").should("be.visible");
+
+    H.queryBuilderFooter().findByLabelText("Switch to visualization").click();
+    H.ensureChartIsActive();
+  });
+});
+
+describe("issue 58628", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signIn("nodata");
+  });
+
+  it("should show the unauthorized page when accessing the notebook editor without data perms (metabase#58628)", () => {
+    cy.log("should not be able to access the notebook editor");
+    cy.visit("/question/notebook");
+    cy.url().should("include", "/unauthorized");
+    H.main()
+      .findByText("Sorry, you don’t have permission to see that.")
+      .should("be.visible");
+
+    cy.log("should be able to access the query builder in view mode");
+    H.visitQuestion(ORDERS_QUESTION_ID);
+    H.queryBuilderHeader().should("be.visible");
+  });
+});
+
+describe("issue 52872", () => {
+  const LONG_NAME = "a".repeat(254);
+
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsNormalUser();
+    H.createQuestion(
+      {
+        name: LONG_NAME,
+        query: {
+          "source-table": ORDERS_ID,
+        },
+      },
+      { visitQuestion: true },
+    );
+  });
+
+  it("Saved questions with a very long title should wrap (metabse#52872)", () => {
+    cy.findByDisplayValue(LONG_NAME)
+      .should("be.visible")
+      .then(($el) => {
+        cy.window().then((window) => {
+          cy.wrap($el[0].offsetWidth).should("be.lt", window.innerWidth);
+        });
+      });
+  });
+});
+describe("issue 64293", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsNormalUser();
+  });
+
+  it("should be possible to run a query for a empty required parameter without a default value (metabase#64293)", () => {
+    const questionDetails: NativeQuestionDetails = {
+      name: "Question 1",
+      native: {
+        query: "SELECT * FROM PEOPLE WHERE state = {{State}}",
+        "template-tags": {
+          State: {
+            type: "text",
+            name: "State",
+            id: "1",
+            "display-name": "State",
+          },
+        },
+      },
+      parameters: [
+        createMockParameter({
+          id: "1",
+          slug: "State",
+          required: true,
+          name: "State",
+        }),
+      ],
+    };
+
+    H.createNativeQuestion(questionDetails, { visitQuestion: true });
+
+    cy.findByPlaceholderText("State").should("exist");
+    cy.findByPlaceholderText("State").type("NY{enter}");
+
+    H.runButtonOverlay().should("exist");
+    H.runButtonOverlay().click();
+
+    H.ensureParameterColumnValue({
+      columnName: "STATE",
+      columnValue: "NY",
+    });
+  });
+});
+
+describe("issue 13347", () => {
+  beforeEach(() => {
+    H.restore();
+    H.restore("postgres-12");
+    cy.signInAsAdmin();
+
+    H.createQuestion({
+      name: "13347 structured",
+      database: WRITABLE_DB_ID,
+      query: {
+        "source-table": ORDERS_ID,
+      },
+    });
+
+    H.createNativeQuestion({
+      name: "13347 native",
+      database: WRITABLE_DB_ID,
+      native: {
+        query: "SELECT * FROM ORDERS",
+      },
+    });
+
+    // The normal user belongs to the data group, which would otherwise get
+    // query-builder access to this database by default. Revoke create-queries so
+    // the user cannot build new questions on it - the condition this issue is
+    // about. (Avoid view-data "blocked", which needs the advanced-permissions
+    // token feature this spec doesn't have.)
+    cy.updatePermissionsGraph({
+      [USER_GROUPS.DATA_GROUP]: {
+        [WRITABLE_DB_ID]: {
+          "view-data": "unrestricted",
+          "create-queries": "no",
+        },
+      },
+    });
+
+    cy.signInAsNormalUser();
+
+    cy.visit("/");
+  });
+
+  it("should not display questions in mini data picker that cannot be used for new questions (metabase#13347)", () => {
+    H.startNewQuestion();
+    H.miniPickerOurAnalytics().click();
+
+    H.miniPicker().within(() => {
+      cy.findByText("Orders").should("exist");
+
+      cy.findByText("13347 structured").should("not.exist");
+      cy.findByText("13347 native").should("not.exist");
+    });
+  });
+
+  it("should not display questions in big data picker that cannot be used for new questions (metabase#13347)", () => {
+    H.startNewQuestion();
+    H.miniPickerBrowseAll().click();
+
+    H.entityPickerModalItem(1, "Sample Database").click();
+
+    H.entityPickerModalLevel(2).within(() => {
+      cy.findByText("Orders").should("exist");
+
+      cy.findByText("13347 structured").should("not.exist");
+      cy.findByText("13347 native").should("not.exist");
+    });
+  });
+});
+
+describe("issue #47005", () => {
+  beforeEach(() => {
+    H.restore();
+    H.restore("postgres-12");
+    cy.signInAsNormalUser();
+
+    H.createQuestion({
+      name: "Question A",
+      query: {
+        "source-table": ORDERS_ID,
+      },
+    }).then(({ body: question }) => {
+      H.createQuestion(
+        {
+          name: "Question B",
+          query: {
+            "source-table": "card__" + question.id,
+          },
+        },
+        { visitQuestion: true },
+      );
+    });
+  });
+
+  it("should show the collection of the base question in breadcrumbs (metabase#47005)", () => {
+    cy.findAllByTestId("head-crumbs-container")
+      .filter(":contains(Question A)")
+      .findByText("Our analytics")
+      .should("be.visible");
+  });
+});
+
+describe("issue 66210", () => {
+  const METRIC_NAME = "66210 metric";
+
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+
+    H.createQuestion({
+      name: METRIC_NAME,
+      query: {
+        "source-table": ORDERS_ID,
+        aggregation: [["count"]],
+      },
+      type: "metric",
+    });
+
+    cy.visit("/");
+  });
+
+  it("should not allow you to join on metrics", () => {
+    H.startNewQuestion();
+    H.miniPickerBrowseAll().click();
+    H.entityPickerModalItem(0, "Our analytics").click();
+    H.entityPickerModalItem(1, METRIC_NAME).should("be.visible");
+    H.entityPickerModalItem(1, "Orders").click();
+    H.join();
+    H.miniPickerBrowseAll().click();
+    H.entityPickerModalItem(0, "Our analytics").click();
+    H.entityPickerModalLevel(1).findByText(METRIC_NAME).should("not.exist");
+  });
+});
+
+describe("issue #67903", () => {
+  beforeEach(() => {
+    cy.viewport(630, 800);
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("should not show preview table headers on top of other elements (metabase#67903)", () => {
+    H.startNewQuestion();
+    H.miniPickerBrowseAll().click();
+    H.pickEntity({ path: ["Databases", /Sample Database/, "Orders"] });
+    H.getNotebookStep("data").findByTestId("step-preview-button").click();
+    H.queryBuilderHeader().findByLabelText("View SQL").click();
+    cy.findByTestId("table-header").should("not.be.visible");
+  });
+});
+
+describe("issue #67767", () => {
+  const SCREEN_WIDTH = 630;
+
+  beforeEach(() => {
+    cy.viewport(SCREEN_WIDTH, 800);
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("only show preview query at full width on small screens (metabase#67767)", () => {
+    H.startNewQuestion();
+    H.miniPickerBrowseAll().click();
+    H.pickEntity({ path: ["Databases", /Sample Database/, "Orders"] });
+    H.getNotebookStep("data").findByTestId("step-preview-button").click();
+    H.queryBuilderHeader().findByLabelText("View SQL").click();
+    H.sidebar()
+      .findByText("SQL for this question")
+      .then(($el) => {
+        expect($el.get(0).scrollWidth).to.eq(SCREEN_WIDTH);
+      });
+  });
+});
+
+describe("issue 68574", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+
+    const questionDetails: NativeQuestionDetails = {
+      name: "Question 1",
+      native: {
+        query: "SELECT * FROM ORDERS WHERE CREATED_AT > {{ start }}",
+        "template-tags": {
+          start: {
+            type: "date",
+            name: "start",
+            "display-name": "Start",
+            id: "1",
+          },
+        },
+      },
+      parameters: [
+        createMockParameter({
+          id: "1",
+          slug: "start",
+          required: true,
+          name: "Start",
+          type: "date/single",
+          target: ["variable", ["template-tag", "start"]],
+        }),
+      ],
+    };
+
+    H.createNativeQuestion(questionDetails, { wrapId: true });
+  });
+
+  it("should be possible to run a query for a empty required parameter without a default value (metabase#68574)", () => {
+    updateFormattingSettings({
+      date_style: "D MMMM, YYYY",
+      date_abbreviate: false,
+    });
+    visitQuestion("2027-01-01");
+    assertParameterFormat("1 January, 2027");
+
+    cy.log("change the date format");
+    updateFormattingSettings({
+      date_style: "dddd, MMMM D, YYYY",
+      date_abbreviate: false,
+    });
+    visitQuestion("2027-01-01");
+    assertParameterFormat("Friday, January 1, 2027");
+
+    cy.log("enable date abbreviation");
+    updateFormattingSettings({
+      date_style: "dddd, MMMM D, YYYY",
+      date_abbreviate: true,
+    });
+    visitQuestion("2027-01-01");
+    assertParameterFormat("Fri, Jan 1, 2027");
+
+    cy.log("even when the setting is unset, it should render a valid format");
+    updateFormattingSettings(undefined);
+    visitQuestion("2027-01-01");
+    assertParameterFormat("January 1, 2027");
+  });
+
+  function updateFormattingSettings(settings: any) {
+    H.updateSetting("custom-formatting", {
+      "type/Temporal": settings,
+    });
+  }
+
+  function visitQuestion(value: string) {
+    cy.get("@questionId").then((id) => {
+      cy.visit(`/question/${id}?start=${value}`);
+    });
+  }
+
+  function assertParameterFormat(value: string) {
+    cy.findByTestId("parameter-value-widget-target")
+      .should("be.visible")
+      .should("contain.text", value);
+  }
 });

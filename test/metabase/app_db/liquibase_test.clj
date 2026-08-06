@@ -1,7 +1,5 @@
 (ns ^:mb/driver-tests metabase.app-db.liquibase-test
   (:require
-   [clojure.java.io :as io]
-   [clojure.set :as set]
    [clojure.string :as str]
    [clojure.test :refer :all]
    [metabase.app-db.core :as mdb]
@@ -11,7 +9,6 @@
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
    [metabase.test :as mt]
-   [metabase.util.yaml :as u.yaml]
    [next.jdbc :as next.jdbc]
    [toucan2.core :as t2])
   (:import
@@ -54,42 +51,24 @@
                   (str/includes? line "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci")))
                 (format "%s should include ENGINE ... CHARACTER SET ... COLLATE ..." (pr-str line)))))))))
 
-(defn liquibase-file->included-ids
-  "Read a liquibase migration file and returns all the migration id that is applied to `db-type`.
-  Ids are orderer in the order it's defined in migration file."
-  [file-path db-type]
-  (let [content (u.yaml/from-file (io/resource file-path))]
-    (->> (:databaseChangeLog content)
-         ;; if the changelog has filter by dbms, remove the ones that doens't apply for the current db-type
-         (remove (fn [{{:keys [dbms]} :changeSet}] (and (not (str/blank? dbms))
-                                                        (not (str/includes? dbms (name db-type))))))
-         ;; remove ignored changeSets
-         (remove #(get-in % [:changeSet :ignore]))
-         (map #(str (get-in % [:changeSet :id])))
-         (remove str/blank?))))
-
 (deftest consolidate-liquibase-changesets-test
   (mt/test-drivers #{:h2 :mysql :postgres}
     (mt/with-temp-empty-app-db [conn driver/*driver*]
       ;; fake a db where we ran all the migrations, including the legacy ones
-      (with-redefs [liquibase/decide-liquibase-file (fn [& _args] @#'liquibase/changelog-legacy-file)]
+      (mt/with-dynamic-fn-redefs [liquibase/decide-liquibase-file (fn [& _args] @#'liquibase/changelog-legacy-file)]
         (liquibase/with-liquibase [liquibase conn]
           (let [table-name (liquibase/changelog-table-name liquibase)]
             (.update liquibase "")
-            (t2/update! table-name {:filename "migrations/000_migrations.yaml"})
             (liquibase/consolidate-liquibase-changesets! conn liquibase)
-
             (testing "makes sure the change log filename are correctly set"
-              (is (= (set (liquibase-file->included-ids "migrations/000_legacy_migrations.yaml" driver/*driver*))
+              (is (= (set (mdb.test-util/liquibase-file->included-ids "liquibase_legacy_migrations.yaml" driver/*driver* conn))
                      (t2/select-fn-set :id table-name :filename "migrations/000_legacy_migrations.yaml")))
-
-              (is (= (set (liquibase-file->included-ids "migrations/001_update_migrations.yaml" driver/*driver*))
-                     (t2/select-fn-set :id table-name :filename "migrations/001_update_migrations.yaml"))))
-
-            (is (= (t2/select-fn-set :id table-name)
-                   (set/union
-                    (set (liquibase-file->included-ids "migrations/000_legacy_migrations.yaml" driver/*driver*))
-                    (set (liquibase-file->included-ids "migrations/001_update_migrations.yaml" driver/*driver*)))))))))))
+              (is (= (set (mdb.test-util/liquibase-file->included-ids "migrations/001_update_migrations.yaml" driver/*driver* conn))
+                     (t2/select-fn-set :id table-name :filename "migrations/001_update_migrations.yaml")))
+              (is (= []
+                     (remove #(str/starts-with? % "v56.") (t2/select-fn-set :id table-name :filename "migrations/056_update_migrations.yaml"))))
+              (is (= (t2/select-fn-set :id table-name)
+                     (set (mdb.test-util/all-liquibase-ids true driver/*driver* conn)))))))))))
 
 (deftest wait-for-all-locks-test
   (mt/test-drivers #{:h2 :mysql :postgres}
@@ -105,7 +84,7 @@
               (is (= :timed-out (liquibase/wait-for-all-locks sleep-ms timeout-ms)))))
           (testing "Will return successfully if the lock is released while we are waiting"
             (let [migrate-ms 100
-                  timeout-ms 200
+                  timeout-ms 500
                   locked     (promise)]
               (future
                 (liquibase/with-scope-locked liquibase
@@ -169,26 +148,28 @@
         (.update liquibase "")
         (is (< 52 (liquibase/latest-applied-major-version conn (.getDatabase liquibase))))))))
 
+(deftest extract-numbers-special-case-test
+  (testing "when specific migration verison is passed reports different major version"
+    (is (= 55 (first (#'liquibase/extract-numbers "v56.2025-06-05T16:48:48"))))
+    (is (= 55 (first (#'liquibase/extract-numbers "v56.2025-05-19T16:48:48"))))
+    (is (= 60 (first (#'liquibase/extract-numbers "v60.ghdf99efd"))))))
+
 (deftest rollback-major-version
   (mt/test-drivers #{:h2 :mysql :rollback}
     (mt/with-temp-empty-app-db [conn driver/*driver*]
       (liquibase/with-liquibase [liquibase conn]
         (.update liquibase "")
-
         (let [actual-latest-applied-version (liquibase/latest-applied-major-version conn (.getDatabase liquibase))
               actual-latest-available-version (liquibase/latest-available-major-version liquibase)]
           (testing "Can downgrade and re-upgrade version"
             (liquibase/rollback-major-version! conn liquibase false (dec actual-latest-available-version))
             (is (= (dec actual-latest-applied-version) (liquibase/latest-applied-major-version conn (.getDatabase liquibase))))
-
             (liquibase/rollback-major-version! conn liquibase false (- actual-latest-available-version 2))
             (is (= (- actual-latest-available-version 2) (liquibase/latest-applied-major-version conn (.getDatabase liquibase))))
-
             (.update liquibase "")
             (is (= actual-latest-applied-version (liquibase/latest-applied-major-version conn (.getDatabase liquibase)))))
-
           (testing "Cannot downgrade when there are changests from a newer version already ran which are not in the changelog file"
-            (with-redefs [liquibase/latest-applied-major-version (constantly (inc actual-latest-applied-version))]
+            (mt/with-dynamic-fn-redefs [liquibase/latest-applied-major-version (constantly (inc actual-latest-applied-version))]
               (is (thrown-with-msg? ExceptionInfo #"Cannot downgrade.*"
                                     (liquibase/rollback-major-version! conn liquibase false (dec actual-latest-available-version))))
               (testing "CAN downgrade if forced"

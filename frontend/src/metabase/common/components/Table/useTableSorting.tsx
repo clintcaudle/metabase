@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 
-import { SortDirection } from "metabase-types/api/sorting";
+import type { SortDirection } from "metabase-types/api";
 
 import type { BaseRow } from "./types";
 
@@ -9,7 +9,7 @@ const compareNumbers = (a: number, b: number) => a - b;
 export const useTableSorting = <Row extends BaseRow>({
   rows,
   defaultSortColumn,
-  defaultSortDirection = SortDirection.Asc,
+  defaultSortDirection = "asc",
   formatValueForSorting,
 }: {
   rows: Row[];
@@ -40,9 +40,11 @@ export const useTableSorting = <Row extends BaseRow>({
 
         const result =
           typeof a === "string"
-            ? compareStrings(a, b as string)
-            : compareNumbers(a, b as number);
-        return sortDirection === SortDirection.Asc ? result : -result;
+            ? // Unjustified type cast. FIXME
+              compareStrings(a, b as string)
+            : // Unjustified type cast. FIXME
+              compareNumbers(a, b as number);
+        return sortDirection === "asc" ? result : -result;
       });
     }
     return rows;

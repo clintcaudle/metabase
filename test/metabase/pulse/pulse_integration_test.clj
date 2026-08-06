@@ -3,6 +3,7 @@
 
   These tests should build content then mock out distrubution by usual channels (e.g. email) and check the results of
   the distributed content for correctness."
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.pulse.pulse-integration-test]}}}}}}
   (:require
    [clojure.data.csv :as csv]
    [clojure.string :as str]
@@ -10,7 +11,6 @@
    [hickory.core :as hik]
    [hickory.select :as hik.s]
    [metabase.channel.settings :as channel.settings]
-   [metabase.lib.core :as lib]
    [metabase.notification.test-util :as notification.tu]
    [metabase.pulse.send :as pulse.send]
    [metabase.pulse.test-util :as pulse.test-util]
@@ -38,7 +38,6 @@
                                                                                 :expressions  {"Tax Rate" [:/
                                                                                                            [:field (mt/id :orders :tax) {:base-type :type/Float}]
                                                                                                            [:field (mt/id :orders :total) {:base-type :type/Float}]]},
-                                                                                :expression-idents {"Tax Rate" "BDpp6yH1r645cmTpDov7e"}
                                                                                 :fields       [[:field (mt/id :orders :tax) {:base-type :type/Float}]
                                                                                                [:field (mt/id :orders :total) {:base-type :type/Float}]
                                                                                                [:expression "Tax Rate"]]
@@ -66,7 +65,7 @@
   element. In our test cases that's the Tax Rate column."
   [pulse]
   (let [channel-messages (pulse.test-util/with-captured-channel-send-messages!
-                           (with-redefs [channel.settings/bcc-enabled? (constantly false)]
+                           (mt/with-dynamic-fn-redefs [channel.settings/bcc-enabled? (constantly false)]
                              (mt/with-test-user nil
                                (pulse.send/send-pulse! pulse))))
         html-body  (-> channel-messages :channel/email first :message first :content)
@@ -190,7 +189,7 @@
   "Simulate sending the pulse email, get the attached text/csv content, and parse into a map of
   attachment name -> column name -> column data"
   [pulse]
-  (with-redefs [channel.settings/bcc-enabled? (constantly false)]
+  (mt/with-dynamic-fn-redefs [channel.settings/bcc-enabled? (constantly false)]
     (->> (mt/with-test-user nil
            (pulse.test-util/with-captured-channel-send-messages!
              (pulse.send/send-pulse! pulse)))
@@ -203,7 +202,7 @@
                    (= :attachment type)
                    (= "text/csv" content-type))
               [(strip-timestamp file-name)
-               (let [[h & r] (csv/read-csv (slurp content))]
+               (let [[h & r] (csv/read-csv (u/strip-bom (slurp content)))]
                  (zipmap h (apply mapv vector r)))])))
          (into {}))))
 
@@ -333,6 +332,7 @@
                   [:field "EXAMPLE_SECOND" {:base-type :type/Integer}]]
    :source-table (format "card__%s" base-card-id)})
 
+#_{:clj-kondo/ignore [:metabase/i-like-making-cams-eyes-bleed-with-horrifically-long-tests]}
 (deftest consistent-date-formatting-test
   (mt/with-temporary-setting-values [custom-formatting nil]
     (let [q (sql-time-query "2023-12-11 15:30:45.123" 20)]
@@ -354,7 +354,8 @@
         (mt/with-temp [:model/Card {native-card-id :id} (-> (mt/card-with-source-metadata-for-query
                                                              (mt/native-query {:query q}))
                                                             (assoc :name "NATIVE"))
-                       :model/Card {model-card-id  :id} (-> (mt/card-with-source-metadata-for-query
+                       :model/Card {model-card-metadata :result_metadata
+                                    model-card-id  :id} (-> (mt/card-with-source-metadata-for-query
                                                              {:database (mt/id)
                                                               :type     :query
                                                               :query    (model-query native-card-id)})
@@ -362,11 +363,12 @@
                                                                     :type :model})
                                                             (update :result_metadata
                                                                     #(mapv model-metadata-fn %)))
-                       :model/Card {meta-model-card-id :id} (-> (mt/card-with-source-metadata-for-query
+                       :model/Card {meta-model-card-metadata :result_metadata
+                                    meta-model-card-id :id} (-> (mt/card-with-source-metadata-for-query
                                                                  (mt/mbql-query nil
                                                                    {:source-table (format "card__%s" model-card-id)}))
-                                                                (assoc :name                   "METAMODEL"
-                                                                       :type                   :model
+                                                                (assoc :name "METAMODEL"
+                                                                       :type :model
                                                                        :visualization_settings
                                                                        {:column_settings {"[\"name\",\"FULL_DATETIME_UTC\"]"
                                                                                           {:date_abbreviate true
@@ -413,7 +415,45 @@
                 native-results    (get-res "NATIVE.csv")
                 model-results     (get-res "MODEL.csv")
                 metamodel-results (get-res "METAMODEL.csv")]
+            (testing "Sanity check: metadata should have correct display names"
+              (testing "model card"
+                (is (= ["Full Datetime Utc"
+                        "Full Datetime Pacific"
+                        "Example Timestamp"
+                        "Example Timestamp With Time Zone"
+                        "Example Date"
+                        "Example Time"
+                        "Example Year"
+                        "Example Month"
+                        "Example Day"
+                        "Example Week Number"
+                        "Example Week"
+                        "Example Hour"
+                        "Example Minute"
+                        "Example Second"]
+                       (map :display_name model-card-metadata))))
+              (testing "metamodel card — QP adds temporal suffix since it computes display names fresh"
+                (is (= ["Full Datetime Utc"
+                        "Full Datetime Pacific"
+                        "Example Timestamp"
+                        "Example Timestamp With Time Zone"
+                        "Example Date"
+                        "Example Time"
+                        "Example Year"
+                        "Example Month"
+                        "Example Day"
+                        "Example Week Number"
+                        "Example Week: Week"
+                        "Example Hour"
+                        "Example Minute"
+                        "Example Second"]
+                       (map :display_name meta-model-card-metadata))))
+              (testing "metamodel results"
+                (is (= (sort (map :display_name meta-model-card-metadata))
+                       (sort (keys metamodel-results))))))
             ;; Note that these values are obtained by inspection since the UI formats are in the FE code.
+            ;;
+            ;; TODO (Cam 6/18/25) -- these fail for me locally with `Dec` instead of `December` -- see #59803
             (testing "The default export formats conform to the default UI formats"
               (is (= {"FULL_DATETIME_UTC"                "December 11, 2023, 3:30 PM"
                       "FULL_DATETIME_PACIFIC"            "December 11, 2023, 3:30 PM"
@@ -445,7 +485,7 @@
                       "Example Month"                    "12"
                       "Example Day"                      "11"
                       "Example Week Number"              "50"
-                      "Example Week: Week"               "December 10, 2023 - December 16, 2023"
+                      "Example Week"                     "December 10, 2023 - December 16, 2023"
                       "Example Hour"                     "15"
                       "Example Minute"                   "30"
                       "Example Second"                   "45"}
@@ -572,7 +612,7 @@
                        :model/PulseChannelRecipient _ {:pulse_channel_id pulse-channel-id
                                                        :user_id          (mt/user->id :rasta)}]
           (let [attachment-name->cols (mt/with-fake-inbox
-                                        (with-redefs [channel.settings/bcc-enabled? (constantly false)]
+                                        (mt/with-dynamic-fn-redefs [channel.settings/bcc-enabled? (constantly false)]
                                           (mt/with-test-user nil
                                             (pulse.send/send-pulse! pulse)))
                                         (->>
@@ -583,7 +623,7 @@
                                                    (= :attachment type)
                                                    (= "text/csv" content-type))
                                               [(strip-timestamp file-name)
-                                               (first (csv/read-csv (slurp content)))])))
+                                               (first (csv/read-csv (u/strip-bom (slurp content))))])))
                                          (into {})))]
             (testing "Renaming columns via viz settings is correctly applied to the CSV export"
               (is (= ["THE_ID" "ORDER TAX" "Total Amount" "Discount Applied ($)" "Amount Ordered" "Effective Tax Rate"]
@@ -602,7 +642,7 @@
   "Simulate sending the pulse email, get the html body of the response and return the scalar value of the card."
   [pulse]
   (mt/with-fake-inbox
-    (with-redefs [channel.settings/bcc-enabled? (constantly false)]
+    (mt/with-dynamic-fn-redefs [channel.settings/bcc-enabled? (constantly false)]
       (mt/with-test-user nil
         (pulse.send/send-pulse! pulse)))
     (let [html-body   (get-in @mt/inbox ["rasta@metabase.com" 0 :body 0 :content])
@@ -664,7 +704,7 @@
   If not pulse is sent, return `nil`."
   [pulse]
   (mt/with-fake-inbox
-    (with-redefs [channel.settings/bcc-enabled? (constantly false)]
+    (mt/with-dynamic-fn-redefs [channel.settings/bcc-enabled? (constantly false)]
       (mt/with-test-user nil
         (pulse.send/send-pulse! pulse)))
     (when-some [html-body (get-in @mt/inbox ["rasta@metabase.com" 0 :body 0 :content])]
@@ -815,7 +855,7 @@
              :model/PulseChannelRecipient _ {:pulse_channel_id pulse-channel-id
                                              :user_id          (mt/user->id :rasta)}]
             (mt/with-fake-inbox
-              (with-redefs [channel.settings/bcc-enabled? (constantly false)]
+              (mt/with-dynamic-fn-redefs [channel.settings/bcc-enabled? (constantly false)]
                 (mt/with-test-user nil
                   (pulse.send/send-pulse! pulse)))
               (let [html-body (get-in @mt/inbox ["rasta@metabase.com" 0 :body 0 :content])
@@ -850,7 +890,7 @@
                            :model/PulseChannelRecipient _ {:pulse_channel_id pulse-channel-id
                                                            :user_id          (mt/user->id :rasta)}]
               (mt/with-fake-inbox
-                (with-redefs [channel.settings/bcc-enabled? (constantly false)]
+                (mt/with-dynamic-fn-redefs [channel.settings/bcc-enabled? (constantly false)]
                   (mt/with-test-user nil
                     (pulse.send/send-pulse! pulse)))
                 (let [html-body (get-in @mt/inbox ["rasta@metabase.com" 0 :body 0 :content])]
@@ -864,20 +904,23 @@
                         {:fields   [$id $longitude $latitude]
                          :order-by [[:asc $id]]
                          :limit    5})
-            base-card {:dataset_query   query}
+            base-card {:dataset_query query}
             model-eid (u/generate-nano-id)
             model     {:dataset_query   query
                        :type            :model
                        :entity_id       model-eid
-                       :result_metadata [{:name  "ID"
-                                          :id    (mt/id :airport :id)
-                                          :ident (lib/model-ident (mt/ident :airport :id) model-eid)}
+                       :result_metadata [{:name         "ID"
+                                          :display_name "ID"
+                                          :id           (mt/id :airport :id)
+                                          :base_type    :type/Integer}
                                          {:semantic_type :type/Longitude
                                           :name          "LONGITUDE"
-                                          :ident         (lib/model-ident (mt/ident :airport :longitude) model-eid)}
+                                          :display_name  "Longitude"
+                                          :base_type     :type/Float}
                                          {:semantic_type :type/Latitude
                                           :name          "LATITUDE"
-                                          :ident         (lib/model-ident (mt/ident :airport :latitude) model-eid)}]}]
+                                          :display_name  "Latitude"
+                                          :base_type     :type/Float}]}]
         (mt/with-temp [:model/Card {card-id :id} base-card
                        :model/Card {model-id :id} model
                        :model/Dashboard {dash-id :id} {}
@@ -924,7 +967,7 @@
                        :model/PulseChannelRecipient _ {:pulse_channel_id pulse-channel-id
                                                        :user_id          (mt/user->id :rasta)}]
           (mt/with-fake-inbox
-            (with-redefs [channel.settings/bcc-enabled? (constantly false)]
+            (mt/with-dynamic-fn-redefs [channel.settings/bcc-enabled? (constantly false)]
               (mt/with-test-user nil
                 (pulse.send/send-pulse! pulse)))
             (is (string? (get-in @mt/inbox ["rasta@metabase.com" 0 :body 0 :content])))))))))

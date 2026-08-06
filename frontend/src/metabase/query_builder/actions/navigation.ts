@@ -1,51 +1,39 @@
-import type { Location, LocationDescriptor } from "history";
-import { push, replace } from "react-router-redux";
-import { createAction } from "redux-actions";
-import { parse as parseUrl } from "url";
+import _ from "underscore";
 
-import { isEqualCard } from "metabase/lib/card";
-import { createThunkAction } from "metabase/lib/redux";
-import { equals } from "metabase/lib/utils";
-import { getLocation } from "metabase/selectors/routing";
-import * as Lib from "metabase-lib";
-import type Question from "metabase-lib/v1/Question";
-import { isAdHocModelOrMetricQuestion } from "metabase-lib/v1/metadata/utils/models";
-import type { Dispatch } from "metabase-types/store";
+import { createThunkAction } from "metabase/redux";
+import { resetUIControls } from "metabase/redux/query-builder";
+import type { Dispatch } from "metabase/redux/store";
+import type { Action, Location } from "metabase/router";
 
 import {
   getCard,
   getDatasetEditorTab,
-  getOriginalQuestion,
   getQueryBuilderMode,
-  getQuestion,
-  getUiControls,
   getZoomedObjectId,
 } from "../selectors";
 import { getQueryBuilderModeFromLocation } from "../typed-utils";
-import {
-  getCurrentQueryParams,
-  getPathNameFromQueryBuilderMode,
-  getURLForCardState,
-} from "../utils";
 
-import { type QueryParams, initializeQB, setCardAndRun } from "./core";
-import { resetRowZoom, zoomInRow } from "./object-detail";
+import { setCardAndRun } from "./core/core";
+import { type QueryParams, initializeQB } from "./core/initializeQB";
+import { resetRowZoom } from "./object-detail";
 import { cancelQuery } from "./querying";
-import { resetUIControls, setQueryBuilderMode } from "./ui";
-
-export const SET_CURRENT_STATE = "metabase/qb/SET_CURRENT_STATE";
-const setCurrentState = createAction(SET_CURRENT_STATE);
+import { setCurrentState } from "./state";
+import { setQueryBuilderMode } from "./ui";
+import { zoomInRow } from "./zoom";
 
 export const POP_STATE = "metabase/qb/POP_STATE";
 export const popState = createThunkAction(
   POP_STATE,
-  (location) => async (dispatch, getState) => {
+  (location: Location) => async (dispatch, getState) => {
     dispatch(cancelQuery());
 
     const zoomedObjectId = getZoomedObjectId(getState());
     if (zoomedObjectId) {
-      const { state, query } = getLocation(getState());
-      const previouslyZoomedObjectId = state?.objectId || query?.objectId;
+      // The POP has already committed, so `location` is the entry we navigated
+      // to; its state/search hold the object we were previously zoomed into.
+      const previouslyZoomedObjectId =
+        location.state?.objectId ||
+        new URLSearchParams(location.search).get("objectId");
 
       if (
         previouslyZoomedObjectId &&
@@ -60,12 +48,12 @@ export const popState = createThunkAction(
 
     const card = getCard(getState());
     if (location.state && location.state.card) {
-      if (!equals(card, location.state.card)) {
+      if (!_.isEqual(card, location.state.card)) {
         const isEmptyQuery = !location.state.card.dataset_query.database;
 
         if (isEmptyQuery) {
-          // We are being navigated back to empty notebook edtor without data source selected.
-          // Reset QB state to aovid showing any data or errors from "future" history states.
+          // We are being navigated back to empty notebook editor without data source selected.
+          // Reset QB state to avoid showing any data or errors from "future" history states.
           // Do not run the question as the query without data source is invalid.
           await dispatch(initializeQB(location, {}));
         } else {
@@ -96,6 +84,10 @@ export const popState = createThunkAction(
         }),
       );
     }
+
+    if (location.state?.objectId) {
+      await dispatch(zoomInRow({ objectId: location.state.objectId }));
+    }
   },
 );
 
@@ -109,138 +101,41 @@ const getURL = (location: Location, { includeMode = false } = {}) =>
 
 // Logic for handling location changes, dispatched by top-level QueryBuilder component
 export const locationChanged =
-  (location: Location, nextLocation: Location, nextParams: QueryParams) =>
+  (
+    location: Location,
+    nextLocation: Location,
+    nextParams: QueryParams,
+    navigationType: Action,
+  ) =>
   (dispatch: Dispatch) => {
     if (location !== nextLocation) {
-      if (nextLocation.action === "POP") {
-        if (
-          getURL(nextLocation, { includeMode: true }) !==
-          getURL(location, { includeMode: true })
-        ) {
+      // Treat both undefined and null as "no state" — the browser leaves
+      // `history.state` as null for navigations the app didn't initiate (typed
+      // URLs, browser hash changes, cy.visit), while `updateUrl` always sets a
+      // `state.card` object.
+      const isExternalUrlChange = nextLocation.state == null;
+      const urlChanged =
+        getURL(nextLocation, { includeMode: true }) !==
+        getURL(location, { includeMode: true });
+      if (navigationType === "POP") {
+        if (urlChanged) {
           // the browser forward/back button was pressed
-
           dispatch(popState(nextLocation));
+          // POP without state means navigation to an externally-set URL (eg.
+          // typing into the address bar, or a hash-only navigation that the
+          // browser handled without a full page reload). Re-run init so the
+          // QB picks up the new query.
+          if (isExternalUrlChange) {
+            dispatch(initializeQB(nextLocation, nextParams));
+          }
         }
       } else if (
-        (nextLocation.action === "PUSH" || nextLocation.action === "REPLACE") &&
+        (navigationType === "PUSH" || navigationType === "REPLACE") &&
         // ignore PUSH/REPLACE with `state` because they were initiated by the `updateUrl` action
-        nextLocation.state === undefined
+        isExternalUrlChange
       ) {
         // a link to a different qb url was clicked
         dispatch(initializeQB(nextLocation, nextParams));
       }
     }
   };
-
-export const UPDATE_URL = "metabase/qb/UPDATE_URL";
-export const updateUrl = createThunkAction(
-  UPDATE_URL,
-  (
-    question?: Question | null,
-    {
-      dirty,
-      replaceState,
-      preserveParameters = true,
-      queryBuilderMode,
-      datasetEditorTab,
-      objectId,
-    } = {},
-  ) =>
-    (dispatch, getState) => {
-      if (!question) {
-        question = getQuestion(getState());
-
-        if (!question) {
-          return;
-        }
-      }
-
-      const originalQuestion = getOriginalQuestion(getState());
-      const isAdHocModelOrMetric = isAdHocModelOrMetricQuestion(
-        question,
-        originalQuestion,
-      );
-
-      if (dirty == null) {
-        const uiControls = getUiControls(getState());
-        dirty =
-          !originalQuestion ||
-          (!isAdHocModelOrMetric &&
-            (question.isDirtyComparedTo(originalQuestion) ||
-              uiControls.isModifiedFromNotebook));
-      }
-
-      const { isNative } = Lib.queryDisplayInfo(question.query());
-      // prevent clobbering of hash when there are fake parameters on the question
-      // consider handling this in a more general way, somehow
-      if (!isNative && question.parameters().length > 0) {
-        dirty = true;
-      }
-
-      if (!queryBuilderMode) {
-        queryBuilderMode = getQueryBuilderMode(getState());
-      }
-      if (!datasetEditorTab) {
-        datasetEditorTab = getDatasetEditorTab(getState());
-      }
-
-      const card = isAdHocModelOrMetric ? getCard(getState()) : question.card();
-      const newState = {
-        card,
-        cardId: question.id(),
-        objectId,
-      };
-
-      const { currentState } = getState().qb;
-      const queryParams = preserveParameters ? getCurrentQueryParams() : {};
-      const url = getURLForCardState(newState, dirty, queryParams, objectId);
-
-      const urlParsed = parseUrl(url);
-      const locationDescriptor: LocationDescriptor = {
-        pathname: getPathNameFromQueryBuilderMode({
-          pathname: urlParsed.pathname || "",
-          queryBuilderMode,
-          datasetEditorTab,
-        }),
-        search: urlParsed.search ?? undefined,
-        hash: urlParsed.hash ?? undefined,
-        state: newState,
-      };
-
-      const isSameURL =
-        locationDescriptor.pathname === window.location.pathname &&
-        (locationDescriptor.search || "") === (window.location.search || "") &&
-        (locationDescriptor.hash || "") === (window.location.hash || "");
-      const isSameCard =
-        currentState && isEqualCard(currentState.card, newState.card);
-
-      if (isSameCard && isSameURL) {
-        return;
-      }
-
-      if (replaceState == null) {
-        const isSameMode =
-          getQueryBuilderModeFromLocation(locationDescriptor)
-            .queryBuilderMode ===
-          getQueryBuilderModeFromLocation(window.location).queryBuilderMode;
-
-        // if the serialized card is identical replace the previous state instead of adding a new one
-        // e.x. when saving a new card we want to replace the state and URL with one with the new card ID
-        replaceState = isSameCard && isSameMode;
-      }
-
-      // this is necessary because we can't get the state from history.state
-      dispatch(setCurrentState(newState));
-
-      try {
-        if (replaceState) {
-          dispatch(replace(locationDescriptor));
-        } else {
-          dispatch(push(locationDescriptor));
-        }
-      } catch (e) {
-        // saving the location state can exceed the session storage quota (metabase#25312)
-        console.warn(e);
-      }
-    },
-);

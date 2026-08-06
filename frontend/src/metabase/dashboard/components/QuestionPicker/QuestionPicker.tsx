@@ -1,40 +1,52 @@
 import { useMemo, useState } from "react";
 import { t } from "ttag";
-import _ from "underscore";
 
-import { useListDatabasesQuery } from "metabase/api";
-import { isPublicCollection } from "metabase/collections/utils";
-import Breadcrumbs from "metabase/components/Breadcrumbs";
-import SelectList from "metabase/components/SelectList";
-import type { BaseSelectListItemProps } from "metabase/components/SelectList/BaseSelectListItem";
-import Input from "metabase/core/components/Input";
+import { useListCollectionsQuery } from "metabase/api";
+import { ROOT_COLLECTION } from "metabase/common/collections/constants";
+import getExpandedCollectionsById from "metabase/common/collections/getExpandedCollectionsById";
+import { isPublicCollection } from "metabase/common/collections/utils";
+import { Breadcrumbs } from "metabase/common/components/Breadcrumbs";
+import { SelectList } from "metabase/common/components/SelectList";
+import type { BaseSelectListItemProps } from "metabase/common/components/SelectList/BaseSelectListItem";
+import { useDebouncedValue } from "metabase/common/hooks/use-debounced-value";
+import { getCollectionBreadCrumbs } from "metabase/common/utils/collections";
+import { useDashboardContext } from "metabase/dashboard/context";
 import { getDashboard } from "metabase/dashboard/selectors";
-import Collections, { ROOT_COLLECTION } from "metabase/entities/collections";
-import { isEmbeddingSdk } from "metabase/env";
-import { useDebouncedValue } from "metabase/hooks/use-debounced-value";
-import { getCrumbs } from "metabase/lib/collections";
-import { SEARCH_DEBOUNCE_DURATION } from "metabase/lib/constants";
-import { connect, useDispatch, useSelector } from "metabase/lib/redux";
+import { isEmbeddingSdk } from "metabase/embedding-sdk/config";
+import { useGetIcon } from "metabase/hooks/use-icon";
 import { PLUGIN_COLLECTIONS } from "metabase/plugins";
-import { getHasDataAccess, getHasNativeWrite } from "metabase/selectors/data";
-import { Button, Flex, Icon, type IconProps } from "metabase/ui";
-import type { Collection, CollectionId } from "metabase-types/api";
+import { useDispatch, useSelector } from "metabase/redux";
+import {
+  canUserCreateNativeQueries,
+  canUserCreateQueries,
+  getUserPersonalCollectionId,
+} from "metabase/selectors/user";
+import { Button, Flex, Icon, Input, TextInput } from "metabase/ui";
+import { SEARCH_DEBOUNCE_DURATION } from "metabase/utils/constants";
+import type { CollectionId } from "metabase-types/api";
 
 import { QuestionList } from "./QuestionList";
 import S from "./QuestionPicker.module.css";
 import { addDashboardQuestion } from "./actions";
+import {
+  COLLECTIONS_TOP_LEVEL_ID,
+  SHARED_TENANT_COLLECTIONS_ROOT_ID,
+  useCollectionsWithTenants,
+} from "./hooks/use-collections-with-tenants";
 
-interface QuestionPickerInnerProps {
+interface QuestionPickerProps {
   onSelect: BaseSelectListItemProps["onSelect"];
-  collectionsById: Record<CollectionId, Collection>;
-  getCollectionIcon: (collection: Collection) => IconProps;
 }
 
-function QuestionPickerInner({
-  onSelect,
-  collectionsById,
-  getCollectionIcon,
-}: QuestionPickerInnerProps) {
+export function QuestionPicker({ onSelect }: QuestionPickerProps) {
+  const { data: allCollectionsList = [] } = useListCollectionsQuery();
+  const userPersonalCollectionId = useSelector(getUserPersonalCollectionId);
+  const baseCollectionsById = useMemo(
+    () =>
+      getExpandedCollectionsById(allCollectionsList, userPersonalCollectionId),
+    [allCollectionsList, userPersonalCollectionId],
+  );
+  const getIcon = useGetIcon();
   const dispatch = useDispatch();
   const dashboard = useSelector(getDashboard);
   const dashboardCollection = dashboard?.collection ?? ROOT_COLLECTION;
@@ -47,8 +59,17 @@ function QuestionPickerInner({
     SEARCH_DEBOUNCE_DURATION,
   );
 
+  const collectionsById = useCollectionsWithTenants(baseCollectionsById);
+
+  const isAtTopLevel = currentCollectionId === COLLECTIONS_TOP_LEVEL_ID;
+  const isAtSharedTenantRoot =
+    currentCollectionId === SHARED_TENANT_COLLECTIONS_ROOT_ID;
   const collection = collectionsById[currentCollectionId];
-  const crumbs = getCrumbs(collection, collectionsById, setCurrentCollectionId);
+  const crumbs = getCollectionBreadCrumbs(
+    collection,
+    collectionsById,
+    setCurrentCollectionId,
+  );
 
   const handleSearchTextChange: React.ChangeEventHandler<HTMLInputElement> = (
     e,
@@ -60,48 +81,47 @@ function QuestionPickerInner({
     ? allCollections.filter(isPublicCollection)
     : allCollections;
 
-  const { data } = useListDatabasesQuery();
-  const databases = useMemo(() => data?.data ?? [], [data]);
-  const hasDataAccess = useMemo(() => getHasDataAccess(databases), [databases]);
-  const hasNativeWrite = useMemo(
-    () => getHasNativeWrite(databases),
-    [databases],
-  );
+  const hasDataAccess = useSelector(canUserCreateQueries);
+  const hasNativeWrite = useSelector(canUserCreateNativeQueries);
 
-  const onNewQuestion = (type: "native" | "notebook") =>
-    dispatch(addDashboardQuestion(type));
-
+  const { onNewQuestion } = useDashboardContext();
+  const onNewNativeQuestion = () => dispatch(addDashboardQuestion("native"));
   return (
     <div className={S.questionPickerRoot}>
-      <Input
+      <TextInput
         className={S.searchInput}
-        fullWidth
         autoFocus
         data-autofocus
         placeholder={t`Search…`}
         value={searchText}
-        onResetClick={() => setSearchText("")}
+        rightSectionPointerEvents="all"
+        rightSection={
+          searchText.length > 0 ? (
+            <Input.ClearButton
+              c="text-secondary"
+              onClick={() => setSearchText("")}
+            />
+          ) : null
+        }
         onChange={handleSearchTextChange}
       />
 
-      {(hasDataAccess || hasNativeWrite) && !isEmbeddingSdk && (
+      {(hasDataAccess || hasNativeWrite) && (
         <Flex gap="sm" mb="md" data-testid="new-button-bar">
           {hasDataAccess && (
             <Button
-              variant="outline"
-              className={S.newButton}
-              leftSection={<Icon name="insight" />}
-              onClick={() => onNewQuestion("notebook")}
+              w="50%"
+              leftSection={<Icon aria-hidden name="insight" />}
+              onClick={onNewQuestion}
             >
               {t`New Question`}
             </Button>
           )}
-          {hasNativeWrite && (
+          {hasNativeWrite && !isEmbeddingSdk() && (
             <Button
-              variant="outline"
-              className={S.newButton}
-              leftSection={<Icon name="sql" />}
-              onClick={() => onNewQuestion("native")}
+              w="50%"
+              leftSection={<Icon aria-hidden name="sql" />}
+              onClick={onNewNativeQuestion}
             >
               {t`New SQL query`}
             </Button>
@@ -118,11 +138,11 @@ function QuestionPickerInner({
           {collections.length > 0 && (
             <SelectList>
               {collections.map((collection) => {
-                const icon = getCollectionIcon(collection);
+                const icon = getIcon({ ...collection, model: "collection" });
                 const iconColor = PLUGIN_COLLECTIONS.isRegularCollection(
                   collection,
                 )
-                  ? "text-light"
+                  ? "text-disabled"
                   : icon.color;
                 return (
                   <SelectList.Item
@@ -131,11 +151,11 @@ function QuestionPickerInner({
                     name={collection.name}
                     icon={{
                       ...icon,
-                      color: iconColor,
+                      c: iconColor,
                     }}
                     rightIcon="chevronright"
                     onSelect={(collectionId) =>
-                      setCurrentCollectionId(collectionId as CollectionId)
+                      setCurrentCollectionId(collectionId)
                     }
                   />
                 );
@@ -145,31 +165,18 @@ function QuestionPickerInner({
         </>
       )}
 
-      <QuestionList
-        hasCollections={collections.length > 0}
-        searchText={debouncedSearchText}
-        collectionId={currentCollectionId}
-        onSelect={onSelect}
-        showOnlyPublicCollections={showOnlyPublicCollections}
-      />
+      {/* Hide the question list at top-level "Collections"
+          and "Shared collections" root. These have fake IDs that don't map to
+          real collections, so querying questions against them would fail. */}
+      {((!isAtSharedTenantRoot && !isAtTopLevel) || debouncedSearchText) && (
+        <QuestionList
+          hasCollections={collections.length > 0}
+          searchText={debouncedSearchText}
+          collectionId={currentCollectionId}
+          onSelect={onSelect}
+          showOnlyPublicCollections={showOnlyPublicCollections}
+        />
+      )}
     </div>
   );
 }
-
-export const QuestionPicker = _.compose(
-  Collections.load({
-    id: () => "root",
-    entityType: "collections",
-    loadingAndErrorWrapper: false,
-  }),
-  Collections.loadList({
-    entityType: "collections",
-    loadingAndErrorWrapper: false,
-  }),
-  connect((state, props: { entity: any /* collection entity instance */ }) => ({
-    collectionsById: (
-      props.entity || Collections
-    ).selectors.getExpandedCollectionsById(state),
-    getCollectionIcon: (props.entity || Collections).objectSelectors.getIcon,
-  })),
-)(QuestionPickerInner);

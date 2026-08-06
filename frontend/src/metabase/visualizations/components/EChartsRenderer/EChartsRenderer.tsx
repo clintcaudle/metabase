@@ -48,12 +48,33 @@ export const EChartsRenderer = forwardRef<HTMLDivElement, EChartsRendererProps>(
       });
 
       chartRef.current?.setOption(option, notMerge);
+
       onInit?.(chartRef.current);
     });
 
     useUnmount(() => {
       chartRef.current?.dispose();
     });
+
+    useEffect(() => {
+      const printMediaQuery = window.matchMedia("print");
+      const resizeForPrint = () => {
+        const chartElement = chartElemRef.current;
+        if (!chartElement) {
+          return;
+        }
+
+        chartRef.current?.resize({
+          width: chartElement.offsetWidth,
+          height: chartElement.offsetHeight,
+        });
+      };
+
+      printMediaQuery.addEventListener("change", resizeForPrint);
+      return () => {
+        printMediaQuery.removeEventListener("change", resizeForPrint);
+      };
+    }, []);
 
     useUpdateEffect(() => {
       chartRef.current?.setOption(option, notMerge);

@@ -1,10 +1,11 @@
 import fetchMock from "fetch-mock";
 
-import type { Dashboard, DashboardCard } from "metabase-types/api";
+import type { Card, Dashboard, DashboardCard } from "metabase-types/api";
+import type { EntityToken } from "metabase-types/api/entity";
 import { createMockDataset } from "metabase-types/api/mocks";
 
 export function setupEmbedDashboardEndpoints(
-  uuidOrToken: string,
+  uuidOrToken: EntityToken,
   dashboard: Dashboard,
   dashcards?: DashboardCard[],
 ) {
@@ -18,4 +19,15 @@ export function setupEmbedDashboardEndpoints(
       );
     });
   }
+}
+
+export function setupEmbeddableEntitiesEndpoints({
+  dashboards = [],
+  cards = [],
+}: {
+  dashboards: Dashboard[];
+  cards: Card[];
+}) {
+  fetchMock.get("path:/api/dashboard/embeddable", dashboards);
+  fetchMock.get("path:/api/card/embeddable", cards);
 }

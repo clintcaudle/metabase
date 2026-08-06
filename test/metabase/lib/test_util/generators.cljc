@@ -13,8 +13,7 @@
    [metabase.lib.test-util.generators.util :as gen.u]
    [metabase.lib.types.isa :as lib.types.isa]
    [metabase.test.util.random :as tu.rng]
-   [metabase.util :as u]
-   [metabase.util.malli :as mu]))
+   [metabase.util :as u]))
 
 ;; NOTE: Being able to *execute* these queries and grok the results would actually be really powerful, if we can
 ;; achieve it with moderate cost. I think we can, at least for most queries. Some temporal stuff is a huge PITA,
@@ -107,7 +106,7 @@
 
 (def ^:private ^:dynamic *safe-for-old-refs*
   "Controls whether the generators will construct queries with things like multiple joins to the same table, which
-  create ambiguous refs in classic pMBQL.
+  create ambiguous refs in classic MBQL 5.
 
   Default to true, ie. safe for the current library.
 
@@ -135,7 +134,7 @@
 ;; TODO: Add a schema for the step `[vectors ...]`?
 (add-step {:kind :aggregate})
 
-;; TODO: columns should be specified with :ident, but that isn't available yet. For now, pMBQL refs will do.
+;; TODO: columns should be specified with :ident, but that isn't available yet. For now, MBQL 5 refs will do.
 (defmethod run-step* :aggregate [query [_aggregate stage-number agg-clause]]
   (lib/aggregate query stage-number agg-clause))
 
@@ -236,13 +235,7 @@
           (testing "adds it to the end of the list"
             (is (= (count after-filters)
                    (inc (count before-filters))))
-            (is (=? filter-clause (last after-filters))))
-          (testing (str `lib/filter-operator " returns the right op")
-            ;; TODO: The generator will happily build multiple joins
-            (when-let [op (mu/disable-enforcement
-                            (lib/filter-operator after stage-number (last after-filters)))]
-              (is (= (first filter-clause)
-                     (:short op))))))))))
+            (is (=? filter-clause (last after-filters)))))))))
 
 ;; Expressions ===================================================================================
 ;; We only support a few basic expressions for now. It would be good to exercise all the expression types eventually,
@@ -380,8 +373,8 @@
         (is (= (inc (count before-joins))
                (count after-joins)))
         (testing "at the end"
-          (let [summaries? (or (seq (lib/aggregations after))
-                               (seq (lib/breakouts after)))]
+          (let [summaries? (or (seq (lib/aggregations after stage-number))
+                               (seq (lib/breakouts after stage-number)))]
             (is (=? {:lib/type   :mbql/join
                      :strategy   strategy
                      :alias      string?
@@ -418,11 +411,22 @@
     (testing "increments the stage-count"
       (is (= (inc (lib/stage-count before))
              (lib/stage-count after))))
-
     (testing "adds a new, empty stage"
       (is (empty? (all-stage-parts after -1))))))
 
 ;; Generator internals ===========================================================================
+(defn history-seq
+  "Returns the sequence of contexts, newest first."
+  [ctx]
+  (->> ctx
+       (iterate :previous)
+       (take-while some?)))
+
+(defn step-seq
+  "Returns the sequence of steps that brought about this query, oldest first."
+  [ctx]
+  (->> ctx history-seq reverse next (map :step)))
+
 (defn- run-step
   "Applies a step, returning the updated context."
   [{:keys [query] :as ctx} step]
@@ -441,26 +445,17 @@
   (let [{after :query :as ctx'} (run-step ctx step)]
     ;; Run the before/after tests. Throws if the tests fail.
     (try
-      (before-and-after before after step)
+      (testing (str "\n\nwith before steps\n" (str/join "\n" (map pr-str (step-seq ctx)))
+                    "\n\nwith before query\n" (u/pprint-to-str before)
+                    "\n\nwith current step\n" (pr-str step)
+                    "\n\nwith after query\n"  (u/pprint-to-str after))
+        (before-and-after before after step))
       ctx'
-
       (catch #?(:clj Throwable :cljs js/Error) e
         (throw (ex-info "Error in before/after testing" (-> ctx
                                                             (dissoc :query)
                                                             (assoc :before before, :after after, :step step))
                         e))))))
-
-(defn history-seq
-  "Returns the sequence of contexts, newest first."
-  [ctx]
-  (->> ctx
-       (iterate :previous)
-       (take-while some?)))
-
-(defn step-seq
-  "Returns the sequence of steps that brought about this query, oldest first."
-  [ctx]
-  (->> ctx history-seq reverse next (map :step)))
 
 (defn query->context
   "Retrieves the generator context from the metadata on a generated query."

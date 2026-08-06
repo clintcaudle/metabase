@@ -1,45 +1,30 @@
-import type { Location } from "history";
-import { useEffect, useState } from "react";
-import type { InjectedRouter, Route } from "react-router";
-import { push } from "react-router-redux";
+import { useEffect, useRef } from "react";
 
-import { useDispatch } from "metabase/lib/redux";
+import { useRouteLeaveBlocker } from "metabase/router";
 
-export const useConfirmOnRouteLeave = ({
-  router,
-  route,
-  shouldConfirm,
-  confirm,
-}: {
-  router?: InjectedRouter;
-  route?: Route;
+type Props = {
   shouldConfirm: boolean;
-  confirm: (onConfirm: () => void) => void;
-}) => {
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const [nextLocation, setNextLocation] = useState<Location>();
+  confirm: (onConfirm: () => void, onCancel: () => void) => void;
+};
+
+export const useConfirmOnRouteLeave = ({ shouldConfirm, confirm }: Props) => {
+  const blocker = useRouteLeaveBlocker(() => shouldConfirm);
+
+  // Both are replaced on every render or router state update. Read them through
+  // refs so the effect below keys on the blocked state alone, and so asks once
+  // per attempted navigation rather than again on every unrelated update.
+  const latest = useRef({ blocker, confirm });
+  latest.current = { blocker, confirm };
 
   useEffect(() => {
-    if (!route || !router) {
+    if (blocker.state !== "blocked") {
       return;
     }
-    const removeLeaveHook = router.setRouteLeaveHook(route, (location) => {
-      if (shouldConfirm && !isConfirmed) {
-        confirm(() => {
-          setIsConfirmed(true);
-          setNextLocation(location);
-        });
-        return false;
-      }
-    });
-    return removeLeaveHook;
-  }, [router, route, isConfirmed, shouldConfirm, confirm]);
-
-  const dispatch = useDispatch();
-
-  useEffect(() => {
-    if (nextLocation) {
-      dispatch(push(nextLocation));
-    }
-  }, [dispatch, nextLocation]);
+    // The navigation is parked, so the URL never moved and there is nothing to
+    // roll back: confirming resumes it, dismissing drops it.
+    latest.current.confirm(
+      () => latest.current.blocker.proceed?.(),
+      () => latest.current.blocker.reset?.(),
+    );
+  }, [blocker.state]);
 };

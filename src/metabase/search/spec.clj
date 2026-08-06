@@ -1,25 +1,51 @@
 (ns metabase.search.spec
   (:require
+   [buddy.core.codecs :as codecs]
+   [buddy.core.hash :as buddy-hash]
+   [clojure.core.memoize :as memoize]
    [clojure.set :as set]
    [clojure.string :as str]
    [clojure.walk :as walk]
    [malli.error :as me]
-   [metabase.api.common :as api]
    [metabase.config.core :as config]
    [metabase.search.config :as search.config]
    [metabase.util :as u]
+   [metabase.util.json :as json]
    [metabase.util.malli.registry :as mr]
    [toucan2.core :as t2]
    [toucan2.tools.transformed :as t2.transformed]))
 
 (def search-models
-  "Set of search model string names."
-  #{"dashboard" "table" "dataset" "segment" "collection" "database" "action" "indexed-entity" "metric" "card"})
+  "Search model string names, ordered by indexing priority.
+   Important / cheaper models come first so partial index is usable as soon as possible during a full index."
+  ["collection"
+   "dashboard"
+   "segment"
+   "measure"
+   "database"
+   "action"
+   "document"
+   "exploration"
+   "transform"
+   ;; The following come last as they can be slow to index due to:
+   ;; - cardinality (table, indexed-entity),
+   ;; - cost (e.g. large text payloads and native-query parsing for cards)
+   "table"
+   "metric"
+   "card"
+   "dataset"
+   ;; These can easily dwarf the cardinality of other entities, hence being dead last.
+   "indexed-entity"])
+
+(def raw-spec-forms
+  "Stores the raw (unevaluated) spec forms captured at macro expansion time.
+  Used to compute a deterministic hash for index versioning."
+  (atom {}))
 
 (def ^:private search-model->toucan-model
   (into {}
         (map (fn [search-model]
-               [search-model (-> search-model api/model->db-model :db-model)]))
+               [search-model (-> search-model search.config/model->db-model :db-model)]))
         search-models))
 
 (def ^:private SearchModel
@@ -33,28 +59,70 @@
   - keyword: given by the corresponding column
   - vector: calculated by the given expression
   - map: a sub-select"
-  [:union :boolean :keyword vector? :map])
+  [:union :boolean :keyword vector? :map
+   [:map
+    [:fn fn?]
+    [:fields {:optional true} [:vector :keyword]]]])
+
+(defn function-attr?
+  "Attributes populate by clojure functions"
+  [attr-def]
+  (and (map? attr-def) (:fn attr-def)))
+
+(defn collect-fn-attr-req-fields
+  "Return set of required appdb fields declared in a spec's function attrs"
+  [spec]
+  (->> (:attrs spec)
+       vals
+       (filter function-attr?)
+       (mapcat :fields)
+       distinct))
+
+(def legacy-input-excluded-keys
+  "Keys present on the ingestion document `m` that must NOT be encoded into `legacy_input`. These are
+   internal signals (ranking, filtering, ingestion bookkeeping) that the search API response should not
+   surface to clients. Consumers: `metabase.search.ingestion/->document`."
+  ;; `:collection_type` and `:collection_location` deliberately stay IN `legacy_input`:
+  ;; - `metabase.search.impl/serialize` reads `:collection_type` to build the response's `:collection.type`
+  ;; - `metabase.search.impl/add-dataset-collection-hierarchy` reads `:collection_location` to hydrate
+  ;;   `:collection_effective_ancestors`, and the collection-result hydration path reads `:location` from
+  ;;   the toucan instance (which the render-term keeps populated).
+  ;; `:document` is the document model's prose-mirror body: it's indexed as searchable text (via
+  ;; ast->text) but the raw JSON should never be echoed back in the search response or bloat the index row.
+  ;; `:data_layer` also stays IN: Metabot surfaces it on table results so the LLM sees a table's data layer.
+  #{:pinned :view_count :last_viewed_at :native_query :dataset_query :document})
 
 (def attr-types
   "The abstract types of each attribute."
-  {:archived            :boolean
-   :collection-id       :pk
-   :created-at          :timestamp
-   :creator-id          :pk
-   :dashboard-id        :int
-   :dashboardcard-count :int
-   :database-id         :pk
-   :id                  :text
-   :last-edited-at      :timestamp
-   :last-editor-id      :pk
-   :last-viewed-at      :timestamp
-   :name                :text
-   :native-query        nil
-   :official-collection :boolean
-   :pinned              :boolean
-   :updated-at          :timestamp
-   :verified            :boolean
-   :view-count          :int})
+  {:archived                :boolean
+   :collection-id           :pk
+   :created-at              :timestamp
+   :creator-id              :pk
+   :dashboard-id            :int
+   :dashboardcard-count     :int
+   :database-id             :pk
+   :id                      :text
+   :last-edited-at          :timestamp
+   :last-editor-id          :pk
+   :last-viewed-at          :timestamp
+   :name                    :text
+   :native-query            nil
+   :official-collection     :boolean
+   :pinned                  :boolean
+   :updated-at              :timestamp
+   :verified                :boolean
+   :view-count              :int
+   :display-type            :text
+   :is-published            :boolean
+   :source-type             :text
+   :collection-type         :text
+   :collection-location     :text
+   :root-collection-type    :text
+   :data-layer              :text
+   :data-authority          :text
+   ;; Precomputed at ingestion (see metabase.search.ingestion) from the curation signals above, so the
+   ;; "verified or curated content" filter is a single indexed boolean rather than a composite OR.
+   :curated                 :boolean})
 
 (def ^:private explicit-attrs
   "These attributes must be explicitly defined, omitting them could be a source of bugs."
@@ -75,7 +143,14 @@
          :pinned
          :verified                                          ;;  in addition to being a filter, this is also a ranker
          :view-count
-         :updated-at])
+         :updated-at
+         :is-published
+         :source-type
+         :collection-type                                   ;;  surfaced for downstream consumers (metabase.search.impl/serialize)
+         :collection-location                               ;;  surfaced for downstream consumers (add-dataset-collection-hierarchy)
+         :root-collection-type                              ;;  indexed for :library scorer — type of the top-level ancestor collection
+         :data-layer                                        ;;  indexed for the :data-layer scorer (table.data_layer; per-tier weights under :data-layer/*)
+         :data-authority])                                  ;;  input to the precomputed :curated flag (authoritative tables)
        distinct
        vec))
 
@@ -114,10 +189,13 @@
 (def ^:private Specification
   [:map {:closed true}
    [:name SearchModel]
-   [:visibility [:enum :all :app-user]]
+   [:visibility [:enum :all :app-user :superuser]]
    [:model :keyword]
    [:attrs Attrs]
-   [:search-terms [:sequential {:min 1} :keyword]]
+   [:search-terms [:or
+                   [:sequential {:min 1} :keyword]
+                   [:map-of :keyword [:or fn? true?]]]]
+   [:embedding-exclude {:optional true} [:set :keyword]]
    [:render-terms [:map-of NonAttrKey AttrValue]]
    [:where {:optional true} vector?]
    [:bookmark {:optional true} vector?]
@@ -166,55 +244,60 @@
     (keyword (str (name table) "." (name kw)))
     kw))
 
-(defn- find-fields-kw [kw]
+(defn- find-fields-kw [acc kw]
   ;; Filter out SQL functions
-  (when-not (or (str/starts-with? (name kw) "%")
-                (#{:else :integer :float} kw))
-    (let [table (get-table kw)]
-      [[(or table :this) (remove-table table kw)]])))
+  (if (or (str/starts-with? (name kw) "%")
+          (#{:else :integer :float} kw))
+    acc
+    (conj! acc
+           (if-let [table (get-table kw)]
+             [table (remove-table table kw)]
+             [:this kw]))))
 
-(defn- find-fields-expr [expr]
-  (cond
-    (keyword? expr)
-    (find-fields-kw expr)
+(defn- find-fields-expr
+  ([expr] (persistent! (find-fields-expr (transient []) expr)))
+  ([acc expr]
+   (cond
+     (keyword? expr)
+     (find-fields-kw acc expr)
 
-    (and (vector? expr) (> (count expr) 1))
-    (into [] (mapcat find-fields-expr) (subvec expr 1))))
+     (and (vector? expr) (> (count expr) 1))
+     (reduce find-fields-expr acc (subvec expr 1))
 
-(defn- find-fields-attr [[k v]]
-  (when v
+     (and (map? expr) (:fields expr))
+     (reduce-kv #(find-fields-expr %1 %3) acc (:fields expr))
+
+     :else acc)))
+
+(defn- find-fields-attr [acc k v]
+  (if v
     (if (true? v)
-      [[:this (keyword (u/->snake_case_en (name k)))]]
-      (find-fields-expr v))))
+      (conj! acc [:this (keyword (u/->snake_case_en (name k)))])
+      (find-fields-expr acc v))
+    acc))
 
-(defn- find-fields-select-item [x]
-  (cond
-    (keyword? x)
-    (find-fields-kw x)
+(defn- find-fields-search [acc item]
+  (let [x (if (map-entry? item) (key item) item)]
+    (cond
+      (keyword? x)
+      (find-fields-kw acc x)
 
-    (vector? x)
-    (find-fields-expr (first x))))
+      (vector? x)
+      (find-fields-expr acc (first x))
 
-(defn- find-fields-top [x]
-  (cond
-    (map? x)
-    (into [] (mapcat find-fields-attr) x)
-
-    (sequential? x)
-    (into [] (mapcat find-fields-select-item) x)
-
-    :else
-    (throw (ex-info "Unexpected format for fields" {:x x}))))
+      :else acc)))
 
 (defn- find-fields
   "Search within a definition for all the fields referenced on the given table alias."
   [spec]
   (u/group-by #(nth % 0) #(nth % 1) conj #{}
-              (-> []
-                  (into (mapcat find-fields-top)
-                        ;; Remove the keys with special meanings (should probably switch this to an allowlist rather)
-                        (vals (dissoc spec :name :visibility :native-query :where :joins :bookmark :model)))
-                  (into (find-fields-expr (:where spec))))))
+              (as-> (transient []) acc
+                ;; select fields that will influence content
+                (reduce-kv find-fields-attr acc (:attrs spec))
+                (reduce find-fields-search acc (:search-terms spec))
+                (reduce-kv find-fields-attr acc (:render-terms spec))
+                (find-fields-expr acc (:where spec))
+                (persistent! acc))))
 
 (defn- replace-qualification [expr from to]
   (cond
@@ -257,7 +340,6 @@
                 (assoc res model #{{:search-model s
                                     :fields       table-fields
                                     :where        (replace-qualification join-condition table-alias :updated)}})))
-
             {(:model spec) #{{:search-model s
                               :fields       (:this (find-fields spec))
                               :where        (construct-source-where (-> spec :attrs :id))}}}
@@ -282,13 +364,13 @@
   identity)
 
 (defn spec
-  "Register a metabase model as a search-model.
+  "Register a Metabase model as a search-model.
   Once we're trying up the fulltext search project, we can inline a detailed explanation.
   For now, see its schema, and the existing definitions that use it."
-  [search-model]
-  ;; make sure the model namespace is loaded.
-  (t2/resolve-model (search-model->toucan-model search-model))
-  (spec* search-model))
+  ([search-model]
+   ;; make sure the model namespace is loaded.
+   (t2/resolve-model (search-model->toucan-model search-model))
+   (spec* search-model)))
 
 (defn specifications
   "A mapping from each search-model to its specification."
@@ -310,24 +392,58 @@
     (assert (contains? (:joins spec) table) (str "Reference to table without a join: " table))))
 
 (defmacro define-spec
-  "Define a spec for a search model."
-  [search-model spec]
-  `(let [spec# (-> ~spec
-                   (assoc :name ~search-model)
-                   (update :visibility #(or % :all))
-                   (update :attrs #(merge ~default-attrs %)))]
-     (validate-spec! spec#)
-     (derive (:model spec#) :hook/search-index)
-     (defmethod spec* ~search-model [~'_] spec#)))
+  "Define a search specification for indexing and searching a Metabase model.
 
-;; TODO we should memoize this for production (based on spec values)
+   Spec keys:
+   - `:model` - Toucan model keyword (required)
+   - `:attrs` - Map of search index attributes (required)
+   - `:search-terms` - Searchable text fields: a vector of column keywords, or a map of
+     column keyword to either `true` (use the raw value) or a transform fn applied for
+     full-text search (required)
+   - `:embedding-exclude` - Set of `:search-terms` keys to omit from the semantic-search
+     embedding text (they remain in full-text search). Use for fields whose raw value is
+     not suitable for semantic search.
+   - `:render-terms` - Additional attributes needed for display (required)
+   - `:visibility` - `:all` (default) or `:app-user` (non-sandboxed, non-impersonated users only)
+   - `:where` - HoneySQL where clause to filter indexed records
+   - `:bookmark` - HoneySQL join expression to detect if entity is bookmarked by current user
+   - `:joins` - Map of join aliases to [model join-condition] tuples
+
+   Attribute value formats:
+   - `true` - Use column with same name (snake_case)
+   - `:column_name` - Use specified database column
+   - `{:fn function :fields [:field1 :field2]}` - Execute a clojure function at index time; its scalar
+     return value is written to the column named after the attr key (snake_case)."
+  [search-model spec]
+  `(do
+     ;; Capture raw form before evaluation (symbols stay as symbols, not function objects)
+     (swap! raw-spec-forms assoc ~search-model '~spec)
+     (let [spec# (-> ~spec
+                     (assoc :name ~search-model)
+                     (update :visibility #(or % :all))
+                     (update :attrs #(merge ~default-attrs %)))]
+       (validate-spec! spec#)
+       (derive (:model spec#) :hook/search-index)
+       (defmethod spec* ~search-model [~'_] spec#))))
+
+(def ^:private model-hooks*
+  ;; Specs are immutable in production, and keying on the methods map also does the useful thing after a
+  ;; REPL/test reload.
+  ;; The key is only an invalidation token: the value comes from the static search-models list, so the first
+  ;; call builds a complete map even though resolving those models registers more methods while it runs.
+  ;; Its key is stale by then, which costs one recompute and nothing else.
+  (memoize/fifo
+   (fn [_spec-methods]
+     (->> (specifications)
+          vals
+          (map search-model-hooks)
+          merge-hooks))
+   :fifo/threshold 1))
+
 (defn model-hooks
   "Return an inverted map of data dependencies to search models, used for updating them based on underlying models."
   []
-  (->> (specifications)
-       vals
-       (map search-model-hooks)
-       merge-hooks))
+  (model-hooks* (methods spec*)))
 
 (defn- instance->db-values
   "Given a transformed toucan map, get back a mapping to the raw db values that we can use in a query."
@@ -365,3 +481,47 @@
 
   (let [where (-> (:model/ModelIndexValue (model-hooks)) first :where)]
     (insert-values where :updated {:model_index_id 1 :model_pk 5})))
+
+;;;; indexing helpers
+
+(defn explode-camel-case
+  "Transform CamelCase into 'CamelCase Camel Case' so that every word can be searchable"
+  [s]
+  (str s " " (str/replace s #"([a-z])([A-Z])" "$1 $2")))
+
+;;;; index version hashing
+
+(defn- canonicalize
+  "Convert a form to a canonical, JSON-serializable representation.
+   Symbols and keywords become strings, maps are sorted."
+  [form]
+  (cond
+    (symbol? form) (str form)
+    (keyword? form) (str form)
+    (map? form) (into (sorted-map)
+                      (for [[k v] form]
+                        [(canonicalize k) (canonicalize v)]))
+    (sequential? form) (mapv canonicalize form)
+    :else form))
+
+(def ^:dynamic *testing-only-index-version-hash*
+  "Override for tests that need a specific index version."
+  nil)
+
+(def ^{:arglists '([testing-only-index-version-hash]) :private true} index-version-hash*
+  (memoize (fn [testing-only-index-version-hash]
+             (or testing-only-index-version-hash
+                 (let [data {:specs        @raw-spec-forms
+                             :default-attrs default-attrs
+                             :attr-types    attr-types}]
+                   (-> data
+                       canonicalize
+                       json/encode
+                       buddy-hash/sha256
+                       codecs/bytes->hex))))))
+
+(defn index-version-hash
+  "Compute a deterministic hash of all search specifications.
+   Includes raw spec forms, default-attrs, and attr-types."
+  []
+  (index-version-hash* *testing-only-index-version-hash*))

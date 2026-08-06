@@ -1,4 +1,4 @@
-import registerVisualizations from "metabase/visualizations/register";
+import { registerVisualizations } from "metabase/visualizations/register";
 import type { VisualizerColumnValueSource } from "metabase-types/api";
 import {
   createMockCategoryColumn,
@@ -12,6 +12,7 @@ import { getUpdatedSettingsForDisplay } from "./get-updated-settings-for-display
 registerVisualizations();
 
 describe("updateSettingsForDisplay", () => {
+  // Unjustified type cast. FIXME
   const columnValuesMapping = {
     COLUMN_1: [
       { sourceId: "card:45", originalName: "CREATED_AT", name: "COLUMN_1" },
@@ -76,6 +77,54 @@ describe("updateSettingsForDisplay", () => {
       "line",
     );
     expect(result).toBeUndefined();
+  });
+
+  it("should preserve otherSettings such as goal line (VIZ-1206)", () => {
+    const settings = {
+      "graph.metrics": ["COLUMN_3"],
+      "graph.dimensions": ["COLUMN_1", "COLUMN_2"],
+      "card.title": "My viz",
+      "goal.line": 100,
+    };
+    const lineToPieResult = getUpdatedSettingsForDisplay(
+      columnValuesMapping,
+      columns,
+      settings,
+      "line",
+      "pie",
+    );
+
+    expect(lineToPieResult).toEqual({
+      columnValuesMapping,
+      columns,
+      settings: {
+        "card.title": "My viz",
+        "goal.line": 100,
+        "pie.metric": "COLUMN_3",
+        "pie.dimension": ["COLUMN_1", "COLUMN_2"],
+      },
+    });
+
+    const lineToFunnelResult = getUpdatedSettingsForDisplay(
+      columnValuesMapping,
+      columns,
+      settings,
+      "line",
+      "funnel",
+    );
+
+    expect(lineToFunnelResult).toEqual({
+      columnValuesMapping,
+      columns,
+      settings: {
+        "card.title": "My viz",
+        "funnel.dimension": "COLUMN_1",
+        "funnel.metric": "COLUMN_3",
+        "goal.line": 100,
+        "graph.dimensions": ["COLUMN_1", "COLUMN_2"],
+        "graph.metrics": ["COLUMN_3"],
+      },
+    });
   });
 
   describe("cartesian → cartesian", () => {
@@ -206,6 +255,32 @@ describe("updateSettingsForDisplay", () => {
         },
       });
     });
+
+    it("should ignore preserved columns that have been removed in the meantime (VIZ-1204)", () => {
+      const preservedMetrics = ["COLUMN_1", "COLUMN_3"];
+      const preservedDimensions = ["COLUMN_2"];
+
+      const result = getUpdatedSettingsForDisplay(
+        columnValuesMapping,
+        columns,
+        {
+          "funnel.metric": "COLUMN_3",
+          "funnel.dimension": "COLUMN_2",
+          "graph.metrics": preservedMetrics,
+          "graph.dimensions": preservedDimensions,
+        },
+        "funnel",
+        "line",
+      );
+      expect(result).toEqual({
+        columnValuesMapping,
+        columns,
+        settings: {
+          "graph.metrics": ["COLUMN_3"],
+          "graph.dimensions": ["COLUMN_2"],
+        },
+      });
+    });
   });
 
   describe("funnel → pie", () => {
@@ -226,6 +301,31 @@ describe("updateSettingsForDisplay", () => {
         settings: {
           "pie.metric": "COLUMN_3",
           "pie.dimension": "COLUMN_2",
+        },
+      });
+    });
+  });
+
+  describe("pie → funnel", () => {
+    it("should work when a pie has an array of dimensions (VIZ-1205)", () => {
+      const result = getUpdatedSettingsForDisplay(
+        columnValuesMapping,
+        columns,
+        {
+          "pie.metric": "COLUMN_3",
+          "pie.dimension": ["COLUMN_2"],
+        },
+        "pie",
+        "funnel",
+      );
+      expect(result).toEqual({
+        columnValuesMapping,
+        columns,
+        settings: {
+          "funnel.metric": "COLUMN_3",
+          "funnel.dimension": "COLUMN_2",
+          "graph.metrics": ["COLUMN_3"],
+          "graph.dimensions": ["COLUMN_2"],
         },
       });
     });

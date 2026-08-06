@@ -1,90 +1,5 @@
 const { H } = cy;
 
-import { addWidgetNumberFilter } from "../native-filters/helpers/e2e-field-filter-helpers";
-
-import {
-  DASHBOARD_SQL_NUMBER_FILTERS,
-  questionDetails,
-} from "./shared/dashboard-filters-sql-number";
-
-describe("scenarios > dashboard > filters > SQL > text/category", () => {
-  beforeEach(() => {
-    cy.intercept("POST", "/api/dashboard/*/dashcard/*/card/*/query").as(
-      "dashcardQuery",
-    );
-
-    H.restore();
-    cy.signInAsAdmin();
-
-    H.createNativeQuestionAndDashboard({ questionDetails }).then(
-      ({ body: { card_id, dashboard_id } }) => {
-        H.visitQuestion(card_id);
-
-        H.visitDashboard(dashboard_id);
-      },
-    );
-
-    H.editDashboard();
-  });
-
-  it("should work when set through the filter widget", () => {
-    Object.entries(DASHBOARD_SQL_NUMBER_FILTERS).forEach(([filter]) => {
-      cy.log(`Make sure we can connect ${filter} filter`);
-
-      H.setFilter("Number", filter);
-
-      clickSelect();
-      H.popover().contains(filter).click();
-    });
-
-    H.saveDashboard();
-
-    Object.entries(DASHBOARD_SQL_NUMBER_FILTERS).forEach(
-      ([filter, { value, representativeResult }], index) => {
-        // eslint-disable-next-line no-unsafe-element-filtering
-        H.filterWidget().eq(index).click();
-        addWidgetNumberFilter(value);
-
-        cy.log(`Make sure ${filter} filter returns correct result`);
-        cy.findByTestId("dashcard").within(() => {
-          cy.contains(representativeResult);
-        });
-
-        H.clearFilterWidget(index);
-        cy.wait("@dashcardQuery");
-      },
-    );
-  });
-
-  it("should work when set as the default filter", () => {
-    H.setFilter("Number", "Equal to");
-    H.sidebar().findByText("Default value").next().click();
-
-    addWidgetNumberFilter("3.8");
-
-    clickSelect();
-    H.popover().contains("Equal to").click();
-
-    H.saveDashboard();
-
-    cy.findByTestId("dashcard").within(() => {
-      cy.contains("Small Marble Hat");
-      cy.contains("Rustic Paper Wallet").should("not.exist");
-    });
-
-    H.clearFilterWidget();
-
-    H.filterWidget().click();
-
-    addWidgetNumberFilter("4.6", { buttonLabel: "Update filter" });
-
-    cy.findByTestId("dashcard").within(() => {
-      cy.findByText("Ergonomic Linen Toucan");
-      cy.contains("Small Marble Hat").should("not.exist");
-    });
-  });
-});
-
 describe("scenarios > dashboard > filters > SQL > number", () => {
   const questionDetails = {
     name: "Question 1",
@@ -171,7 +86,8 @@ describe("scenarios > dashboard > filters > SQL > number", () => {
     cy.findByPlaceholderText("Price").type("95").blur();
     cy.findByPlaceholderText("Rating").type("3.8").blur();
 
-    cy.findAllByRole("row")
+    cy.findByTestId("table-body")
+      .findAllByRole("row")
       .should("have.length", 2)
       // first line price
       .and("contain", "98.82")
@@ -183,7 +99,3 @@ describe("scenarios > dashboard > filters > SQL > number", () => {
       .and("contain", "4.4");
   });
 });
-
-function clickSelect() {
-  H.getDashboardCard().findByText("Select…").click();
-}

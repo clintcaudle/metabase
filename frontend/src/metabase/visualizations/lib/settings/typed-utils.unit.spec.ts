@@ -1,9 +1,17 @@
+import { registerVisualization } from "metabase/visualizations";
+import { BarChart } from "metabase/visualizations/visualizations/BarChart";
 import {
   createMockCard,
   createMockTableColumnOrderSetting,
 } from "metabase-types/api/mocks";
 
-import { extendCardWithDashcardSettings, mergeSettings } from "./typed-utils";
+import {
+  extendCardWithDashcardSettings,
+  mergeSettings,
+  sanitizeDashcardSettings,
+} from "./typed-utils";
+
+registerVisualization(BarChart);
 
 describe("mergeSettings (metabase#14597)", () => {
   it("should merge with second overriding first", () => {
@@ -65,7 +73,11 @@ describe("mergeSettings (metabase#14597)", () => {
       name: "DISCOUNT",
     });
 
-    it("should remove columns that don't appear in the first settings", () => {
+    const RENAMED_QUANTITY_COLUMN = createMockTableColumnOrderSetting({
+      name: "QUANTITY_RENAMED",
+    });
+
+    it("should keep added columns that only appear in the second settings (#76136)", () => {
       expect(
         mergeSettings(
           {
@@ -76,7 +88,26 @@ describe("mergeSettings (metabase#14597)", () => {
           },
         ),
       ).toEqual({
-        "table.columns": [ID_COLUMN, QUANTITY_COLUMN],
+        "table.columns": [ID_COLUMN, QUANTITY_COLUMN, TAX_COLUMN],
+      });
+    });
+
+    it("should keep replacement columns that only appear in the second settings (#76136)", () => {
+      expect(
+        mergeSettings(
+          {
+            "table.columns": [ID_COLUMN, QUANTITY_COLUMN],
+          },
+          {
+            "table.columns": [ID_COLUMN, { ...TAX_COLUMN, enabled: false }],
+          },
+        ),
+      ).toEqual({
+        "table.columns": [
+          ID_COLUMN,
+          { ...TAX_COLUMN, enabled: false },
+          QUANTITY_COLUMN,
+        ],
       });
     });
 
@@ -115,6 +146,29 @@ describe("mergeSettings (metabase#14597)", () => {
           DISCOUNT_COLUMN,
           { ...ID_COLUMN, enabled: false },
           QUANTITY_COLUMN,
+          TAX_COLUMN,
+        ],
+      });
+    });
+
+    it("should preserve second settings order when columns are replaced", () => {
+      expect(
+        mergeSettings(
+          {
+            "table.columns": [ID_COLUMN, RENAMED_QUANTITY_COLUMN],
+          },
+          {
+            "table.columns": [
+              QUANTITY_COLUMN,
+              { ...ID_COLUMN, enabled: false },
+            ],
+          },
+        ),
+      ).toEqual({
+        "table.columns": [
+          QUANTITY_COLUMN,
+          { ...ID_COLUMN, enabled: false },
+          RENAMED_QUANTITY_COLUMN,
         ],
       });
     });
@@ -145,5 +199,120 @@ describe("extendCardWithDashcardSettings", () => {
     const result = extendCardWithDashcardSettings(card, undefined);
 
     expect(result.visualization_settings).toEqual({ foo: "bar" });
+  });
+
+  it("should omit settings that are hidden on dashboards (metabase#61112)", () => {
+    const card = createMockCard({
+      display: "bar" as const,
+      visualization_settings: { "graph.metrics": ["count"] },
+    });
+
+    const result = extendCardWithDashcardSettings(card, {
+      // non-dashboard settings that should be filtered out
+      "graph.dimensions": ["any_value"],
+      "graph.metrics": ["avg"],
+      // dashboard setting that should be preserved
+      "graph.goal_label": "goal label",
+    });
+
+    expect(result.visualization_settings).toEqual({
+      "graph.metrics": ["count"],
+      "graph.goal_label": "goal label",
+    });
+  });
+});
+
+describe("sanitizeDashcardSettings", () => {
+  it("should filter out settings with dashboard: false", () => {
+    const settings = {
+      "graph.dimensions": ["TAX"],
+      "graph.metrics": ["count"],
+      "graph.goal_label": "My Goal",
+      "card.title": "Custom Title",
+    };
+
+    // Unjustified type cast. FIXME
+    const vizSettingsDefs = {
+      "graph.dimensions": { dashboard: false },
+      "graph.metrics": { dashboard: false },
+      "graph.goal_label": { dashboard: true },
+      "card.title": { dashboard: true },
+    } as any;
+
+    const result = sanitizeDashcardSettings(settings, vizSettingsDefs);
+
+    expect(result).toEqual({
+      "graph.goal_label": "My Goal",
+      "card.title": "Custom Title",
+    });
+  });
+
+  it("should keep settings that have no definition", () => {
+    const settings = {
+      "graph.dimensions": ["TAX"],
+      unknownSetting: "value",
+    };
+
+    // Unjustified type cast. FIXME
+    const vizSettingsDefs = {
+      "graph.dimensions": { dashboard: false },
+    } as any;
+
+    const result = sanitizeDashcardSettings(settings, vizSettingsDefs);
+
+    expect(result).toEqual({
+      unknownSetting: "value",
+    });
+  });
+
+  it("should keep settings where dashboard is not explicitly false", () => {
+    const settings = {
+      "graph.dimensions": ["TAX"],
+      "graph.goal_value": 100,
+      "card.description": "Description",
+    };
+
+    // Unjustified type cast. FIXME
+    const vizSettingsDefs = {
+      "graph.dimensions": { dashboard: false },
+      "graph.goal_value": {}, // no dashboard property
+      "card.description": { dashboard: undefined },
+    } as any;
+
+    const result = sanitizeDashcardSettings(settings, vizSettingsDefs);
+
+    expect(result).toEqual({
+      "graph.goal_value": 100,
+      "card.description": "Description",
+    });
+  });
+
+  it("should return empty object when all settings are dashboard: false", () => {
+    const settings = {
+      "graph.dimensions": ["TAX"],
+      "graph.metrics": ["count"],
+    };
+
+    // Unjustified type cast. FIXME
+    const vizSettingsDefs = {
+      "graph.dimensions": { dashboard: false },
+      "graph.metrics": { dashboard: false },
+    } as any;
+
+    const result = sanitizeDashcardSettings(settings, vizSettingsDefs);
+
+    expect(result).toEqual({});
+  });
+
+  it("should handle empty settings", () => {
+    const settings = {};
+    // Unjustified type cast. FIXME
+    const vizSettingsDefs = {
+      "graph.dimensions": { dashboard: false },
+    } as any;
+
+    const result = sanitizeDashcardSettings(settings, vizSettingsDefs);
+
+    expect(result).toEqual({});
   });
 });

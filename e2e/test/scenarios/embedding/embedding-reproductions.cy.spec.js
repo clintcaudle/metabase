@@ -1,11 +1,12 @@
 const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ORDERS_DASHBOARD_ID } from "e2e/support/cypress_sample_instance_data";
-import { defer } from "metabase/lib/promise";
+import { questionAsPinMapWithTiles } from "e2e/test/scenarios/embedding/shared/embedding-questions";
+import { defer } from "metabase/utils/promise";
+const { PRODUCTS, PRODUCTS_ID, ORDERS, ORDERS_ID, FEEDBACK, FEEDBACK_ID } =
+  SAMPLE_DATABASE;
 
-const { PRODUCTS, PRODUCTS_ID, ORDERS, ORDERS_ID } = SAMPLE_DATABASE;
-
-describe.skip("issue 15860", () => {
+describe("issue 15860", { tags: "@skip" }, () => {
   const q1IdFilter = {
     name: "Q1 ID",
     slug: "q1_id",
@@ -141,20 +142,23 @@ describe.skip("issue 15860", () => {
       });
 
       H.visitDashboard(dashboard_id);
+
+      H.openLegacyStaticEmbeddingModal({
+        resource: "dashboard",
+        resourceId: dashboard_id,
+        activeTab: "parameters",
+        unpublishBeforeOpen: false,
+      });
     });
   });
 
   it("should work for locked linked filters connected to different cards with the same source table (metabase#15860)", () => {
-    cy.icon("share").click();
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Embed in your application").click();
-
     setDefaultValueForLockedFilter("Q1 ID", 1);
     setDefaultValueForLockedFilter("Q2 ID", 3);
 
     H.visitIframe();
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Q1 Category").click();
 
     H.popover().within(() => {
@@ -163,7 +167,7 @@ describe.skip("issue 15860", () => {
         .and("contain", "Gizmo");
     });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Q2 Category").click();
 
     H.popover().within(() => {
@@ -243,12 +247,22 @@ describe("issue 20438", () => {
         embedding_params: { [filter.slug]: "enabled" },
       });
 
+      cy.wrap(card_id).as("questionId");
+      cy.wrap(dashboard_id).as("dashboardId");
+
       H.visitDashboard(dashboard_id);
     });
   });
 
   it("dashboard filter connected to the field filter should work with a single value in embedded dashboards (metabase#20438)", () => {
-    H.openStaticEmbeddingModal({ activeTab: "parameters" });
+    cy.get("@dashboardId").then((dashboardId) => {
+      H.openLegacyStaticEmbeddingModal({
+        resource: "dashboard",
+        resourceId: dashboardId,
+        activeTab: "parameters",
+        unpublishBeforeOpen: false,
+      });
+    });
 
     H.visitIframe();
 
@@ -294,31 +308,36 @@ describe("locked parameters in embedded question (metabase#20634)", () => {
           },
         },
       },
-      { visitQuestion: true },
+      {
+        visitQuestion: true,
+        wrapId: true,
+      },
     );
   });
 
   it("should let the user lock parameters to specific values", () => {
-    H.openStaticEmbeddingModal({ activeTab: "parameters" });
-
-    H.modal().within(() => {
-      // select the dropdown next to the Text parameter so that we can set the value to "Locked"
-      cy.findByText("Text")
-        .parent()
-        .within(() => {
-          cy.findByText("Disabled").click();
-        });
+    cy.get("@questionId").then((questionId) => {
+      H.openLegacyStaticEmbeddingModal({
+        resource: "question",
+        resourceId: questionId,
+        activeTab: "parameters",
+        unpublishBeforeOpen: false,
+      });
     });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Locked").click();
+    H.modal().within(() => {
+      // open the visibility dropdown for the Text parameter so that we can set the value to "Locked"
+      cy.findByLabelText("Text").click();
+    });
+
+    H.selectDropdown().findByText("Locked").click();
 
     H.modal().within(() => {
       // set a parameter value
       cy.findByPlaceholderText("Text").type("foo{enter}");
 
       // publish the embedded question so that we can directly navigate to its url
-      cy.findByText("Publish").click();
+      cy.findByText("Publish changes").click();
       cy.wait("@publishChanges");
     });
 
@@ -326,7 +345,7 @@ describe("locked parameters in embedded question (metabase#20634)", () => {
     H.visitIframe();
 
     // verify that the Text parameter doesn't show up but that its value is reflected in the dashcard
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Text").should("not.exist");
     cy.get(".CardVisualization").within(() => {
       cy.contains("foo");
@@ -658,7 +677,7 @@ describe("issue 30535", () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
 
     cy.sandboxTable({
       table_id: PRODUCTS_ID,
@@ -671,16 +690,18 @@ describe("issue 30535", () => {
       cy.request("PUT", `/api/card/${id}`, { enable_embedding: true });
 
       H.visitQuestion(id);
+
+      H.openLegacyStaticEmbeddingModal({
+        resource: "question",
+        resourceId: id,
+        activeTab: "parameters",
+        previewMode: "preview",
+        unpublishBeforeOpen: false,
+      });
     });
   });
 
   it("user session should not apply sandboxing to a signed embedded question (metabase#30535)", () => {
-    H.openStaticEmbeddingModal({
-      activeTab: "parameters",
-      previewMode: "preview",
-      acceptTerms: false,
-    });
-
     cy.document().then((doc) => {
       const iframe = doc.querySelector("iframe");
 
@@ -790,11 +811,13 @@ describe("dashboard preview", () => {
       });
 
       H.visitDashboard(dashboard_id);
-    });
 
-    H.openStaticEmbeddingModal({
-      activeTab: "parameters",
-      previewMode: "preview",
+      H.openLegacyStaticEmbeddingModal({
+        resource: "dashboard",
+        resourceId: dashboard_id,
+        activeTab: "parameters",
+        previewMode: "preview",
+      });
     });
 
     H.modal().within(() => {
@@ -875,11 +898,13 @@ describe("dashboard preview", () => {
       });
 
       H.visitDashboard(dashboard_id);
-    });
 
-    H.openStaticEmbeddingModal({
-      activeTab: "parameters",
-      previewMode: "preview",
+      H.openLegacyStaticEmbeddingModal({
+        resource: "dashboard",
+        resourceId: dashboard_id,
+        activeTab: "parameters",
+        previewMode: "preview",
+      });
     });
 
     // Makes it less likely to flake.
@@ -943,7 +968,9 @@ describe("issue 40660", () => {
 
     H.restore();
     cy.signInAsAdmin();
+  });
 
+  it("static dashboard content shouldn't overflow its container (metabase#40660)", () => {
     H.createQuestionAndDashboard({
       questionDetails,
       dashboardDetails,
@@ -954,27 +981,30 @@ describe("issue 40660", () => {
       });
 
       H.visitDashboard(dashboard_id);
-    });
-  });
 
-  it("static dashboard content shouldn't overflow its container (metabase#40660)", () => {
-    H.openStaticEmbeddingModal({
-      activeTab: "parameters",
-      previewMode: "preview",
+      H.openLegacyStaticEmbeddingModal({
+        resource: "dashboard",
+        resourceId: dashboard_id,
+        activeTab: "parameters",
+        previewMode: "preview",
+      });
     });
 
     H.getIframeBody().within(() => {
+      cy.findByText(dashboardDetails.name).should("be.visible");
+      cy.findByTestId("loading-indicator").should("not.exist");
+      cy.findAllByText("1018947080336").should("have.length", 3);
       cy.findByTestId("embed-frame").scrollTo("bottom");
 
-      cy.findByRole("link", { name: "Powered by Metabase" }).should(
-        "be.visible",
-      );
+      cy.findByRole("link", { name: "Powered by Metabase" })
+        .scrollIntoView()
+        .should("be.visible");
     });
   });
 });
 
 // Skipped since it does not make sense when CSP is disabled
-describe.skip("issue 49142", () => {
+describe("issue 49142", { tags: "@skip" }, () => {
   const questionDetails = {
     name: "Products",
     query: { "source-table": PRODUCTS_ID, limit: 2 },
@@ -988,20 +1018,23 @@ describe.skip("issue 49142", () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
+  });
 
+  it("embedding preview should be always working", () => {
     H.createQuestionAndDashboard({
       questionDetails,
       dashboardDetails,
     }).then(({ body: { dashboard_id } }) => {
       H.visitDashboard(dashboard_id);
-    });
-  });
 
-  it("embedding preview should be always working", () => {
-    H.openStaticEmbeddingModal({
-      activeTab: "lookAndFeel",
-      previewMode: "preview",
+      H.openLegacyStaticEmbeddingModal({
+        resource: "dashboard",
+        resourceId: dashboard_id,
+        activeTab: "lookAndFeel",
+        previewMode: "preview",
+      });
     });
+
     cy.findByTestId("embed-preview-iframe")
       .its("0.contentDocument.body")
       .should("be.visible")
@@ -1013,7 +1046,7 @@ describe("issue 8490", () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
 
     H.createDashboardWithQuestions({
       dashboardDetails: {
@@ -1035,10 +1068,10 @@ describe("issue 8490", () => {
               ],
             ],
             filter: [
-              "time-interval",
+              "between",
               ["field", PRODUCTS.CREATED_AT, { "base-type": "type/DateTime" }],
-              -12,
-              "month",
+              "2027-01-01",
+              "2028-01-01",
             ],
           },
           limit: 100,
@@ -1071,8 +1104,8 @@ describe("issue 8490", () => {
               [
                 "between",
                 ["field", ORDERS.CREATED_AT, { "base-type": "type/DateTime" }],
-                "2024-10-01",
-                "2024-12-01",
+                "2027-10-01",
+                "2027-12-01",
               ],
               [
                 "=",
@@ -1161,7 +1194,9 @@ describe("issue 8490", () => {
     });
 
     // Loading...
-    cy.findByTestId("embed-frame").findByText("로딩...").should("be.visible");
+    cy.findByTestId("embed-frame")
+      .findByText("로드 중...")
+      .should("be.visible");
 
     cy.log("test a static embedded question");
     cy.get("@lineChartQuestionId").then((lineChartQuestionId) => {
@@ -1215,14 +1250,14 @@ describe("issue 8490", () => {
         "static embeddings with `#locale` should show a translated the loading message",
       );
       // Loading...
-      cy.findByText("로딩...")
+      cy.findByText("로드 중...")
         .should("be.visible")
         .then(resolveDashboardLoaderPromise);
 
       cy.log("assert the line chart");
       H.getDashboardCard(0).within(() => {
         // X-axis labels: Jan 2024 (or some other year)
-        cy.findByText(/1월 20\d\d\b/).should("be.visible");
+        cy.findByText(/^1월 20\d\d\b/).should("be.visible");
         // Aggregation "count"
         cy.findByText("카운트").should("be.visible");
       });
@@ -1299,7 +1334,7 @@ describe("issue 50373", () => {
         url: /^\/app\/dist\/(.*)\.js$/,
       },
       (req) => {
-        // When running in development (e.g. with `yarn dev`),
+        // When running in development (e.g. with `bun run dev`),
         // the *.hot.bundle.js hot-reloaded file is served by the dev server.
         if (req.url.includes("hot.bundle.js")) {
           return;
@@ -1322,18 +1357,19 @@ describe("issue 51934 (EMB-189)", () => {
   const COLLECTION_NAME = "Model Collection";
   const MODEL_IN_ROOT_NAME = "Products Model";
   const MODEL_IN_COLLECTION_NAME = "QA Postgres12 Orders Model";
+  const QUESTION_IN_COLLECTION_NAME = "Orders Question";
 
   beforeEach(() => {
     H.restore("postgres-12");
     cy.signInAsAdmin();
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
     H.createModelFromTableName({
       tableName: "products",
       modelName: MODEL_IN_ROOT_NAME,
     });
     H.createCollection({
       name: COLLECTION_NAME,
-      alias: "modelCollectionId",
+      alias: "collectionId",
     });
     H.createModelFromTableName({
       tableName: "orders",
@@ -1341,8 +1377,24 @@ describe("issue 51934 (EMB-189)", () => {
       idAlias: "modelId",
     });
     moveToCollection({
-      collectionIdAlias: "modelCollectionId",
+      collectionIdAlias: "collectionId",
       cardIdAlias: "modelId",
+    });
+    H.createQuestion(
+      {
+        name: QUESTION_IN_COLLECTION_NAME,
+        query: {
+          "source-table": ORDERS_ID,
+        },
+      },
+      {
+        wrapId: true,
+        idAlias: "questionId",
+      },
+    );
+    moveToCollection({
+      collectionIdAlias: "collectionId",
+      cardIdAlias: "questionId",
     });
   });
 
@@ -1351,10 +1403,52 @@ describe("issue 51934 (EMB-189)", () => {
     const QA_DB_NAME = "QA Postgres12";
     const DATA_SOURCE_NAME = "Orders";
 
+    // Before the picker can auto-navigate into the data source's collection it
+    // resolves the target path asynchronously: a card-metadata fetch plus one
+    // `listCollectionItems` request per collection level (root -> Model
+    // Collection). On a throttled CI runner that serial chain routinely outlasts
+    // Cypress's default 4 s command timeout, so the picker is still showing the
+    // parent (root) collections when a default-timeout query gives up — the
+    // dominant "cannot find menuitem '...' (only the root collections are
+    // present)" flake. Wait for the loader to clear, then give the item lookup a
+    // generous timeout so it waits for the path to finish resolving, and assert
+    // it is visible (positive anchor) before clicking.
+    const PICKER_ITEM_TIMEOUT = 15000;
+    const clickPickerItem = (name) => {
+      cy.get('[data-testid="mini-picker-list-loader"]').should("not.exist");
+      cy.findByRole("menuitem", { name }, { timeout: PICKER_ITEM_TIMEOUT })
+        .should("be.visible")
+        .click();
+    };
+
+    // The data-source picker and the join picker are both rendered by the same
+    // embedding DataSourceSelector, so a generic popover query could not tell
+    // them apart. When a click swaps one for the other they can briefly overlap
+    // (the outgoing one is still in its close transition while the incoming one
+    // is already mounted), which made matching ambiguous and flaky on slow CI
+    // runners.
+    //
+    // Each picker now carries its trigger's label as the dropdown's accessible
+    // name (`aria-label`), so we can target each popover deterministically by
+    // name regardless of any transition overlap. `.filter(":visible").last()`
+    // guards against a same-named popover that is still animating closed.
+    const pickerPopover = (name) =>
+      cy
+        .get(`[data-element-id=mantine-popover][aria-label="${name}"]`)
+        .filter(":visible")
+        .should("have.length.at.least", 1)
+        .last();
+    const dataSourcePopover = () => pickerPopover("Pick your starting data");
+    const joinPopover = () => pickerPopover("Pick data to join");
+
     cy.log("select a table as a data source");
-    H.popover().within(() => {
+    dataSourcePopover().within(() => {
       cy.findByText("Raw Data").click();
+    });
+    dataSourcePopover().within(() => {
       cy.findByRole("heading", { name: QA_DB_NAME }).click();
+    });
+    dataSourcePopover().within(() => {
       cy.findByRole("option", { name: DATA_SOURCE_NAME }).click();
     });
     H.getNotebookStep("data").button("Join data").click();
@@ -1362,7 +1456,7 @@ describe("issue 51934 (EMB-189)", () => {
     cy.log(
       'select the "Join" step when the data source is a table will open a table in the same database',
     );
-    H.popover().within(() => {
+    joinPopover().within(() => {
       cy.findByText(QA_DB_NAME).should("be.visible");
       cy.findByRole("option", { name: "Orders" }).should("be.visible");
     });
@@ -1373,49 +1467,77 @@ describe("issue 51934 (EMB-189)", () => {
     H.getNotebookStep("data").findByText(DATA_SOURCE_NAME).click();
 
     cy.log('go back to the "Bucket" step');
-    H.popover().within(() => {
+    dataSourcePopover().within(() => {
       cy.icon("chevronleft").click();
+    });
+    dataSourcePopover().within(() => {
       cy.icon("chevronleft").click();
     });
 
     cy.log(
-      "select a model as a data source should open the model step in the same collection as the data source",
+      "select a question as a data source should open the saved question step in the same collection as the data source (metabase#58357)",
     );
-    H.popover().within(() => {
-      cy.findByText("Models").click();
-      cy.findByRole("menuitem", { name: COLLECTION_NAME }).click();
-      cy.findByRole("menuitem", { name: MODEL_IN_COLLECTION_NAME }).click();
+    dataSourcePopover().within(() => {
+      cy.findByText("Saved Questions").click();
     });
+    dataSourcePopover().within(() => clickPickerItem(COLLECTION_NAME));
+    dataSourcePopover().within(() =>
+      clickPickerItem(QUESTION_IN_COLLECTION_NAME),
+    );
 
-    H.popover().within(() => {
+    cy.log("the join popover is automatically opened");
+    joinPopover().within(() => {
       cy.log("the collection of the data source should be selected");
       cy.findByRole("menuitem", { name: COLLECTION_NAME }).should(
         "have.css",
         "background-color",
         // brand color
-        "rgb(80, 158, 227)",
+        "rgb(80, 158, 226)",
       );
-      cy.findByRole("menuitem", { name: MODEL_IN_COLLECTION_NAME })
-        .should("be.visible")
-        .click();
+      clickPickerItem(QUESTION_IN_COLLECTION_NAME);
+    });
+
+    cy.log(
+      "select a model as a data source should open the model step in the same collection as the data source",
+    );
+    H.getNotebookStep("data").findByText(QUESTION_IN_COLLECTION_NAME).click();
+
+    // Go back to the "Bucket" step
+    dataSourcePopover().within(() => {
+      cy.findByText("Saved Questions").click();
+    });
+    // We're now at the "Bucket" step
+    dataSourcePopover().within(() => {
+      cy.findByText("Models").click();
+    });
+    dataSourcePopover().within(() => clickPickerItem(MODEL_IN_COLLECTION_NAME));
+
+    cy.log("the join popover is automatically opened");
+    joinPopover().within(() => {
+      cy.log("the collection of the data source should be selected");
+      cy.findByRole("menuitem", { name: COLLECTION_NAME }).should(
+        "have.css",
+        "background-color",
+        // brand color
+        "rgb(80, 158, 226)",
+      );
+      clickPickerItem(MODEL_IN_COLLECTION_NAME);
     });
 
     cy.log(
       "select a data source after selecting a join step should refresh the data picker on the join step",
     );
     H.getNotebookStep("data").findByText(MODEL_IN_COLLECTION_NAME).click();
-    H.popover().within(() => {
-      cy.findByRole("menuitem", { name: "Our analytics" }).click();
-      cy.findByRole("menuitem", { name: MODEL_IN_ROOT_NAME }).click();
-    });
+    dataSourcePopover().within(() => clickPickerItem("Our analytics"));
+    dataSourcePopover().within(() => clickPickerItem(MODEL_IN_ROOT_NAME));
 
-    H.popover().within(() => {
+    joinPopover().within(() => {
       cy.log("the collection of the new data source should be selected");
       cy.findByRole("menuitem", { name: "Our analytics" }).should(
         "have.css",
         "background-color",
         // brand color
-        "rgb(80, 158, 227)",
+        "rgb(80, 158, 226)",
       );
       cy.findByRole("menuitem", { name: MODEL_IN_ROOT_NAME }).should(
         "be.visible",
@@ -1424,17 +1546,12 @@ describe("issue 51934 (EMB-189)", () => {
   });
 
   function startNewEmbeddingQuestion() {
-    cy.intercept("GET", "/api/search*", (req) => {
-      if (req.query.limit === "0") {
-        req.continue((res) => {
-          // The data picker will fall back to multi-stage picker if there are more than or equal 100 tables and models
-          res.body.total = 100;
-        });
-      }
-    });
-
     H.visitFullAppEmbeddingUrl({
       url: "/question/notebook",
+      qs: {
+        data_picker: "staged",
+        entity_types: "table,model,question",
+      },
     });
   }
 
@@ -1447,4 +1564,118 @@ describe("issue 51934 (EMB-189)", () => {
       });
     });
   }
+});
+
+describe("issue 63687", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("should properly display pin map tiles without auth errors for a valid JWT token", () => {
+    H.createNativeQuestion(questionAsPinMapWithTiles, {
+      visitQuestion: true,
+      wrapId: true,
+    });
+
+    cy.get("@questionId").then((questionId) => {
+      H.openLegacyStaticEmbeddingModal({
+        resource: "question",
+        resourceId: questionId,
+        activeTab: "parameters",
+        unpublishBeforeOpen: false,
+      });
+    });
+
+    cy.intercept("/api/embed/tiles/**").as("getTiles");
+
+    H.visitIframe();
+
+    cy.wait("@getTiles").then(({ response: tileResponse }) => {
+      expect(tileResponse?.statusCode).to.equal(200);
+    });
+  });
+});
+
+describe("issue 57028", () => {
+  const lockedContainsBodyFilter = {
+    name: "locked_contains_body",
+    slug: "locked_contains_body",
+    id: "e6588080",
+    type: "string/contains",
+    sectionId: "string",
+    isMultiSelect: true,
+    values_query_type: "none",
+  };
+
+  const emailFilter = {
+    name: "Email",
+    slug: "email",
+    id: "d31e550f",
+    type: "string/=",
+    sectionId: "string",
+    values_query_type: "list",
+  };
+
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("static embedded editable filter should load dropdown values when a string/contains locked param has multiple values (metabase#57028)", () => {
+    H.createQuestionAndDashboard({
+      questionDetails: {
+        name: "Feedback",
+        query: { "source-table": FEEDBACK_ID },
+      },
+      dashboardDetails: {
+        parameters: [lockedContainsBodyFilter, emailFilter],
+        enable_embedding: true,
+        embedding_params: {
+          [lockedContainsBodyFilter.slug]: "locked",
+          [emailFilter.slug]: "enabled",
+        },
+      },
+    }).then(({ body: { card_id, dashboard_id } }) => {
+      H.addOrUpdateDashboardCard({
+        dashboard_id,
+        card_id,
+        card: {
+          parameter_mappings: [
+            {
+              card_id,
+              parameter_id: lockedContainsBodyFilter.id,
+              target: ["dimension", ["field", FEEDBACK.BODY, null]],
+            },
+            {
+              card_id,
+              parameter_id: emailFilter.id,
+              target: ["dimension", ["field", FEEDBACK.EMAIL, null]],
+            },
+          ],
+        },
+      });
+
+      cy.intercept(
+        "GET",
+        `/api/embed/dashboard/*/params/${emailFilter.id}/values`,
+      ).as("emailValues");
+
+      H.visitEmbeddedPage({
+        resource: { dashboard: dashboard_id },
+        params: {
+          [lockedContainsBodyFilter.slug]: ["March", "damp", "somewhat"],
+        },
+      });
+    });
+
+    H.filterWidget().contains("Email").click();
+
+    cy.wait("@emailValues").its("response.statusCode").should("eq", 200);
+
+    H.popover().within(() => {
+      cy.findByPlaceholderText("Search the list").should("be.visible");
+      cy.findAllByRole("checkbox").its("length").should("be.greaterThan", 0);
+    });
+  });
 });

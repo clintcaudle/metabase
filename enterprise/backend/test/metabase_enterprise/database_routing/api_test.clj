@@ -1,14 +1,18 @@
 (ns metabase-enterprise.database-routing.api-test
   (:require
-   [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.string :as str]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [metabase-enterprise.test :as met]
    [metabase.driver :as driver]
-   [metabase.driver.h2]
+   [metabase.driver.settings :as driver.settings]
+   [metabase.metabot.tools.resources :as read-resource]
+   [metabase.permissions-rest.data-permissions.graph :as data-perms.graph]
    [metabase.permissions.core :as perms]
    [metabase.test :as mt]
    [toucan2.core :as t2]))
 
 (defn with-h2-fixture [f]
-  (binding [metabase.driver.h2/*allow-testing-h2-connections* true]
+  (binding [driver.settings/*allow-testing-h2-connections* true]
     (f)))
 
 (defn with-premium-feature-fixture [f]
@@ -24,10 +28,10 @@
 
 (deftest creation-works
   (mt/with-model-cleanup [:model/Database]
-    (let [[{db-id :id}] (mt/user-http-request :crowberto :post 200 "ee/database-routing/mirror-database"
+    (let [[{db-id :id}] (mt/user-http-request :crowberto :post 200 "ee/database-routing/destination-database"
                                               {:router_database_id (mt/id)
-                                               :mirrors [{:name "mirror database"
-                                                          :details (:details (mt/db))}]})]
+                                               :destinations [{:name "destination database"
+                                                               :details (:details (mt/db))}]})]
       (is (t2/exists? :model/Database
                       :router_database_id (mt/id)
                       :id db-id)))))
@@ -36,20 +40,20 @@
   (mt/with-model-cleanup [:model/Database]
     (with-redefs [driver/can-connect? (fn [_ _]
                                         (throw (ex-info "nope" {})))]
-      (let [[{db-id :id}] (mt/user-http-request :crowberto :post 200 "ee/database-routing/mirror-database"
+      (let [[{db-id :id}] (mt/user-http-request :crowberto :post 200 "ee/database-routing/destination-database"
                                                 {:router_database_id (mt/id)
-                                                 :mirrors [{:name (str (random-uuid))
-                                                            :details {:db "meow"}}]})]
+                                                 :destinations [{:name (str (random-uuid))
+                                                                 :details {:db "meow"}}]})]
         (is (t2/exists? :model/Database
                         :router_database_id (mt/id)
                         :id db-id)))
       (testing "unless you pass the `check_connection_details` flag"
         (let [db-name (str (random-uuid))]
           (is (= {(keyword db-name) {:message "nope"}}
-                 (mt/user-http-request :crowberto :post 400 "ee/database-routing/mirror-database?check_connection_details=true"
+                 (mt/user-http-request :crowberto :post 400 "ee/database-routing/destination-database?check_connection_details=true"
                                        {:router_database_id (mt/id)
-                                        :mirrors [{:name db-name
-                                                   :details {:db "meow"}}]}))))))))
+                                        :destinations [{:name db-name
+                                                        :details {:db "meow"}}]}))))))))
 
 (deftest we-can-mark-an-existing-database-as-being-a-router-database
   (mt/with-temp [:model/Database {db-id :id} {}]
@@ -75,19 +79,19 @@
 (deftest deleting-database-routers-works
   (mt/with-temp [:model/Database {db-id :id} {}
                  :model/DatabaseRouter {router-id :id} {:database_id db-id :user_attribute "foo"}
-                 :model/Database {mirror-db-id :id} {:router_database_id db-id}]
+                 :model/Database {destination-db-id :id} {:router_database_id db-id}]
     (mt/user-http-request :crowberto :put 200 (str "ee/database-routing/router-database/" db-id) {:user_attribute nil})
-    ;; the mirror databases are left around
-    (is (t2/exists? :model/Database :id mirror-db-id))
+    ;; the destination databases are left around
+    (is (t2/exists? :model/Database :id destination-db-id))
     (is (not (t2/exists? :model/DatabaseRouter :id router-id)))))
 
 (deftest endpoint-are-locked-down-to-superusers-only
-  (testing "POST /api/ee/database-routing/mirror-database"
+  (testing "POST /api/ee/database-routing/destination-database"
     (mt/with-model-cleanup [:model/Database]
-      (mt/user-http-request :rasta :post 403 "ee/database-routing/mirror-database"
+      (mt/user-http-request :rasta :post 403 "ee/database-routing/destination-database"
                             {:router_database_id (mt/id)
-                             :mirrors [{:name "mirror database"
-                                        :details (:details (mt/db))}]})))
+                             :destinations [{:name "destination database"
+                                             :details (:details (mt/db))}]})))
   (testing "PUT /api/ee/database-routing/router-database/:id"
     (mt/with-temp [:model/Database {db-id :id} {}]
       (mt/with-model-cleanup [:model/DatabaseRouter]
@@ -107,10 +111,10 @@
                  :model/DatabaseRouter _ {:database_id db-id :user_attribute "foobar"}
                  :model/Database _ {:name "fluffy" :router_database_id db-id}]
     (is (= "A destination database with that name already exists."
-           (mt/user-http-request :crowberto :post 400 "ee/database-routing/mirror-database"
+           (mt/user-http-request :crowberto :post 400 "ee/database-routing/destination-database"
                                  {:router_database_id db-id
-                                  :mirrors [{:name "fluffy"
-                                             :details (:details (mt/db))}]})))))
+                                  :destinations [{:name "fluffy"
+                                                  :details (:details (mt/db))}]})))))
 
 (deftest cannot-enable-db-routing-when-other-features-enabled
   (mt/with-temp [:model/Database {db-id :id} {:settings {:persist-models-enabled true}}]
@@ -125,9 +129,19 @@
     (is (= "Cannot enable database routing for a database with uploads enabled"
            (mt/user-http-request :crowberto :put 400 (str "ee/database-routing/router-database/" db-id)
                                  {:user_attribute "db_name"}))))
+  (mt/with-temp [:model/Database {db-id :id} {:write_data_details {:host "other-host"}}]
+    (is (= "Cannot enable database routing for a database with a write connection configured"
+           (mt/user-http-request :crowberto :put 400 (str "ee/database-routing/router-database/" db-id)
+                                 {:user_attribute "db_name"}))))
   (mt/with-temp [:model/Database {router-db-id :id} {}
                  :model/Database {db-id :id} {:router_database_id router-db-id}]
     (is (= "Cannot make a destination database a router database"
+           (mt/user-http-request :crowberto :put 400 (str "ee/database-routing/router-database/" db-id)
+                                 {:user_attribute "db_name"}))))
+  (mt/with-temp [:model/Database {db-id :id} {}
+                 :model/Transform _ {:source_database_id db-id
+                                     :name "Test Transform"}]
+    (is (= "Cannot enable database routing for a database with transforms"
            (mt/user-http-request :crowberto :put 400 (str "ee/database-routing/router-database/" db-id)
                                  {:user_attribute "db_name"})))))
 
@@ -139,57 +153,138 @@
     (is (not (t2/exists? :model/Database dest-db-id)))
     (is (not (t2/exists? :model/Database db-id)))))
 
-(deftest mirror-databases-are-hidden-from-regular-database-api
+(deftest destination-databases-are-hidden-from-regular-database-api
   (mt/with-temp [:model/Database {db-id :id} {}
                  :model/DatabaseRouter _ {:database_id db-id :user_attribute "foo"}
-                 :model/Database {mirror-db-id :id} {:router_database_id db-id}]
+                 :model/Database {destination-db-id :id} {:router_database_id db-id}]
     (testing "GET /database/:id"
-      (testing "Superusers can get mirror DBs"
-        (mt/user-http-request :crowberto :get 200 (str "database/" mirror-db-id)))
+      (testing "Superusers can get destination DBs"
+        (mt/user-http-request :crowberto :get 200 (str "database/" destination-db-id)))
       (testing "Regular users can not."
-        (mt/user-http-request :rasta :get 403 (str "database/" mirror-db-id))))
+        (mt/user-http-request :rasta :get 403 (str "database/" destination-db-id))))
     (testing "GET /database/"
-      (is (not-any? #(= (:id %) mirror-db-id)
+      (is (not-any? #(= (:id %) destination-db-id)
                     (:data (mt/user-http-request :crowberto :get 200 "database/"))))
       (testing "If we pass the `router_database_id` param it is included"
-        (is (some #(= (:id %) mirror-db-id)
+        (is (some #(= (:id %) destination-db-id)
                   (:data (mt/user-http-request :crowberto :get 200 (str "database/?router_database_id=" db-id))))))
       (testing "Regular users can't do this"
-        (is (not-any? #(= (:id %) mirror-db-id)
+        (is (not-any? #(= (:id %) destination-db-id)
                       (:data (mt/user-http-request :rasta :get 200 (str "database/?router_database_id=" db-id))))))
       (testing "Unless they have manage-database permissions"
         (mt/with-no-data-perms-for-all-users!
           (perms/set-database-permission! (perms/all-users-group) db-id :perms/manage-database :yes)
           (perms/set-database-permission! (perms/all-users-group) db-id :perms/create-queries :query-builder-and-native)
           (t2/select :model/DataPermissions :db_id db-id :perm_type "perms/create-queries")
-          (is (some #(= (:id %) mirror-db-id)
+          (is (some #(= (:id %) destination-db-id)
                     (:data (mt/user-http-request :rasta :get 200 (str "database/?router_database_id=" db-id)))))
           (perms/set-database-permission! (perms/all-users-group) db-id :perms/manage-database :no)
-          (is (not (some #(= (:id %) mirror-db-id)
+          (is (not (some #(= (:id %) destination-db-id)
                          (:data (mt/user-http-request :rasta :get 200 (str "database/?router_database_id=" db-id)))))))))
     (testing "PUT /database/:id should work normally"
-      (mt/user-http-request :crowberto :put 200 (str "database/" mirror-db-id)))
+      (mt/user-http-request :crowberto :put 200 (str "database/" destination-db-id)))
     (testing "GET /database/:id/usage_info"
-      (mt/user-http-request :crowberto :get 404 (str "database/" mirror-db-id "/usage_info")))
+      (mt/user-http-request :crowberto :get 404 (str "database/" destination-db-id "/usage_info")))
     (testing "GET /database/:id/metadata"
-      (mt/user-http-request :crowberto :get 404 (str "database/" mirror-db-id "/metadata")))
+      (mt/user-http-request :crowberto :get 404 (str "database/" destination-db-id "/metadata")))
     (testing "GET /database/:id/autocomplete_suggestions"
-      (mt/user-http-request :crowberto :get 404 (str "database/" mirror-db-id "/autocomplete_suggestions")))
+      (mt/user-http-request :crowberto :get 404 (str "database/" destination-db-id "/autocomplete_suggestions")))
     (testing "GET /database/:id/card_autocomplete_suggestions"
-      (mt/user-http-request :crowberto :get 404 (str "database/" mirror-db-id "/card_autocomplete_suggestions?query=foobar")))
+      (mt/user-http-request :crowberto :get 404 (str "database/" destination-db-id "/card_autocomplete_suggestions?query=foobar")))
     (testing "GET /database/:id/fields"
-      (mt/user-http-request :crowberto :get 404 (str "database/" mirror-db-id "/fields")))
+      (mt/user-http-request :crowberto :get 404 (str "database/" destination-db-id "/fields")))
     (testing "GET /database/:id/idfields"
-      (mt/user-http-request :crowberto :get 404 (str "database/" mirror-db-id "/idfields")))
+      (mt/user-http-request :crowberto :get 404 (str "database/" destination-db-id "/idfields")))
     (testing "POST /database/:id/sync_schema"
-      (mt/user-http-request :crowberto :post 404 (str "database/" mirror-db-id "/sync_schema")))
+      (mt/user-http-request :crowberto :post 404 (str "database/" destination-db-id "/sync_schema")))
     (testing "POST /database/:id/dismiss_spinner"
-      (mt/user-http-request :crowberto :post 404 (str "database/" mirror-db-id "/dismiss_spinner")))
+      (mt/user-http-request :crowberto :post 404 (str "database/" destination-db-id "/dismiss_spinner")))
     (testing "POST /database/:id/rescan_values"
-      (mt/user-http-request :crowberto :post 404 (str "database/" mirror-db-id "/rescan_values")))
+      (mt/user-http-request :crowberto :post 404 (str "database/" destination-db-id "/rescan_values")))
     (testing "POST /database/:id/discard_values"
-      (mt/user-http-request :crowberto :post 404 (str "database/" mirror-db-id "/discard_values")))
+      (mt/user-http-request :crowberto :post 404 (str "database/" destination-db-id "/discard_values")))
     (testing "POST /database/:id/syncable_schemas"
-      (mt/user-http-request :crowberto :get 404 (str "database/" mirror-db-id "/syncable_schemas")))
+      (mt/user-http-request :crowberto :get 404 (str "database/" destination-db-id "/syncable_schemas")))
     (testing "GET /database/:id/schemas"
-      (mt/user-http-request :crowberto :get 404 (str "database/" mirror-db-id "/schemas")))))
+      (mt/user-http-request :crowberto :get 404 (str "database/" destination-db-id "/schemas")))))
+
+(deftest routed-destination-database-names-are-hidden-in-metabot-resources
+  (mt/with-temp [:model/Database {router-id :id} {:name "Postgres Router"}
+                 :model/DatabaseRouter _ {:database_id router-id :user_attribute "db_name"}
+                 :model/Database {selected-destination-id :id} {:name "customer-a"
+                                                                :router_database_id router-id}
+                 :model/Database {other-destination-id :id} {:name "customer-b"
+                                                             :router_database_id router-id}]
+    (met/with-user-attributes! :rasta {"db_name" "customer-a"}
+      (mt/with-current-user (mt/user->id :rasta)
+        (testing "database list includes the router and hides destination databases"
+          (let [{:keys [output]} (read-resource/read-resource {:uris ["metabase://databases"]})]
+            (is (str/includes? output "Postgres Router"))
+            (is (not (str/includes? output "customer-a")))
+            (is (not (str/includes? output "customer-b")))))
+        (testing "a sibling destination cannot be read by URI"
+          (is (some? (-> (read-resource/read-resource
+                          {:uris [(str "metabase://database/" other-destination-id)]})
+                         :resources
+                         first
+                         :error))))
+        (testing "the current user's routed destination cannot be read by URI"
+          (is (some? (-> (read-resource/read-resource
+                          {:uris [(str "metabase://database/" selected-destination-id)]})
+                         :resources
+                         first
+                         :error))))))))
+
+(deftest destination-databases-excluded-from-permissions-graph
+  (mt/with-temp [:model/Database {db-id :id} {}
+                 :model/DatabaseRouter _ {:database_id db-id :user_attribute "foo"}
+                 :model/Database {destination-db-id :id} {:router_database_id db-id}]
+    (testing "Permissions graph does not include destination databases"
+      (let [graph (data-perms.graph/data-permissions-graph)]
+        (is (not (some (fn [[_group-id db-perms]]
+                         (contains? db-perms destination-db-id))
+                       graph)))))
+    (testing "API permissions graph does not include destination databases"
+      (let [api-graph (:groups (data-perms.graph/api-graph))]
+        (is (not (some (fn [[_group-id db-perms]]
+                         (contains? db-perms destination-db-id))
+                       api-graph)))))))
+
+(deftest new-group-does-not-get-destination-database-permissions
+  (mt/with-temp [:model/Database {db-id :id} {}
+                 :model/DatabaseRouter _ {:database_id db-id :user_attribute "foo"}
+                 :model/Database {destination-db-id :id} {:router_database_id db-id}]
+    (mt/with-temp [:model/PermissionsGroup {group-id :id} {:name "Test Group for Routing"}]
+      (testing "New group should have permissions for the router database"
+        (is (t2/exists? :model/DataPermissions :group_id group-id :db_id db-id)))
+      (testing "New group should NOT have permissions for the destination database"
+        (is (not (t2/exists? :model/DataPermissions :group_id group-id :db_id destination-db-id)))))))
+
+(deftest manage-db-user-cannot-delete-destination-database-test
+  (testing "DELETE /api/database/:id is rejected (403) for a non-superuser with manage-database perms on a routed destination"
+    ;; NOTE: `DELETE /api/database/:id` calls `api/check-superuser` unconditionally before it ever looks at the
+    ;; database being deleted (see `metabase.warehouses-rest.api`), so this endpoint is admin-only full stop -- it
+    ;; doesn't have any destination-specific carve-out to disprove. To show that manage-database perms are actually
+    ;; being exercised here (and not just trivially irrelevant), we also enable `:advanced-permissions` -- without it,
+    ;; `current-user-can-write-db?` falls back to the OSS `superuser?` check and the manage-database grant below would
+    ;; be a no-op -- and we assert the *same* grant is refused identically for a regular database, proving there's no
+    ;; accidental carve-out that would let a manage-database non-admin delete regular databases while destinations
+    ;; stay protected (or vice versa).
+    (mt/with-additional-premium-features #{:advanced-permissions}
+      (mt/with-temp [:model/Database {db-id :id} {}
+                     :model/DatabaseRouter _ {:database_id db-id :user_attribute "foo"}
+                     :model/Database {dest :id} {:router_database_id db-id}
+                     :model/Database {regular-db-id :id} {}]
+        (mt/with-no-data-perms-for-all-users!
+          (perms/set-database-permission! (perms/all-users-group) db-id :perms/manage-database :yes)
+          (perms/set-database-permission! (perms/all-users-group) db-id :perms/create-queries :query-builder-and-native)
+          (perms/set-database-permission! (perms/all-users-group) regular-db-id :perms/manage-database :yes)
+          (perms/set-database-permission! (perms/all-users-group) regular-db-id :perms/create-queries :query-builder-and-native)
+          (testing "manage-database perms don't allow deleting a regular database either"
+            (is (= "You don't have permissions to do that."
+                   (mt/user-http-request :rasta :delete 403 (str "database/" regular-db-id)))))
+          (testing "manage-database perms on the router database don't allow deleting its destination database"
+            (is (= "You don't have permissions to do that."
+                   (mt/user-http-request :rasta :delete 403 (str "database/" dest)))))
+          (is (t2/exists? :model/Database :id regular-db-id))
+          (is (t2/exists? :model/Database :id dest)))))))

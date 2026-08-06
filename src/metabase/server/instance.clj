@@ -7,7 +7,6 @@
    [metabase.config.core :as config]
    [metabase.server.protocols :as server.protocols]
    [metabase.server.statistics-handler :as statistics-handler]
-   [metabase.util :as u]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    [ring.adapter.jetty :as ring-jetty]
@@ -43,7 +42,8 @@
             :max-threads   (config/config-int :mb-jetty-maxthreads)
             :min-threads   (config/config-int :mb-jetty-minthreads)
             :max-queued    (config/config-int :mb-jetty-maxqueued)
-            :max-idle-time (config/config-int :mb-jetty-maxidletime)})
+            :max-idle-time (config/config-int :mb-jetty-maxidletime)
+            :send-server-version? false})
     (config/config-int :mb-jetty-request-header-size) (assoc :request-header-size (config/config-int
                                                                                    :mb-jetty-request-header-size))
     (config/config-str :mb-jetty-daemon) (assoc :daemon? (config/config-bool :mb-jetty-daemon))
@@ -51,10 +51,10 @@
                                              (merge (jetty-ssl-config)))))
 
 (defn- log-config [jetty-config]
-  (log/info "Launching Embedded Jetty Webserver with config:\n"
-            (u/pprint-to-str (m/filter-keys
-                              #(not (str/includes? % "password"))
-                              jetty-config))))
+  (log/info "Launching Embedded Jetty Webserver with config:"
+            (pr-str (m/filter-keys
+                     #(not (str/includes? % "password"))
+                     jetty-config))))
 
 (defonce ^:private instance*
   (atom nil))
@@ -64,6 +64,13 @@
   ^Server []
   @instance*)
 
+(defn server-port
+  "Return the actual port the running Jetty server is listening on. Useful when the server was started with port 0
+  (OS-assigned random port). Returns `nil` if no server is running."
+  []
+  (when-let [^Server server (instance)]
+    (.. server getURI getPort)))
+
 (defn- async-proxy-handler ^ServletHandler [handler timeout]
   (proxy [ServletHandler] []
     (doHandle [_ ^Request base-request ^HttpServletRequest request ^HttpServletResponse response]
@@ -71,11 +78,11 @@
                                     (.setTimeout timeout))
             request-map           (servlet/build-request-map request)
             raise                 (fn raise [^Throwable e]
-                                    (log/error e "Unexpected exception in endpoint")
+                                    (log/errorf "Unexpected exception in endpoint: %s" (ex-message e))
                                     (try
                                       (.sendError response 500 (.getMessage e))
                                       (catch Throwable e
-                                        (log/error e "Unexpected exception writing error response")))
+                                        (log/errorf "Unexpected exception writing error response: %s" (ex-message e))))
                                     (.complete context))]
         (try
           (handler
@@ -88,7 +95,7 @@
                                                              :response-map  response-map}))
            raise)
           (catch Throwable e
-            (log/error e "Unexpected Exception in API request handler")
+            (log/errorf "Unexpected Exception in API request handler: %s" (ex-message e))
             (raise e))
           (finally
             (.setHandled base-request true)))))))

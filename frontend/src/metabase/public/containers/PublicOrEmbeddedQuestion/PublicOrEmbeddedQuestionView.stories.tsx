@@ -2,9 +2,10 @@
 import createAsyncCallback from "@loki/create-async-callback";
 import type { StoryFn } from "@storybook/react";
 import { userEvent, within } from "@storybook/test";
+import { HttpResponse, http } from "msw";
 import type { ComponentProps } from "react";
 
-import { getStore } from "__support__/entities-store";
+import { getPublicStore } from "__support__/entities-store";
 import { createMockMetadata } from "__support__/metadata";
 import { createWaitForResizeToStopDecorator } from "__support__/storybook";
 import { getNextId } from "__support__/utils";
@@ -13,47 +14,62 @@ import {
   NumberColumn,
   StringColumn,
 } from "__support__/visualizations";
-import { MetabaseReduxProvider } from "metabase/lib/redux";
-import { publicReducers } from "metabase/reducers-public";
+import { MetabaseReduxProvider } from "metabase/redux";
+import {
+  createMockSettingsState,
+  createMockState,
+} from "metabase/redux/store/mocks";
 import { Box } from "metabase/ui";
 import { registerVisualization } from "metabase/visualizations";
 import { BarChart } from "metabase/visualizations/visualizations/BarChart";
-import PivotTable from "metabase/visualizations/visualizations/PivotTable";
+import { PivotTable } from "metabase/visualizations/visualizations/PivotTable";
 import { PIVOT_TABLE_MOCK_DATA } from "metabase/visualizations/visualizations/PivotTable/pivot-table-test-mocks";
 import { SmartScalar } from "metabase/visualizations/visualizations/SmartScalar";
+import { Table } from "metabase/visualizations/visualizations/Table/Table";
+import * as TABLE_MOCK_DATA from "metabase/visualizations/visualizations/Table/stories-data";
 import {
   createMockCard,
   createMockColumn,
   createMockDataset,
   createMockDatasetData,
 } from "metabase-types/api/mocks";
-import {
-  createMockSettingsState,
-  createMockState,
-} from "metabase-types/store/mocks";
 
 import {
   PublicOrEmbeddedQuestionView,
   type PublicOrEmbeddedQuestionViewProps,
 } from "./PublicOrEmbeddedQuestionView";
 
-// @ts-expect-error: incompatible prop types with registerVisualization
 registerVisualization(PivotTable);
-// @ts-expect-error: incompatible prop types with registerVisualization
 registerVisualization(SmartScalar);
-// @ts-expect-error: incompatible prop types with registerVisualization
 registerVisualization(BarChart);
+registerVisualization(Table);
 
 export default {
   title: "App/Embed/PublicOrEmbeddedQuestionView",
   component: PublicOrEmbeddedQuestionView,
-  decorators: [
-    ReduxDecorator,
-    createWaitForResizeToStopDecorator(),
-    MockIsEmbeddingDecorator,
-  ],
+  decorators: [ReduxDecorator, createWaitForResizeToStopDecorator()],
   parameters: {
     layout: "fullscreen",
+    msw: {
+      handlers: [
+        http.get(
+          "/api/user-key-value/namespace/last_download_format/key/download_format_preference",
+          () =>
+            HttpResponse.json({
+              last_download_format: "csv",
+              last_table_download_format: "csv",
+            }),
+        ),
+        http.put(
+          "/api/user-key-value/namespace/last_download_format/key/download_format_preference",
+          () =>
+            HttpResponse.json({
+              last_download_format: "csv",
+              last_table_download_format: "csv",
+            }),
+        ),
+      ],
+    },
   },
 };
 
@@ -65,16 +81,6 @@ function ReduxDecorator(Story: StoryFn) {
   );
 }
 
-declare global {
-  interface Window {
-    overrideIsWithinIframe?: boolean;
-  }
-}
-function MockIsEmbeddingDecorator(Story: StoryFn) {
-  window.overrideIsWithinIframe = true;
-  return <Story />;
-}
-
 const CARD_BAR_ID = getNextId();
 const initialState = createMockState({
   settings: createMockSettingsState({
@@ -82,7 +88,7 @@ const initialState = createMockState({
   }),
 });
 
-const store = getStore(publicReducers, initialState);
+const store = getPublicStore(initialState);
 
 const Template: StoryFn<PublicOrEmbeddedQuestionViewProps> = (args) => {
   return <PublicOrEmbeddedQuestionView {...args} />;
@@ -97,6 +103,7 @@ const defaultArgs: Partial<
   bordered: true,
   getParameters: () => [],
   setCard: () => {},
+  downloadsEnabled: { pdf: true, results: true },
   result: createMockDataset({
     data: createMockDatasetData({
       cols: [
@@ -130,12 +137,16 @@ export const LightThemeDownload = {
 
   args: {
     ...LightThemeDefault.args,
-    downloadsEnabled: true,
+    downloadsEnabled: { pdf: true, results: true },
   },
 
   play: async ({ canvasElement }: { canvasElement: HTMLCanvasElement }) => {
     const asyncCallback = createAsyncCallback();
-    await downloadQuestionAsPng(canvasElement, asyncCallback);
+    try {
+      await downloadQuestionAsPng(canvasElement);
+    } finally {
+      asyncCallback();
+    }
   },
 };
 
@@ -163,7 +174,7 @@ export const DarkThemeDownload = {
 
   args: {
     ...DarkThemeDefault.args,
-    downloadsEnabled: true,
+    downloadsEnabled: { pdf: true, results: true },
   },
 
   play: LightThemeDownload.play,
@@ -182,7 +193,7 @@ export const TransparentThemeDefault = {
 
 function LightBackgroundDecorator(Story: StoryFn) {
   return (
-    <Box bg="#ddd" h="100%">
+    <Box bg="background_page-primary" h="100%">
       <Story />
     </Box>
   );
@@ -208,6 +219,7 @@ export const PivotTableLightTheme = {
 
   play: async ({ canvasElement }: { canvasElement: HTMLCanvasElement }) => {
     const cell = await within(canvasElement).findByText("field-123");
+    // Unjustified type cast. FIXME
     (cell.parentNode?.parentNode as HTMLElement).classList.add("pseudo-hover");
   },
 };
@@ -272,7 +284,81 @@ export const SmartScalarDarkTheme = {
   },
 };
 
+// Regression guard for metabase#72443: `₂` subscript descender used to clip at the value's line-box edge.
+export const SmartScalarUnicodeSubscript = {
+  render: Template,
+
+  args: {
+    ...SmartScalarLightTheme.args,
+    card: createMockCard({
+      id: getNextId(),
+      display: "smartscalar",
+      visualization_settings: {
+        "graph.dimensions": ["timestamp"],
+        "graph.metrics": ["count"],
+        column_settings: {
+          '["name","Count"]': { suffix: "tCO₂e" },
+        },
+      },
+    }),
+  },
+};
+
+// metabase#77001 guard: html2canvas drops the arrow's currentColor on export — must be red, not black.
+export const SmartScalarDownload = {
+  render: Template,
+
+  args: {
+    ...defaultArgs,
+    card: createMockCard({
+      id: getNextId(),
+      display: "smartscalar",
+      visualization_settings: {
+        "graph.dimensions": ["timestamp"],
+        "graph.metrics": ["count"],
+      },
+    }),
+    result: createMockDataset({
+      data: createMockDatasetData({
+        cols: [
+          createMockColumn(DateTimeColumn({ name: "Timestamp" })),
+          createMockColumn(NumberColumn({ name: "Count" })),
+        ],
+        insights: [
+          {
+            "previous-value": 220,
+            unit: "week",
+            offset: -199100,
+            "last-change": -0.3181818181818182,
+            col: "count",
+            slope: 10,
+            "last-value": 150,
+            "best-fit": ["+", -199100, ["*", 10, "x"]],
+          },
+        ],
+        rows: [
+          ["2024-07-21T00:00:00Z", 220],
+          ["2024-07-28T00:00:00Z", 150],
+        ],
+      }),
+    }),
+  },
+
+  play: async ({ canvasElement }: { canvasElement: HTMLCanvasElement }) => {
+    const asyncCallback = createAsyncCallback();
+    try {
+      await downloadQuestionAsPng(canvasElement);
+    } finally {
+      asyncCallback();
+    }
+  },
+};
+
 export const SmartScalarLightThemeTooltip = {
+  parameters: {
+    loki: { skip: true },
+  },
+
   render: Template,
 
   args: {
@@ -317,6 +403,7 @@ export const SmartScalarLightThemeTooltip = {
     const value = "vs. July 21, 2024, 12:00 AM";
     const valueElement = await within(canvasElement).findByText(value);
     await userEvent.hover(valueElement);
+    // Unjustified type cast. FIXME
     const tooltip = document.documentElement.querySelector(
       '[role="tooltip"]',
     ) as HTMLElement;
@@ -325,6 +412,10 @@ export const SmartScalarLightThemeTooltip = {
 };
 
 export const SmartScalarDarkThemeTooltip = {
+  parameters: {
+    loki: { skip: true },
+  },
+
   render: Template,
 
   args: {
@@ -336,6 +427,27 @@ export const SmartScalarDarkThemeTooltip = {
   play: SmartScalarLightThemeTooltip.play,
 };
 
+export const TableLightTheme = {
+  render: Template,
+
+  args: {
+    ...defaultArgs,
+    titled: false,
+    card: createMockCard({
+      id: getNextId(),
+      display: "table",
+      // Unjustified type cast. FIXME
+      ...(TABLE_MOCK_DATA.variousColumnSettings[0].card as any),
+    }),
+    result: createMockDataset({
+      data: createMockDatasetData(
+        // Unjustified type cast. FIXME
+        TABLE_MOCK_DATA.variousColumnSettings[0].data as any,
+      ),
+    }),
+  },
+};
+
 function NarrowContainer(Story: StoryFn) {
   return (
     <Box w="300px" h="250px" pos="relative">
@@ -344,16 +456,13 @@ function NarrowContainer(Story: StoryFn) {
   );
 }
 
-const downloadQuestionAsPng = async (
-  canvasElement: HTMLElement,
-  asyncCallback: () => void,
-) => {
+const downloadQuestionAsPng = async (canvasElement: HTMLElement) => {
   const canvas = within(canvasElement);
 
   const downloadButton = await canvas.findByTestId(
     "question-results-download-button",
   );
-  await userEvent.click(downloadButton!);
+  await userEvent.click(downloadButton);
 
   const documentElement = within(document.documentElement);
   const pngButton = await documentElement.findByText(".png");
@@ -362,5 +471,4 @@ const downloadQuestionAsPng = async (
     await documentElement.findByTestId("download-results-button"),
   );
   await canvas.findByTestId("image-downloaded");
-  asyncCallback();
 };

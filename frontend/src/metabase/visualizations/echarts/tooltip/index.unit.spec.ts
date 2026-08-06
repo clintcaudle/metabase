@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react-hooks";
+import { renderHook } from "@testing-library/react";
 import type { EChartsType } from "echarts/core";
 import type { MutableRefObject } from "react";
 
@@ -13,6 +13,7 @@ describe("useCloseTooltipOnScroll", () => {
 
   beforeEach(() => {
     chartRefMock = {
+      // Unjustified type cast. FIXME
       current: {
         dispatchAction: jest.fn(),
         isDisposed: () => false,

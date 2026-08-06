@@ -1,16 +1,18 @@
 (ns metabase.lib.schema.mbql-clause
+  (:refer-clojure :exclude [every?])
   (:require
    [malli.core :as mc]
    [metabase.lib.schema.common :as common]
    [metabase.lib.schema.expression :as expression]
    [metabase.types.core]
    [metabase.util.malli :as mu]
-   [metabase.util.malli.registry :as mr]))
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.performance :refer [every?]]))
 
 (comment metabase.types.core/keep-me)
 
 (defonce ^:private ^{:doc "Set of all registered MBQL clause tags e.g. #{:starts-with}"} tag-registry
-  (atom #{}))
+  (atom (sorted-set)))
 
 (defn tag->registered-schema-name
   "Given an MBQL clause tag like `:starts-with`, return the name of the schema we'll register for it, e.g.
@@ -18,8 +20,22 @@
   [tag]
   (keyword "mbql.clause" (name tag)))
 
+(defn registered-tags
+  "Snapshot of every MBQL clause tag currently registered via [[define-mbql-clause]]
+  (e.g. `#{:starts-with :sum :count …}`). Returns a sorted set so iteration order is
+  deterministic."
+  []
+  @tag-registry)
+
 (def ^:private invalid-clause-schema
   [:fn {:error/message "not a known MBQL clause"} (constantly false)])
+
+(mu/defn- mbql-clause-tag :- [:maybe :keyword]
+  "If `x` is a (possibly not-yet-normalized) MBQL clause, return its `tag`."
+  [x]
+  (when (and (sequential? x)
+             ((some-fn keyword? string?) (first x)))
+    (keyword (first x))))
 
 (defn- clause-schema
   "Build the schema for `::clause`, a `:multi` schema that maps MBQL clause tag -> the schema
@@ -28,9 +44,12 @@
   (into [:multi
          {:dispatch common/mbql-clause-tag
           :error/fn (fn [{:keys [value]} _]
-                      (if-let [tag (common/mbql-clause-tag value)]
+                      (if-let [tag (mbql-clause-tag value)]
                         (str "Invalid " tag " clause: " (pr-str value))
-                        "not an MBQL clause"))}
+                        "not an MBQL clause"))
+          :decode/normalize (fn [x]
+                              (when-let [tag (mbql-clause-tag x)]
+                                (into [tag] (rest x))))}
          [::mc/default invalid-clause-schema]]
         (map (fn [tag]
                [tag [:ref (tag->registered-schema-name tag)]]))
@@ -80,6 +99,15 @@
      return-type)
    nil))
 
+(defn- normalize-clause [x]
+  (when (sequential? x)
+    ;; Coerce non-vector sequentials (e.g. LazySeqs from `json/decode+kw`) to vectors so downstream
+    ;; `:tuple` schemas match.
+    (let [x (if (vector? x) x (vec x))]
+      (if ((some-fn map? nil?) (second x))
+        x
+        (into [(first x) {:lib/uuid (str (random-uuid))}] (rest x))))))
+
 ;;; TODO: Support options more nicely - these don't allow for overriding the options, but we have a few cases where that
 ;;; is necessary. See for example the inclusion of `string-filter-options` in [[metabase.lib.filter]].
 
@@ -94,7 +122,8 @@
          (every? keyword? (map first args))]}
   [:schema
    (into [:catn
-          {:error/message (str "Valid " tag " clause")}
+          {:error/message    (str "Valid " tag " clause")
+           :decode/normalize normalize-clause}
           [:tag [:= {:decode/normalize common/normalize-keyword} tag]]
           [:options [:schema [:ref ::common/options]]]]
          args)])
@@ -105,7 +134,8 @@
   [tag & args]
   {:pre [(simple-keyword? tag)]}
   (into [:tuple
-         {:error/message (str "Valid " tag " clause")}
+         {:error/message    (str "Valid " tag " clause")
+          :decode/normalize normalize-clause}
          [:= {:decode/normalize common/normalize-keyword} tag]
          [:ref ::common/options]]
         args))

@@ -1,6 +1,10 @@
 import _ from "underscore";
 
-import type { SearchResponse, SearchResult } from "metabase-types/api";
+import type {
+  ModelResult,
+  SearchResponse,
+  SearchResult,
+} from "metabase-types/api";
 
 import { createMockCollection } from "./collection";
 
@@ -23,6 +27,7 @@ export const createMockSearchResult = (
     can_write: true,
     table_id: 1,
     table_name: null,
+    table_display_name: null,
     bookmark: null,
     database_id: 1,
     database_name: "test-data",
@@ -47,6 +52,12 @@ export const createMockSearchResult = (
   };
 };
 
+export const createMockModelResult = (
+  model: Partial<ModelResult> = {},
+): ModelResult =>
+  // Unjustified type cast. FIXME
+  createMockSearchResult({ ...model, model: "dataset" }) as ModelResult;
+
 export const createMockSearchResults = ({
   items = [createMockSearchResult()],
   options = {},
@@ -64,6 +75,7 @@ export const createMockSearchResults = ({
     offset: 0,
     table_db_id: null,
     total: items.length,
+    engine: "search.engine/appdb",
     ...options,
   };
 };

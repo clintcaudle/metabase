@@ -1,13 +1,16 @@
 import userEvent from "@testing-library/user-event";
 
 import { renderWithProviders, screen } from "__support__/ui";
-import { ELEVATED_ENGINES } from "metabase/databases/constants";
-import type { Engine } from "metabase-types/api";
-import { createMockEngine } from "metabase-types/api/mocks";
+import {
+  ELEVATED_ENGINES,
+  MAX_INITIAL_ENGINES_SHOWN,
+} from "metabase/databases/constants";
 import {
   createMockSettingsState,
   createMockState,
-} from "metabase-types/store/mocks";
+} from "metabase/redux/store/mocks";
+import type { Engine } from "metabase-types/api";
+import { createMockEngine } from "metabase-types/api/mocks";
 
 import { DatabaseEngineList } from "./DatabaseEngineList";
 
@@ -62,7 +65,9 @@ describe("DatabaseEngineList", () => {
   it("should render initial list of elevated engines", () => {
     setup();
 
-    expect(screen.getAllByRole("option")).toHaveLength(6);
+    expect(screen.getAllByRole("option")).toHaveLength(
+      MAX_INITIAL_ENGINES_SHOWN,
+    );
     ELEVATED_ENGINES.forEach((engine) => {
       expect(
         screen.getByText(mockEngines[engine]["driver-name"]),
@@ -74,11 +79,15 @@ describe("DatabaseEngineList", () => {
     setup();
 
     await userEvent.click(screen.getByText("Show more"));
-    expect(screen.getAllByRole("option").length).toBeGreaterThan(6);
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(
+      MAX_INITIAL_ENGINES_SHOWN,
+    );
     expect(screen.getByText("Hide")).toBeInTheDocument();
 
     await userEvent.click(screen.getByText("Hide"));
-    expect(screen.getAllByRole("option")).toHaveLength(6);
+    expect(screen.getAllByRole("option")).toHaveLength(
+      MAX_INITIAL_ENGINES_SHOWN,
+    );
     expect(screen.getByText("Show more")).toBeInTheDocument();
   });
 
@@ -100,6 +109,37 @@ describe("DatabaseEngineList", () => {
     expect(screen.getAllByRole("option")).toHaveLength(1);
     expect(screen.getByText("MongoDB")).toBeInTheDocument();
     expect(screen.queryByText("MySQL")).not.toBeInTheDocument();
+  });
+
+  it("should allow keyboard navigation", async () => {
+    const { onSelect } = setup();
+
+    const searchInput = screen.getByPlaceholderText("Search databases");
+    await userEvent.click(searchInput);
+
+    const [mysql, postgres, sqlServer] = screen.getAllByRole("option");
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(mysql).toHaveAttribute("aria-selected", "true");
+    expect(mysql).toHaveAttribute("data-combobox-selected", "true");
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(mysql).not.toHaveAttribute("aria-selected");
+    expect(mysql).not.toHaveAttribute("data-combobox-selected");
+    expect(postgres).toHaveAttribute("aria-selected", "true");
+    expect(postgres).toHaveAttribute("data-combobox-selected", "true");
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(postgres).not.toHaveAttribute("aria-selected");
+    expect(postgres).not.toHaveAttribute("data-combobox-selected");
+    expect(sqlServer).toHaveAttribute("aria-selected", "true");
+    expect(sqlServer).toHaveAttribute("data-combobox-selected", "true");
+
+    // Pressing enter should submit the selected option
+    await userEvent.keyboard("{Enter}");
+
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("sqlserver");
   });
 
   it("should show no results message when search has no matches", async () => {
@@ -134,7 +174,9 @@ describe("DatabaseEngineList", () => {
     expect(screen.getAllByRole("option")).toHaveLength(2);
 
     await userEvent.click(screen.getByText("Hide"));
-    expect(screen.getAllByRole("option")).toHaveLength(6);
+    expect(screen.getAllByRole("option")).toHaveLength(
+      MAX_INITIAL_ENGINES_SHOWN,
+    );
     expect(searchInput).not.toHaveValue();
   });
 });

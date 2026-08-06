@@ -1,16 +1,22 @@
 import { createMockMetadata } from "__support__/metadata";
 import { getNextId } from "__support__/utils";
-import { serializeCardForUrl } from "metabase/lib/card";
-import { checkNotNull } from "metabase/lib/types";
+import { serializeCardForUrl } from "metabase/common/utils/card";
+import { createMockLocation } from "metabase/redux/store/mocks";
+import { checkNotNull } from "metabase/utils/types";
+import * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
 import type { Card } from "metabase-types/api";
 import {
   createMockCard,
   createMockNativeDatasetQuery,
 } from "metabase-types/api/mocks";
-import { createMockLocation } from "metabase-types/store/mocks";
+import {
+  ORDERS_ID,
+  PRODUCTS_ID,
+  createSampleDatabase,
+} from "metabase-types/api/mocks/presets";
 
-import { isNavigationAllowed } from ".";
+import { getTableUrlForPristineQuestion, isNavigationAllowed } from ".";
 
 const structuredCard = createMockCard({
   id: getNextId(),
@@ -82,8 +88,8 @@ const newModelQueryTabLocation = createMockLocation({
   pathname: "/model/query",
 });
 
-const newModelMetadataTabLocation = createMockLocation({
-  pathname: "/model/metadata",
+const newModelColumnsTabLocation = createMockLocation({
+  pathname: "/model/columns",
 });
 
 const newMetricQueryTabLocation = createMockLocation({
@@ -104,8 +110,8 @@ const getViewModelLocations = (model: Question) => [
 const getEditModelLocations = (model: Question) => [
   createMockLocation({ pathname: `/model/${model.id()}/query` }),
   createMockLocation({ pathname: `/model/${model.slug()}/query` }),
-  createMockLocation({ pathname: `/model/${model.id()}/metadata` }),
-  createMockLocation({ pathname: `/model/${model.slug()}/metadata` }),
+  createMockLocation({ pathname: `/model/${model.id()}/columns` }),
+  createMockLocation({ pathname: `/model/${model.slug()}/columns` }),
   createMockLocation({ pathname: `/model/${model.id()}/notebook` }),
   createMockLocation({ pathname: `/model/${model.slug()}/notebook` }),
 ];
@@ -231,7 +237,7 @@ describe("isNavigationAllowed", () => {
       ...getStructuredQuestionLocations(structuredQuestion),
       ...getNativeQuestionLocations(nativeQuestion),
       newModelQueryTabLocation,
-      newModelMetadataTabLocation,
+      newModelColumnsTabLocation,
       newMetricQueryTabLocation,
       runModelLocation,
       runNewModelLocation,
@@ -264,7 +270,7 @@ describe("isNavigationAllowed", () => {
         ...getStructuredQuestionLocations(structuredQuestion),
         ...getNativeQuestionLocations(nativeQuestion),
         newModelQueryTabLocation,
-        newModelMetadataTabLocation,
+        newModelColumnsTabLocation,
         newMetricQueryTabLocation,
         runModelLocation,
         runNewModelLocation,
@@ -307,7 +313,7 @@ describe("isNavigationAllowed", () => {
         ...getNativeQuestionLocations(nativeQuestion),
         ...getRunQuestionLocations(structuredQuestion),
         newModelQueryTabLocation,
-        newModelMetadataTabLocation,
+        newModelColumnsTabLocation,
         newMetricQueryTabLocation,
         runModelLocation,
         runNewModelLocation,
@@ -365,7 +371,7 @@ describe("isNavigationAllowed", () => {
         ...getNativeQuestionLocations(nativeQuestion),
         ...getRunQuestionLocations(nativeQuestion),
         newModelQueryTabLocation,
-        newModelMetadataTabLocation,
+        newModelColumnsTabLocation,
         newMetricQueryTabLocation,
       ])("to `$pathname`", (destination) => {
         expect(
@@ -400,7 +406,7 @@ describe("isNavigationAllowed", () => {
         ...getNativeQuestionLocations(nativeQuestion),
         ...getRunQuestionLocations(structuredQuestion),
         newModelQueryTabLocation,
-        newModelMetadataTabLocation,
+        newModelColumnsTabLocation,
         newMetricQueryTabLocation,
         runModelLocation,
         runNewModelLocation,
@@ -419,8 +425,8 @@ describe("isNavigationAllowed", () => {
     const isNewQuestion = true;
     const question = structuredModelQuestion;
 
-    describe("allows navigating between model query & metadata tabs", () => {
-      it.each([newModelQueryTabLocation, newModelMetadataTabLocation])(
+    describe("allows navigating between model query & columns tabs", () => {
+      it.each([newModelQueryTabLocation, newModelColumnsTabLocation])(
         "to `$pathname`",
         (destination) => {
           expect(
@@ -462,7 +468,7 @@ describe("isNavigationAllowed", () => {
     const isNewQuestion = false;
     const question = structuredModelQuestion;
 
-    describe("allows navigating between model query & metadata tabs", () => {
+    describe("allows navigating between model query & columns tabs", () => {
       it.each(getEditModelLocations(question))(
         "to `$pathname`",
         (destination) => {
@@ -498,7 +504,7 @@ describe("isNavigationAllowed", () => {
         ...getStructuredQuestionLocations(structuredQuestion),
         ...getNativeQuestionLocations(nativeQuestion),
         newModelQueryTabLocation,
-        newModelMetadataTabLocation,
+        newModelColumnsTabLocation,
         newMetricQueryTabLocation,
         runMetricLocation,
         runNewMetricLocation,
@@ -515,7 +521,7 @@ describe("isNavigationAllowed", () => {
     const isNewQuestion = false;
     const question = nativeModelQuestion;
 
-    describe("allows navigating between model query & metadata tabs", () => {
+    describe("allows navigating between model query & columns tabs", () => {
       it.each(getEditModelLocations(question))(
         "to `$pathname`",
         (destination) => {
@@ -551,7 +557,7 @@ describe("isNavigationAllowed", () => {
         ...getStructuredQuestionLocations(structuredQuestion),
         ...getNativeQuestionLocations(nativeQuestion),
         newModelQueryTabLocation,
-        newModelMetadataTabLocation,
+        newModelColumnsTabLocation,
         newMetricQueryTabLocation,
         runMetricLocation,
         runNewMetricLocation,
@@ -609,7 +615,7 @@ describe("isNavigationAllowed", () => {
     const isNewQuestion = false;
     const question = structuredMetricQuestion;
 
-    describe("allows navigating between metric query & metadata tabs", () => {
+    describe("allows navigating between metric query & columns tabs", () => {
       it.each(getEditMetricLocations(question))(
         "to `$pathname`",
         (destination) => {
@@ -645,7 +651,7 @@ describe("isNavigationAllowed", () => {
         ...getStructuredQuestionLocations(structuredQuestion),
         ...getNativeQuestionLocations(nativeQuestion),
         newModelQueryTabLocation,
-        newModelMetadataTabLocation,
+        newModelColumnsTabLocation,
         newMetricQueryTabLocation,
         runQuestionEditNotebookLocation,
       ])("to `$pathname`", (destination) => {
@@ -654,5 +660,59 @@ describe("isNavigationAllowed", () => {
         ).toBe(false);
       });
     });
+  });
+});
+
+describe("getTableUrlForPristineQuestion", () => {
+  const tableMetadata = createMockMetadata({
+    databases: [createSampleDatabase()],
+  });
+
+  const pristineOrders = checkNotNull(
+    tableMetadata.table(ORDERS_ID),
+  ).newQuestion();
+
+  it("returns the /table/:slug URL for a table's pristine default question", () => {
+    expect(getTableUrlForPristineQuestion(pristineOrders)).toBe(
+      "/table/2-orders",
+    );
+    expect(
+      getTableUrlForPristineQuestion(
+        checkNotNull(tableMetadata.table(PRODUCTS_ID)).newQuestion(),
+      ),
+    ).toBe("/table/1-products");
+  });
+
+  it("returns null once the query is modified", () => {
+    const withLimit = pristineOrders.setQuery(
+      Lib.limit(pristineOrders.query(), -1, 10),
+    );
+    expect(getTableUrlForPristineQuestion(withLimit)).toBeNull();
+  });
+
+  it("returns null when the display is changed", () => {
+    expect(
+      getTableUrlForPristineQuestion(pristineOrders.setDisplay("bar")),
+    ).toBeNull();
+  });
+
+  it("returns null when visualization settings are set", () => {
+    const withSettings = pristineOrders.setCard({
+      ...pristineOrders.card(),
+      visualization_settings: { "table.pivot": true },
+    });
+    expect(getTableUrlForPristineQuestion(withSettings)).toBeNull();
+  });
+
+  it("returns null for a saved question", () => {
+    expect(getTableUrlForPristineQuestion(pristineOrders.setId(1))).toBeNull();
+  });
+
+  it("returns null for a native question", () => {
+    const native = pristineOrders.setCard({
+      ...pristineOrders.card(),
+      dataset_query: createMockNativeDatasetQuery(),
+    });
+    expect(getTableUrlForPristineQuestion(native)).toBeNull();
   });
 });

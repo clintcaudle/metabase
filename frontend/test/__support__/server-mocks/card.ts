@@ -5,6 +5,8 @@ import type {
   Card,
   CardId,
   CardQueryMetadata,
+  ConcreteTableId,
+  DashboardId,
   Dataset,
   GetPublicCard,
 } from "metabase-types/api";
@@ -13,32 +15,86 @@ import { createMockCard } from "metabase-types/api/mocks";
 import { PERMISSION_ERROR } from "./constants";
 
 export function setupCardEndpoints(card: Card) {
-  fetchMock.get(`path:/api/card/${card.id}`, card);
-  fetchMock.put(`path:/api/card/${card.id}`, async (url) => {
-    const lastCall = fetchMock.lastCall(url);
-    return createMockCard(await lastCall?.request?.json());
+  fetchMock.get(`path:/api/card/${card.id}`, card, {
+    name: `card-${card.id}-get`,
   });
-  fetchMock.get(`path:/api/card/${card.id}/series`, []);
+  fetchMock.put(
+    `path:/api/card/${card.id}`,
+    async (call) => {
+      const lastCall = fetchMock.callHistory.lastCall(call.url);
+      return createMockCard(await lastCall?.request?.json());
+    },
+    { name: `card-${card.id}-put` },
+  );
+  fetchMock.get(`path:/api/card/${card.id}/series`, [], {
+    name: `card-${card.id}-series`,
+  });
+}
+
+export function setupCardByEntityIdEndpoints(card: Card) {
+  fetchMock.get(`path:/api/card/${card.entity_id}`, card, {
+    name: `card-entity-${card.entity_id}-get`,
+  });
+  fetchMock.put(
+    `path:/api/card/${card.entity_id}`,
+    async (call) => {
+      const lastCall = fetchMock.callHistory.lastCall(call.url);
+      return createMockCard(await lastCall?.request?.json());
+    },
+    { name: `card-entity-${card.entity_id}-put` },
+  );
+  fetchMock.get(`path:/api/card/${card.entity_id}/series`, [], {
+    name: `card-entity-${card.entity_id}-series`,
+  });
 }
 
 export function setupCardQueryMetadataEndpoint(
   card: Card,
   metadata: CardQueryMetadata,
 ) {
-  fetchMock.get(`path:/api/card/${card.id}/query_metadata`, metadata);
+  fetchMock.get(`path:/api/card/${card.id}/query_metadata`, metadata, {
+    name: `card-${card.id}-query-metadata`,
+  });
 }
 
 export function setupCardsEndpoints(cards: Card[]) {
-  fetchMock.get({ url: "path:/api/card", overwriteRoutes: false }, cards);
+  fetchMock.get({
+    url: "path:/api/card",
+    response: cards,
+    name: "cards-list",
+  });
   setupCardCreateEndpoint();
   cards.forEach((card) => setupCardEndpoints(card));
 }
 
-export function setupCardCreateEndpoint() {
-  fetchMock.post("path:/api/card", async (url) => {
-    const lastCall = fetchMock.lastCall(url);
-    return createMockCard(await lastCall?.request?.json());
+export function setupCardsUsingModelEndpoint(card: Card, usedBy: Card[] = []) {
+  fetchMock.get({
+    url: "path:/api/card",
+    query: { f: "using_model", model_id: card.id },
+    response: usedBy,
   });
+}
+
+export function setupCardsForTableEndpoint(
+  tableId: ConcreteTableId,
+  cards: Card[] = [],
+) {
+  fetchMock.get({
+    url: "path:/api/card",
+    query: { f: "table", model_id: tableId },
+    response: cards,
+  });
+}
+
+export function setupCardCreateEndpoint() {
+  fetchMock.post(
+    "path:/api/card",
+    async (call) => {
+      const lastCall = fetchMock.callHistory.lastCall(call.url);
+      return createMockCard(await lastCall?.request?.json());
+    },
+    { name: "card-create" },
+  );
 }
 
 export function setupUnauthorizedCardEndpoints(card: Card) {
@@ -56,6 +112,25 @@ export function setupUnauthorizedCardEndpoints(card: Card) {
 
 export function setupUnauthorizedCardsEndpoints(cards: Card[]) {
   cards.forEach((card) => setupUnauthorizedCardEndpoints(card));
+}
+
+/**
+ * Makes the card's own endpoints (the card, its query metadata, and running its
+ * query) all return 403, i.e. a card the current user has no access to at all.
+ */
+export function setupForbiddenCardEndpoints(cardId: CardId) {
+  fetchMock.get(`path:/api/card/${cardId}`, {
+    status: 403,
+    body: PERMISSION_ERROR,
+  });
+  fetchMock.get(`path:/api/card/${cardId}/query_metadata`, {
+    status: 403,
+    body: PERMISSION_ERROR,
+  });
+  fetchMock.post(`path:/api/card/${cardId}/query`, {
+    status: 403,
+    body: PERMISSION_ERROR,
+  });
 }
 
 export function setupCardQueryEndpoints(card: Card, dataset: Dataset) {
@@ -78,4 +153,13 @@ export function setupCardPublicLinkEndpoints(cardId: CardId) {
 
 export function setupListPublicCardsEndpoint(publicCards: GetPublicCard[]) {
   fetchMock.get("path:/api/card/public", publicCards);
+}
+
+export function setupCardDashboardsEndpoint(
+  cardId: CardId,
+  dashboards: { id: DashboardId; name: string; enable_embedding: boolean }[],
+) {
+  fetchMock.get(`path:/api/card/${cardId}/dashboards`, dashboards, {
+    name: `card-${cardId}-dashboards`,
+  });
 }

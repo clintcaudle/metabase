@@ -2,11 +2,19 @@ import type {
   DashCardId,
   DashboardCard,
   DashboardId,
+  DashboardTab,
+  VirtualDashboardCard,
   WritebackActionId,
 } from "metabase-types/api";
 
 import { visitDashboard } from "./e2e-misc-helpers";
-import { menu, popover, sidebar, sidesheet } from "./e2e-ui-elements-helpers";
+import {
+  filterWidget,
+  menu,
+  popover,
+  sidebar,
+  sidesheet,
+} from "./e2e-ui-elements-helpers";
 
 // Metabase utility functions for commonly-used patterns
 export function selectDashboardFilter(
@@ -28,34 +36,113 @@ export function getDashboardCards() {
 }
 
 export function getDashboardCard(index = 0) {
-  // eslint-disable-next-line no-unsafe-element-filtering
+  // eslint-disable-next-line metabase/no-unsafe-element-filtering
   return getDashboardCards().eq(index);
 }
 
 export function ensureDashboardCardHasText(text: string, index = 0) {
-  // eslint-disable-next-line no-unsafe-element-filtering
+  // eslint-disable-next-line metabase/no-unsafe-element-filtering
   cy.findAllByTestId("dashcard").eq(index).should("contain", text);
 }
 
+export function getEmbeddedDashboardCardMenu(index = 0) {
+  return getDashboardCard(index).findByTestId(
+    "public-or-embedded-dashcard-menu",
+  );
+}
+
 export function getDashboardCardMenu(index = 0) {
+  cy.log("Wait for the card results to load");
+  getDashboardCard(index).findByTestId("loading-indicator").should("not.exist");
+  cy.log("Click on the card menu");
   return getDashboardCard(index).findByTestId("dashcard-menu");
+}
+
+/**
+ * Wait until every dashcard in the grid has finished loading its results.
+ *
+ * Prefer this over counting card-query requests: how many queries fire after a
+ * save, filter change, or navigation is not deterministic (results can be served
+ * from cache), but the absence of loading indicators is a stable signal that the
+ * grid has settled. Pass `count` to also assert the expected number of cards is
+ * present, which guards against the check passing before the cards render.
+ *
+ * Anchors on the dashboard body being visible before checking for spinners so
+ * the absence check can't pass mid-render, before any cards have started
+ * loading. The body container renders even for empty dashboards (which show no
+ * grid), so this stays a no-op rather than hanging when there is no grid.
+ */
+export function waitForDashcardsToLoad({ count }: { count?: number } = {}) {
+  cy.log("Wait for all dashcards to finish loading");
+  if (count != null) {
+    getDashboardCards().should("have.length", count);
+  }
+  cy.findByTestId("dashboard-parameters-and-cards")
+    .should("be.visible")
+    .findAllByTestId("loading-indicator")
+    .should("not.exist");
+  waitForGridLayoutStable();
+  waitForFilterWidgetsStable();
+}
+
+/**
+ * Wait until the grid stops reflowing. react-grid-layout repositions cards when
+ * switching between edit and view mode (the "resizing and detaching elements"
+ * the old fixed sleeps compensated for), which can move a chart out from under a
+ * coordinate-based click. No-op when there are no cards to reflow (empty or
+ * text-only dashboards).
+ */
+function waitForGridLayoutStable() {
+  waitForLayoutStable(
+    "dashcard-container",
+    () => getDashboardCards(),
+    "dashcard",
+  );
+}
+
+/**
+ * Wait until the filter widgets stop re-rendering. The parameter panel re-mounts
+ * when leaving edit mode, so interacting with a widget too soon after a save can
+ * hit a detaching element and drop the click. No-op when the dashboard has no
+ * filter widgets.
+ */
+export function waitForFilterWidgetsStable() {
+  waitForLayoutStable(
+    "parameter-widget",
+    () => cy.findAllByTestId("parameter-widget"),
+    "filter widget",
+  );
+}
+
+/**
+ * Poll the first matching element's box until it is unchanged across consecutive
+ * retries, i.e. layout has settled. There's no "layout done" event to await, and
+ * this is a no-op when nothing matches so it never hangs on absent elements.
+ */
+function waitForLayoutStable(
+  testId: string,
+  getElements: () => Cypress.Chainable<JQuery<HTMLElement>>,
+  label: string,
+) {
+  cy.get("body").then(($body) => {
+    if (!$body.find(`[data-testid="${testId}"]`).length) {
+      return;
+    }
+    let previous: string | null = null;
+    getElements()
+      .first()
+      .should(($el) => {
+        const { top, left, width, height } = $el[0].getBoundingClientRect();
+        const current = [top, left, width, height].map(Math.round).join(",");
+        const settled = current === previous;
+        previous = current;
+        expect(settled, `${label} layout settled (${current})`).to.be.true;
+      });
+  });
 }
 
 export function showDashboardCardActions(index = 0) {
   return getDashboardCard(index).realHover({ scrollBehavior: "bottom" });
-}
-
-/**
- * Given a dashcard HTML element, will return the element for the action icon
- * with the given label text (e.g. "Click behavior", "Replace", "Duplicate", etc)
- */
-export function findDashCardAction(
-  dashcardElement: Cypress.Chainable<JQuery<HTMLElement>>,
-  labelText: string,
-) {
-  return dashcardElement
-    .realHover({ scrollBehavior: "bottom" })
-    .findByLabelText(labelText);
 }
 
 export function removeDashboardCard(index = 0) {
@@ -64,7 +151,7 @@ export function removeDashboardCard(index = 0) {
     .findByTestId("dashboardcard-actions-panel")
     .should("be.visible")
     .icon("close")
-    .click();
+    .click({ force: true });
 }
 
 export function showDashcardVisualizationSettings(index = 0) {
@@ -77,45 +164,49 @@ export function showDashcardVisualizationSettings(index = 0) {
 
 export function editDashboard() {
   cy.findByLabelText("Edit dashboard").click();
+  // The click can be dropped while the header is still re-rendering (e.g. right
+  // after a save). The Edit button only exists in view mode, so if it's still
+  // present the click didn't take — re-click it. This can't double-toggle.
+  // Use cy.document() (not cy.get("body")) so this also works when editDashboard
+  // runs inside a cy.within() block, where cy.get is scoped to the subject.
+  cy.document().then((doc) => {
+    if (doc.querySelector('[aria-label="Edit dashboard"]')) {
+      cy.findByLabelText("Edit dashboard").click();
+    }
+  });
   cy.findByText("You're editing this dashboard.");
 }
 
 export function saveDashboard({
-  buttonLabel = "Save",
-  editBarText = "You're editing this dashboard.",
-  waitMs = 1,
   awaitRequest = true,
-} = {}) {
+}: { awaitRequest?: boolean } = {}) {
   cy.intercept("PUT", "/api/dashboard/*").as(
     "saveDashboard-saveDashboardCards",
   );
-  cy.intercept("GET", "/api/dashboard/*").as("saveDashboard-getDashboard");
   cy.intercept("GET", "/api/dashboard/*/query_metadata*").as(
     "saveDashboard-getDashboardMetadata",
   );
 
-  cy.findByText(editBarText).should("be.visible");
-  cy.button(buttonLabel).click();
+  cy.findByTestId("edit-bar").should("be.visible");
+  cy.findByTestId("edit-bar").findByTestId("save-edit-button").click();
 
   if (awaitRequest) {
     cy.wait("@saveDashboard-saveDashboardCards");
-    cy.wait("@saveDashboard-getDashboard");
     cy.wait("@saveDashboard-getDashboardMetadata");
   }
 
-  cy.findByText(editBarText).should("not.exist");
-  cy.wait(waitMs); // this is stupid but necessary to due to the dashboard resizing and detaching elements
+  cy.findByTestId("edit-bar").should("not.exist");
+  // Settle on a deterministic signal (all dashcards loaded) instead of sleeping
+  // for a fixed time while the grid resizes and detaches elements.
+  waitForDashcardsToLoad();
 }
 
 export function checkFilterLabelAndValue(label: string, value: string) {
-  cy.get("fieldset").find("legend").invoke("text").should("eq", label);
-
-  cy.get("fieldset").contains(value);
+  filterWidget().findByLabelText(label, { exact: false }).should("exist");
+  filterWidget().contains(value);
 }
 
-export function setFilter(type: string, subType?: string, name?: string) {
-  cy.icon("filter").click();
-
+function _setFilter(type: string, subType?: string, name?: string) {
   popover().findByText("Add a filter or parameter").should("be.visible");
   popover().findByText(type).click();
 
@@ -127,6 +218,24 @@ export function setFilter(type: string, subType?: string, name?: string) {
   if (name) {
     sidebar().findByLabelText("Label").clear().type(name);
   }
+}
+
+export function setFilter(type: string, subType?: string, name?: string) {
+  dashboardHeader().findByLabelText("Add a filter or parameter").click();
+  _setFilter(type, subType, name);
+}
+
+export function setDashCardFilter(
+  dashcardIndex: number,
+  type: string,
+  subType?: string,
+  name?: string,
+) {
+  getDashboardCard(dashcardIndex)
+    .realHover({ scrollBehavior: "bottom" })
+    .findByLabelText("Add a filter")
+    .click({ force: true });
+  _setFilter(type, subType, name);
 }
 
 export function getRequiredToggle() {
@@ -215,7 +324,9 @@ export function addHeadingWhileEditing(
 ) {
   cy.findByLabelText("Add a heading or text box").click();
   popover().findByText("Heading").click();
-  cy.findByPlaceholderText("Heading").type(string, options);
+  cy.findByPlaceholderText(
+    "You can connect widgets to {{variables}} in heading cards.",
+  ).type(string, options);
 }
 
 export function openQuestionsSidebar() {
@@ -296,8 +407,7 @@ export function resizeDashboardCard({
   y: number;
 }) {
   card.within(() => {
-    const resizeHandle = cy.get(".react-resizable-handle");
-    resizeHandle
+    cy.get(".react-resizable-handle")
       .trigger("mousedown", { button: 0 })
       .wait(200)
       .trigger("mousemove", {
@@ -335,10 +445,18 @@ export function openDashboardMenu(option?: string) {
   }
 }
 
+export function toggleDashboardSubscriptionsSidebar() {
+  dashboardHeader().findByTestId("dashboard-subscriptions-button").click();
+}
+
 export function assertDashboardCardTitle(index: number, title: string) {
   getDashboardCard(index)
     .findByTestId("legend-caption-title")
     .should("have.text", title);
+}
+
+export function clickOnCardTitle(index: number) {
+  getDashboardCard(index).findByTestId("legend-caption-title").click();
 }
 
 export const dashboardHeader = () => {
@@ -349,6 +467,10 @@ export const dashboardGrid = () => {
   return cy.findByTestId("dashboard-grid");
 };
 
+export function dashboardCancelButton() {
+  return cy.findByTestId("edit-bar").findByRole("button", { name: "Cancel" });
+}
+
 export function dashboardSaveButton() {
   return cy.findByTestId("edit-bar").findByRole("button", { name: "Save" });
 }
@@ -357,23 +479,44 @@ export function dashboardParameterSidebar() {
   return cy.findByTestId("dashboard-parameter-sidebar");
 }
 
+export function applyFilterToast() {
+  return cy.findByTestId("filter-apply-toast");
+}
+
+export function applyFilterButton() {
+  return applyFilterToast().button("Apply");
+}
+
+export function cancelFilterButton() {
+  return applyFilterToast().button("Cancel");
+}
+
+export function setDashboardParameterName(name: string) {
+  dashboardParameterSidebar().findByLabelText("Label").clear().type(name);
+}
+
+export function setDashboardParameterType(type: string) {
+  dashboardParameterSidebar()
+    .findByText("Filter or parameter type")
+    .next()
+    .click();
+  popover().findByText(type).click();
+}
+
+export function setDashboardParameterOperator(operatorName: string) {
+  dashboardParameterSidebar().findByText("Filter operator").next().click();
+  popover().findByText(operatorName).click();
+}
+
 export function dashboardParametersDoneButton() {
   return dashboardParameterSidebar().button("Done");
 }
 
 export function dashboardParametersPopover() {
+  // Unjustified type cast. FIXME
   return popover({ testId: "parameter-value-dropdown" } as any);
 }
 
-/**
- * @param {Object} option
- * @param {number=} option.id
- * @param {number=} option.col
- * @param {number=} option.row
- * @param {number=} option.size_x
- * @param {number=} option.size_y
- * @param {string=} option.text
- */
 export function getTextCardDetails({
   id = getNextUnsavedDashboardCardId(),
   col = 0,
@@ -381,7 +524,10 @@ export function getTextCardDetails({
   size_x = 4,
   size_y = 6,
   text = "Text card",
-} = {}) {
+  ...cardDetails
+}: Partial<VirtualDashboardCard> & {
+  text?: string;
+} = {}): Partial<VirtualDashboardCard> {
   return {
     id,
     card_id: null,
@@ -399,7 +545,20 @@ export function getTextCardDetails({
       },
       text,
     },
-  } as const;
+    ...cardDetails,
+  };
+}
+export function getDashboardTabDetails({
+  id,
+  name,
+}: Pick<DashboardTab, "id" | "name" | "position">): Pick<
+  DashboardTab,
+  "id" | "name" | "position"
+> {
+  return {
+    id,
+    name,
+  };
 }
 
 export function getHeadingCardDetails({
@@ -409,7 +568,10 @@ export function getHeadingCardDetails({
   size_x = 24,
   size_y = 1,
   text = "Heading text details",
-} = {}) {
+  ...cardDetails
+}: Partial<VirtualDashboardCard> & {
+  text?: string;
+} = {}): Partial<VirtualDashboardCard> {
   return {
     id,
     card_id: null,
@@ -428,6 +590,7 @@ export function getHeadingCardDetails({
       "dashcard.background": false,
       text,
     },
+    ...cardDetails,
   };
 }
 
@@ -555,4 +718,16 @@ export function assertDashboardFullWidth() {
     "max-width",
     MAX_WIDTH,
   );
+}
+
+export function clickBehaviorSidebar(
+  dashcardIndex = 0,
+): Cypress.Chainable<JQuery<HTMLElement>> {
+  showDashboardCardActions(dashcardIndex);
+
+  getDashboardCard(dashcardIndex)
+    .findByLabelText("Click behavior")
+    .click({ force: true });
+
+  return cy.findByTestId("click-behavior-sidebar");
 }

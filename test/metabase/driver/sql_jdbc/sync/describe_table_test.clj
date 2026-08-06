@@ -16,12 +16,13 @@
    [metabase.driver.sql-jdbc.sync.describe-table :as sql-jdbc.describe-table]
    [metabase.driver.sql-jdbc.sync.interface :as sql-jdbc.sync.interface]
    [metabase.driver.util :as driver.u]
+   [metabase.lib.metadata :as lib.metadata]
+   [metabase.query-processor.timeseries-test.util :as tqpt]
    [metabase.sync.core :as sync]
    [metabase.test :as mt]
    [metabase.test.data.interface :as tx]
    [metabase.test.data.one-off-dbs :as one-off-dbs]
    [metabase.test.data.sql :as sql.tx]
-   [metabase.timeseries-query-processor-test.util :as tqpt]
    [metabase.util :as u]
    [metabase.util.json :as json]
    [metabase.util.log :as log]
@@ -49,7 +50,7 @@
   (mt/test-driver :h2
     (assert (uses-default-describe-table? :h2)
             "Make sure H2 uses the default `describe-table` implementation")
-    (is (= {:name "VENUES",
+    (is (= {:name "VENUES"
             :fields
             #{{:name                       "ID"
                :database-type              "BIGINT"
@@ -58,6 +59,9 @@
                :pk?                        true
                :database-required          false
                :database-is-auto-increment true
+               :database-is-generated      false
+               :database-is-nullable       false
+               :jdbc-type                  java.sql.Types/BIGINT
                :json-unfolding             false}
               {:name                       "NAME"
                :database-type              "CHARACTER VARYING"
@@ -65,6 +69,9 @@
                :database-position          1
                :database-required          false
                :database-is-auto-increment false
+               :database-is-generated      false
+               :database-is-nullable       true
+               :jdbc-type                  java.sql.Types/VARCHAR
                :json-unfolding             false}
               {:name                       "CATEGORY_ID"
                :database-type              "INTEGER"
@@ -72,6 +79,9 @@
                :database-position          2
                :database-required          false
                :database-is-auto-increment false
+               :database-is-generated      false
+               :database-is-nullable       true
+               :jdbc-type                  java.sql.Types/INTEGER
                :json-unfolding             false}
               {:name                       "LATITUDE"
                :database-type              "DOUBLE PRECISION"
@@ -79,6 +89,9 @@
                :database-position          3
                :database-required          false
                :database-is-auto-increment false
+               :database-is-generated      false
+               :database-is-nullable       true
+               :jdbc-type                  java.sql.Types/FLOAT
                :json-unfolding             false}
               {:name                       "LONGITUDE"
                :database-type              "DOUBLE PRECISION"
@@ -86,6 +99,9 @@
                :database-position          4
                :database-required          false
                :database-is-auto-increment false
+               :database-is-generated      false
+               :database-is-nullable       true
+               :jdbc-type                  java.sql.Types/FLOAT
                :json-unfolding             false}
               {:name                       "PRICE"
                :database-type              "INTEGER"
@@ -93,6 +109,9 @@
                :database-position          5
                :database-required          false
                :database-is-auto-increment false
+               :database-is-generated      false
+               :database-is-nullable       true
+               :jdbc-type                  java.sql.Types/INTEGER
                :json-unfolding             false}}}
            (driver/describe-table :h2 (mt/db) {:name "VENUES"})))))
 
@@ -109,28 +128,37 @@
                          "GRANT ALL ON \"employee_counter\" TO GUEST;"]]
         (jdbc/execute! one-off-dbs/*conn* [statement]))
       (sync/sync-database! (mt/db))
-      (is (= {:fields #{{:base-type                 :type/Integer
+      (is (= {:fields #{{:base-type                  :type/Integer
                          :database-is-auto-increment true
-                         :database-position         0
-                         :database-required         false
-                         :database-type             "INTEGER"
-                         :name                      "id"
-                         :pk?                       true
-                         :json-unfolding            false}
-                        {:base-type                 :type/Integer
+                         :database-is-generated      false
+                         :database-is-nullable       false
+                         :database-position          0
+                         :database-required          false
+                         :database-type              "INTEGER"
+                         :jdbc-type                  java.sql.Types/INTEGER
+                         :name                       "id"
+                         :pk?                        true
+                         :json-unfolding             false}
+                        {:base-type                  :type/Integer
                          :database-is-auto-increment true
-                         :database-position         1
-                         :database-required         false
-                         :database-type             "INTEGER"
-                         :name                      "count"
-                         :json-unfolding            false}
-                        {:base-type                 :type/Integer
+                         :database-is-generated      false
+                         :database-is-nullable       false
+                         :database-position          1
+                         :database-required          false
+                         :database-type              "INTEGER"
+                         :jdbc-type                  java.sql.Types/INTEGER
+                         :name                       "count"
+                         :json-unfolding             false}
+                        {:base-type                  :type/Integer
                          :database-is-auto-increment false
-                         :database-position         2
-                         :database-required         true
-                         :database-type             "INTEGER"
-                         :name                      "rank"
-                         :json-unfolding            false}}
+                         :database-is-generated      false
+                         :database-is-nullable       false
+                         :database-position          2
+                         :database-required          true
+                         :database-type              "INTEGER"
+                         :jdbc-type                  java.sql.Types/INTEGER
+                         :name                       "rank"
+                         :json-unfolding             false}}
               :name "employee_counter"}
              (sql-jdbc.describe-table/describe-table :h2 (mt/id) {:name "employee_counter"}))))))
 
@@ -156,7 +184,7 @@
     [_driver _feature _database]
     true))
 
-(deftest describe-fields-shared-attributes-test
+(deftest ^:parallel describe-fields-shared-attributes-test
   (testing "common metadata attributes"
     (mt/test-drivers (mt/normal-drivers-with-feature :actions)
       (is (=?
@@ -172,7 +200,10 @@
                        :database-required
                        :database-is-auto-increment
                        (comp boolean :pk?))
-                 (describe-fields-for-table (mt/db) (t2/select-one :model/Table :id (mt/id :venues))))))))
+                 (describe-fields-for-table (mt/db) (t2/select-one :model/Table :id (mt/id :venues))))))))))
+
+(deftest ^:parallel describe-fields-shared-attributes-test-2
+  (testing "common metadata attributes"
     (mt/test-drivers (mt/normal-drivers-without-feature :actions)
       (is (=?
            [[0 (driver/database-supports? driver/*driver* ::describe-pks (mt/db))]
@@ -189,9 +220,9 @@
 (deftest database-types-fallback-test
   (mt/test-drivers (apply disj (sql-jdbc-drivers-using-default-describe-table-or-fields-impl)
                           (tqpt/timeseries-drivers))
-    (let [org-result-set-seq jdbc/result-set-seq]
-      (with-redefs [jdbc/result-set-seq (fn [& args]
-                                          (map #(dissoc % :type_name) (apply org-result-set-seq args)))]
+    (let [org-result-set-seq (mt/original-fn #'jdbc/result-set-seq)]
+      (mt/with-dynamic-fn-redefs [jdbc/result-set-seq (fn [& args]
+                                                        (map #(dissoc % :type_name) (apply org-result-set-seq args)))]
         (is (= #{{:name "longitude"   :base-type :type/Float}
                  {:name "category_id" :base-type :type/Integer}
                  {:name "price"       :base-type :type/Integer}
@@ -291,12 +322,12 @@
       (is (= types (#'sql-jdbc.describe-table/json-map->types row)))))
   (testing "JSON json-map->types handles bigint that comes in and gets interpreted as Java bigint OK (#22732)"
     (let [int-row   {:zlob (json/encode {"blob" (java.math.BigInteger. "123124124312134235234235345344324352")})}]
-      (is (= #{{:name              "zlob → blob",
-                :database-type     "decimal",
-                :base-type         :type/BigInteger,
-                :database-position 0,
+      (is (= #{{:name              "zlob → blob"
+                :database-type     "decimal"
+                :base-type         :type/BigInteger
+                :database-position 0
                 :json-unfolding    false
-                :visibility-type   :normal,
+                :visibility-type   :normal
                 :nfc-path          [:zlob "blob"]}}
              (-> int-row
                  (#'sql-jdbc.describe-table/json-map->types)
@@ -313,68 +344,68 @@
                       (filter #(= (:name %) "json_bit"))
                       first
                       ((juxt :base-type :semantic-type)))))
-          (is (= #{{:name "json_bit → 1234123412314",
-                    :database-type "timestamp",
-                    :base-type :type/DateTime,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+          (is (= #{{:name "json_bit → 1234123412314"
+                    :database-type "timestamp"
+                    :base-type :type/DateTime
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "1234123412314"]}
-                   {:name "json_bit → boop",
-                    :database-type "timestamp",
-                    :base-type :type/DateTime,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+                   {:name "json_bit → boop"
+                    :database-type "timestamp"
+                    :base-type :type/DateTime
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "boop"]}
-                   {:name "json_bit → genres",
-                    :database-type "text",
-                    :base-type :type/Array,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+                   {:name "json_bit → genres"
+                    :database-type "text"
+                    :base-type :type/Array
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "genres"]}
-                   {:name "json_bit → 1234",
-                    :database-type "decimal",
-                    :base-type :type/Integer,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+                   {:name "json_bit → 1234"
+                    :database-type "decimal"
+                    :base-type :type/Integer
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "1234"]}
-                   {:name "json_bit → doop",
-                    :database-type "text",
-                    :base-type :type/Text,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+                   {:name "json_bit → doop"
+                    :database-type "text"
+                    :base-type :type/Text
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "doop"]}
-                   {:name "json_bit → noop",
-                    :database-type "timestamp",
-                    :base-type :type/DateTime,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+                   {:name "json_bit → noop"
+                    :database-type "timestamp"
+                    :base-type :type/DateTime
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "noop"]}
-                   {:name "json_bit → zoop",
-                    :database-type "timestamp",
-                    :base-type :type/DateTime,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+                   {:name "json_bit → zoop"
+                    :database-type "timestamp"
+                    :base-type :type/DateTime
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "zoop"]}
-                   {:name "json_bit → published",
-                    :database-type "text",
-                    :base-type :type/Text,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+                   {:name "json_bit → published"
+                    :database-type "text"
+                    :base-type :type/Text
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "published"]}
-                   {:name "json_bit → title",
-                    :database-type "text",
-                    :base-type :type/Text,
-                    :database-position 0,
-                    :json-unfolding false,
-                    :visibility-type :normal,
+                   {:name "json_bit → title"
+                    :database-type "text"
+                    :base-type :type/Text
+                    :database-position 0
+                    :json-unfolding false
+                    :visibility-type :normal
                     :nfc-path [:json_bit "title"]}}
                  (sql-jdbc.sync/describe-nested-field-columns
                   driver/*driver*
@@ -386,17 +417,15 @@
     (mt/test-drivers (mt/normal-drivers-with-feature :nested-field-columns)
       (mt/dataset (mt/dataset-definition
                    "naked_json"
-                   ["json_table"
-                    [{:field-name "array_col" :base-type :type/JSON}
-                     {:field-name "string_col" :base-type :type/JSON}]
-                    [["[1, 2, 3]" "\"just-a-string-in-a-json-column\""]]])
-
+                   [["json_table"
+                     [{:field-name "array_col" :base-type :type/JSON}
+                      {:field-name "string_col" :base-type :type/JSON}]
+                     [["[1, 2, 3]" "\"just-a-string-in-a-json-column\""]]]])
         (testing "there should be no nested fields"
           (is (= #{} (sql-jdbc.sync/describe-nested-field-columns
                       driver/*driver*
                       (mt/db)
                       {:name "json_table" :id (mt/id "json_table")}))))
-
         (sync/sync-database! (mt/db))
         (is (=? (if (mysql/mariadb? (mt/db))
                   #{{:name "id"
@@ -452,9 +481,9 @@
 
 (mt/defdataset long-json
   [["long_json_table"
-     ;; `short_json` and `long_json` have the same schema,
-     ;; in the first row, both have an "a" key.
-     ;; in the second row, both have a "b" key, except `long_json` has a longer value.
+    ;; `short_json` and `long_json` have the same schema
+    ;; in the first row, both have an "a" key.
+    ;; in the second row, both have a "b" key, except `long_json` has a longer value.
     [{:field-name "short_json", :base-type :type/JSON}
      {:field-name "long_json",  :base-type :type/JSON}]
     [[(json/encode {:a "x"}) (json/encode {:a "x"})]
@@ -623,42 +652,29 @@
             (map lowercase-value)
             (driver/describe-table-indexes driver database table)))))
 
-(defn- do-with-temporary-dataset [dataset thunk]
-  (mt/dataset dataset
-    (try
-      (thunk)
-      (finally
-        ;; clean and destroy the db so this test is repeatable.
-        (t2/delete! :model/Database (mt/id))
-        (u/ignore-exceptions
-          (tx/destroy-db! driver/*driver* dataset))))))
-
 (deftest describe-table-indexes-test
   (mt/test-drivers (mt/normal-driver-select {:+parent :sql-jdbc
                                              :+features [:index-info]})
-    (do-with-temporary-dataset
-     (mt/dataset-definition "indexes"
-                            ["single_index"
-                             [{:field-name "indexed" :indexed? true :base-type :type/Integer}
-                              {:field-name "not-indexed" :indexed? false :base-type :type/Integer}]
-                             [[1 2]]]
-                            ["composite_index"
-                             [{:field-name "first" :indexed? false :base-type :type/Integer}
-                              {:field-name "second" :indexed? false :base-type :type/Integer}]
-                             [[1 2]]])
-     (fn []
-       (testing "single column indexes are synced correctly"
-         (is (= #{{:type :normal-column-index :value "id"}
-                  {:type :normal-column-index :value "indexed"}}
-                (describe-table-indexes (t2/select-one :model/Table (mt/id :single_index))))))
-
-       (testing "for composite indexes, we only care about the 1st column"
-         (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
-                        (sql.tx/create-index-sql driver/*driver* "composite_index" ["first" "second"]))
-         (sync/sync-database! (mt/db))
-         (is (= #{{:type :normal-column-index :value "id"}
-                  {:type :normal-column-index :value "first"}}
-                (describe-table-indexes (t2/select-one :model/Table (mt/id :composite_index))))))))))
+    (mt/with-temp-test-data
+      [["single_index"
+        [{:field-name "indexed" :indexed? true :base-type :type/Integer}
+         {:field-name "not-indexed" :indexed? false :base-type :type/Integer}]
+        [[1 2]]]
+       ["composite_index"
+        [{:field-name "first" :indexed? false :base-type :type/Integer}
+         {:field-name "second" :indexed? false :base-type :type/Integer}]
+        [[1 2]]]]
+      (testing "single column indexes are synced correctly"
+        (is (= #{{:type :normal-column-index :value "id"}
+                 {:type :normal-column-index :value "indexed"}}
+               (describe-table-indexes (t2/select-one :model/Table (mt/id :single_index))))))
+      (testing "for composite indexes, we only care about the 1st column"
+        (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
+                       (sql.tx/create-index-sql driver/*driver* "composite_index" ["first" "second"]))
+        (sync/sync-database! (mt/db))
+        (is (= #{{:type :normal-column-index :value "id"}
+                 {:type :normal-column-index :value "first"}}
+               (describe-table-indexes (t2/select-one :model/Table (mt/id :composite_index)))))))))
 
 (defmethod driver/database-supports? [::driver/driver ::unique-index]
   [_driver _feature _database]
@@ -672,36 +688,30 @@
 (deftest describe-table-indexes-unique-index-test
   (mt/test-drivers (mt/normal-driver-select {:+parent :sql-jdbc
                                              :+features [:index-info ::unique-index]})
-    (do-with-temporary-dataset
-     (mt/dataset-definition
-      "advanced-indexes-unique"
-      ["unique_index"
-       [{:field-name "column" :indexed? false :base-type :type/Integer}]
-       [[1 2]]])
-     (fn []
-       (testing "unique index"
-         (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
-                        (sql.tx/create-index-sql driver/*driver* "unique_index" ["column"] {:method "hash"}))
-         (is (= #{{:type :normal-column-index :value "id"}
-                  {:type :normal-column-index :value "column"}}
-                (describe-table-indexes (t2/select-one :model/Table (mt/id :unique_index))))))))))
+    (mt/with-temp-test-data
+      [["unique_index"
+        [{:field-name "column" :indexed? false :base-type :type/Integer}]
+        [[1 2]]]]
+      (testing "unique index"
+        (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
+                       (sql.tx/create-index-sql driver/*driver* "unique_index" ["column"] {:method "hash"}))
+        (is (= #{{:type :normal-column-index :value "id"}
+                 {:type :normal-column-index :value "column"}}
+               (describe-table-indexes (t2/select-one :model/Table (mt/id :unique_index)))))))))
 
 (deftest describe-table-indexes-hashed-index-test
   (mt/test-drivers (mt/normal-driver-select {:+parent :sql-jdbc
                                              :+features [:index-info]})
-    (do-with-temporary-dataset
-     (mt/dataset-definition
-      "advanced-indexes-hashed"
-      ["hashed_index"
-       [{:field-name "column" :indexed? false :base-type :type/Integer}]
-       [[1 2]]])
-     (fn []
-       (testing "hashed index"
-         (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
-                        (sql.tx/create-index-sql driver/*driver* "hashed_index" ["column"] {:unique? true}))
-         (is (= #{{:type :normal-column-index :value "id"}
-                  {:type :normal-column-index :value "column"}}
-                (describe-table-indexes (t2/select-one :model/Table (mt/id :hashed_index))))))))))
+    (mt/with-temp-test-data
+      [["hashed_index"
+        [{:field-name "column" :indexed? false :base-type :type/Integer}]
+        [[1 2]]]]
+      (testing "hashed index"
+        (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
+                       (sql.tx/create-index-sql driver/*driver* "hashed_index" ["column"] {:unique? true}))
+        (is (= #{{:type :normal-column-index :value "id"}
+                 {:type :normal-column-index :value "column"}}
+               (describe-table-indexes (t2/select-one :model/Table (mt/id :hashed_index)))))))))
 
 (defmethod driver/database-supports? [::driver/driver ::clustered-index]
   [_driver _feature _database]
@@ -714,21 +724,18 @@
 (deftest describe-table-indexes-clustered-index-test
   (mt/test-drivers (mt/normal-driver-select {:+parent :sql-jdbc
                                              :+features [:index-info ::clustered-index]})
-    (do-with-temporary-dataset
-     (mt/dataset-definition
-      "advanced-indexes-clustered"
-      ["clustered_index"
-       [{:field-name "column" :indexed? false :base-type :type/Integer}]
-       [[1 2]]])
-     (fn []
-       (testing "clustered index"
-         (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
-                        (sql.tx/create-index-sql driver/*driver* "clustered_index" ["column"]))
-         (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
-                        "CLUSTER clustered_index USING idx_clustered_index_column;")
-         (is (= #{{:type :normal-column-index :value "id"}
-                  {:type :normal-column-index :value "column"}}
-                (describe-table-indexes (t2/select-one :model/Table (mt/id :clustered_index))))))))))
+    (mt/with-temp-test-data
+      [["clustered_index"
+        [{:field-name "column" :indexed? false :base-type :type/Integer}]
+        [[1 2]]]]
+      (testing "clustered index"
+        (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
+                       (sql.tx/create-index-sql driver/*driver* "clustered_index" ["column"]))
+        (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
+                       "CLUSTER clustered_index USING idx_clustered_index_column;")
+        (is (= #{{:type :normal-column-index :value "id"}
+                 {:type :normal-column-index :value "column"}}
+               (describe-table-indexes (t2/select-one :model/Table (mt/id :clustered_index)))))))))
 
 ;; FIXME: sqlsever supports conditional index too, but the sqlserver jdbc does not return filter_condition
 ;; for those indexes so we can't filter those out.
@@ -743,18 +750,15 @@
 (deftest describe-table-indexes-conditional-index-test
   (mt/test-drivers (mt/normal-driver-select {:+parent :sql-jdbc
                                              :+features [:index-info ::conditional-index]})
-    (do-with-temporary-dataset
-     (mt/dataset-definition
-      "advanced-indexes-conditional"
-      ["conditional_index"
-       [{:field-name "column" :indexed? false :base-type :type/Integer}]
-       [[1 2]]])
-     (fn []
-       (testing "conditional index are ignored"
-         (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
-                        (sql.tx/create-index-sql driver/*driver* "conditional_index" ["column"] {:condition "id > 2"}))
-         (is (= #{{:type :normal-column-index :value "id"}}
-                (describe-table-indexes (t2/select-one :model/Table (mt/id :conditional_index))))))))))
+    (mt/with-temp-test-data
+      [["conditional_index"
+        [{:field-name "column" :indexed? false :base-type :type/Integer}]
+        [[1 2]]]]
+      (testing "conditional index are ignored"
+        (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec (mt/db))
+                       (sql.tx/create-index-sql driver/*driver* "conditional_index" ["column"] {:condition "id > 2"}))
+        (is (= #{{:type :normal-column-index :value "id"}}
+               (describe-table-indexes (t2/select-one :model/Table (mt/id :conditional_index)))))))))
 
 (deftest describe-fields-are-sorted-test
   (mt/test-drivers (mt/normal-drivers-with-feature :describe-fields)
@@ -773,7 +777,6 @@
 
 (doseq [driver [:presto-jdbc
                 :h2 ;; TODO
-                :druid
                 :druid-jdbc]]
   (defmethod driver/database-supports? [driver ::describe-view-fields]
     [_driver _feature _database]
@@ -783,7 +786,6 @@
                 :h2 ;; TODO
                 :snowflake ;; Requires enterprise account
                 :presto-jdbc
-                :druid
                 :druid-jdbc
                 :mysql
                 :sqlserver
@@ -800,39 +802,127 @@
 (deftest describe-view-fields
   (mt/test-drivers (set/union (mt/normal-drivers-with-feature ::describe-materialized-view-fields :test/dynamic-dataset-loading)
                               (mt/normal-drivers-with-feature ::describe-view-fields :test/dynamic-dataset-loading))
-    (doseq [materialized? (cond-> []
-                            (driver/database-supports? driver/*driver* ::describe-view-fields nil)
-                            (conj false)
-                            (driver/database-supports? driver/*driver* ::describe-materialized-view-fields nil)
-                            (conj true))
-            :let [view-name (if materialized? "orders_m" "orders_v")
-                  table-name "orders"]]
-      (try
-        (testing (if materialized? "Materialized View" "View")
-          (tx/drop-view! driver/*driver* (mt/db) view-name {:materialized? materialized?})
-          (tx/create-view-of-table! driver/*driver* (mt/db) view-name table-name {:materialized? materialized?})
-          (sync/sync-database! (mt/db) {:scan :schema})
-          (let [orders-id (:id (tx/metabase-instance (tx/map->TableDefinition {:table-name table-name}) (mt/db)))
-                view-instance (tx/metabase-instance (tx/map->TableDefinition {:table-name view-name}) (mt/db))
-                orders-m-id (:id view-instance)
-                non-view-fields (t2/select-fn-vec
-                                 (juxt (comp u/lower-case-en :name) :base_type :database_position)
-                                 :model/Field
-                                 :table_id orders-id
-                                 {:order-by [:database_position]})
-                view-fields (t2/select-fn-vec
-                             (juxt (comp u/lower-case-en :name) :base_type :database_position)
-                             :model/Field
-                             :table_id orders-m-id
-                             {:order-by [:database_position]})]
-            (is (contains? (into #{} (map :name) (:tables (driver/describe-database driver/*driver* (mt/db))))
-                           (:name view-instance)))
-            (is (some? orders-m-id))
-            (is (some? orders-id))
-            (is (= 9 (count view-fields)))
-            (is (= non-view-fields view-fields))))
-        (catch Exception e
-          (is (nil? e) "This should not happen")
-          (log/error e "Exception occurred."))
-        (finally
-          (tx/drop-view! driver/*driver* (mt/db) view-name {:materialized? materialized?}))))))
+    (mt/with-temp-test-data [["orders"
+                              [{:field-name "user_id", :base-type :type/Integer}
+                               {:field-name "product_id", :base-type :type/Integer}
+                               {:field-name "subtotal", :base-type :type/Float}
+                               {:field-name "tax", :base-type :type/Float}
+                               {:field-name "total", :base-type :type/Float}
+                               {:field-name "discount", :base-type :type/Float}
+                               {:field-name "created_at", :base-type :type/DateTimeWithTZ}
+                               {:field-name "quantity", :base-type :type/Integer}]
+                              [[1 14 37.65 2.07 39.72 nil #t "2019-02-11T21:40:27.892Z" 2]]]]
+      (doseq [materialized? (cond-> []
+                              (driver/database-supports? driver/*driver* ::describe-view-fields nil)
+                              (conj false)
+                              (driver/database-supports? driver/*driver* ::describe-materialized-view-fields nil)
+                              (conj true))
+              :let [view-name (if materialized? "orders_m" "orders_v")
+                    table-name "orders"]]
+        (try
+          (testing (if materialized? "Materialized View" "View")
+            (tx/drop-view! driver/*driver* (mt/db) view-name {:materialized? materialized?})
+            (tx/create-view-of-table! driver/*driver* (mt/db) view-name table-name {:materialized? materialized?})
+            (sync/sync-database! (mt/db) {:scan :schema})
+            (let [orders-id (:id (tx/metabase-instance (tx/map->TableDefinition {:table-name table-name}) (mt/db)))
+                  view-instance (tx/metabase-instance (tx/map->TableDefinition {:table-name view-name}) (mt/db))
+                  orders-m-id (:id view-instance)
+                  non-view-fields (t2/select-fn-vec
+                                   (juxt (comp u/lower-case-en :name) :base_type :database_position)
+                                   :model/Field
+                                   :table_id orders-id
+                                   {:order-by [:database_position]})
+                  view-fields (t2/select-fn-vec
+                               (juxt (comp u/lower-case-en :name) :base_type :database_position)
+                               :model/Field
+                               :table_id orders-m-id
+                               {:order-by [:database_position]})]
+              (is (contains? (into #{} (map :name) (:tables (driver/describe-database driver/*driver* (mt/db))))
+                             (:name view-instance)))
+              (is (some? orders-m-id))
+              (is (some? orders-id))
+              (is (= 9 (count view-fields)))
+              (is (= non-view-fields view-fields))))
+          (catch Exception e
+            (is (nil? e) "This should not happen")
+            (log/error e "Exception occurred."))
+          (finally
+            (tx/drop-view! driver/*driver* (mt/db) view-name {:materialized? materialized?})))))))
+
+(deftest ^:parallel describe-fks-with-jdbc-metadata-test
+  (testing "Make sure the fallback default JDBC-metadata-based implementation of `describe-fks` works correctly"
+    (are [options] (= #{{:fk-table-schema "PUBLIC"
+                         :fk-table-name   "ORDERS"
+                         :fk-column-name  "USER_ID"
+                         :pk-table-schema "PUBLIC"
+                         :pk-table-name   "PEOPLE"
+                         :pk-column-name  "ID"}
+                        {:fk-table-schema "PUBLIC"
+                         :fk-table-name   "CHECKINS"
+                         :fk-column-name  "VENUE_ID"
+                         :pk-table-schema "PUBLIC"
+                         :pk-table-name   "VENUES"
+                         :pk-column-name  "ID"}
+                        {:fk-table-schema "PUBLIC"
+                         :fk-table-name   "ORDERS"
+                         :fk-column-name  "PRODUCT_ID"
+                         :pk-table-schema "PUBLIC"
+                         :pk-table-name   "PRODUCTS"
+                         :pk-column-name  "ID"}
+                        {:fk-table-schema "PUBLIC"
+                         :fk-table-name   "VENUES"
+                         :fk-column-name  "CATEGORY_ID"
+                         :pk-table-schema "PUBLIC"
+                         :pk-table-name   "CATEGORIES"
+                         :pk-column-name  "ID"}
+                        {:fk-table-schema "PUBLIC"
+                         :fk-table-name   "REVIEWS"
+                         :fk-column-name  "PRODUCT_ID"
+                         :pk-table-schema "PUBLIC"
+                         :pk-table-name   "PRODUCTS"
+                         :pk-column-name  "ID"}
+                        {:fk-table-schema "PUBLIC"
+                         :fk-table-name   "CHECKINS"
+                         :fk-column-name  "USER_ID"
+                         :pk-table-schema "PUBLIC"
+                         :pk-table-name   "USERS"
+                         :pk-column-name  "ID"}}
+                      (into
+                       #{}
+                       (#'sql-jdbc.describe-table/describe-fks-with-jdbc-metadata
+                        :h2
+                        (lib.metadata/database (mt/metadata-provider))
+                        options)))
+      {}
+      {:schema-names ["PUBLIC"]}
+      {:schema-names ["PUBLIC" "PUBLIC2"]})
+    (testing "Filter by schema/table name that does not exist, should return nothing"
+      (are [options] (= #{}
+                        (into
+                         #{}
+                         (#'sql-jdbc.describe-table/describe-fks-with-jdbc-metadata
+                          :h2
+                          (lib.metadata/database (mt/metadata-provider))
+                          options)))
+        {:schema-names ["PUBLIC2"]}
+        {:schema-names ["PUBLIC2"], :table-names ["CHECKINS"]}
+        {:table-names ["CHECKINS2"]}))
+    (testing "Filter by table name"
+      (is (= #{{:fk-table-schema "PUBLIC"
+                :fk-table-name   "CHECKINS"
+                :fk-column-name  "VENUE_ID"
+                :pk-table-schema "PUBLIC"
+                :pk-table-name   "VENUES"
+                :pk-column-name  "ID"}
+               {:fk-table-schema "PUBLIC"
+                :fk-table-name   "CHECKINS"
+                :fk-column-name  "USER_ID"
+                :pk-table-schema "PUBLIC"
+                :pk-table-name   "USERS"
+                :pk-column-name  "ID"}}
+             (into
+              #{}
+              (#'sql-jdbc.describe-table/describe-fks-with-jdbc-metadata
+               :h2
+               (lib.metadata/database (mt/metadata-provider))
+               {:table-names ["CHECKINS"]})))))))

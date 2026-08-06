@@ -1,21 +1,19 @@
+import { useDebouncedValue, useResizeObserver } from "@mantine/hooks";
 import { GoogleLogin, GoogleOAuthProvider } from "@react-oauth/google";
 import { getIn } from "icepick";
 import { useCallback, useState } from "react";
 import { t } from "ttag";
 
 import ErrorBoundary from "metabase/ErrorBoundary";
-import { useDispatch, useSelector } from "metabase/lib/redux";
-import * as Urls from "metabase/lib/urls";
+import { Link } from "metabase/common/components/Link";
+import { useDispatch } from "metabase/redux";
+import { loginGoogle } from "metabase/redux/auth";
+import { useSetting } from "metabase/settings";
+import { Box, Checkbox, useColorScheme } from "metabase/ui";
+import * as Urls from "metabase/urls";
+import { getCspNonce } from "metabase/utils/csp";
 
-import { loginGoogle } from "../../actions";
-import { getGoogleClientId, getSiteLocale } from "../../selectors";
-
-import {
-  AuthError,
-  AuthErrorRoot,
-  GoogleButtonRoot,
-  TextLink,
-} from "./GoogleButton.styled";
+import S from "./GoogleButton.module.css";
 
 interface GoogleButtonProps {
   redirectUrl?: string;
@@ -27,21 +25,26 @@ interface CredentialResponse {
 }
 
 export const GoogleButton = ({ redirectUrl, isCard }: GoogleButtonProps) => {
-  const clientId = useSelector(getGoogleClientId);
-  const locale = useSelector(getSiteLocale);
+  const [remember, setRemember] = useState(false);
+  const clientId = useSetting("google-auth-client-id");
+  const locale = useSetting("site-locale");
   const [errors, setErrors] = useState<string[]>([]);
   const dispatch = useDispatch();
+
+  const { resolvedColorScheme } = useColorScheme();
 
   const handleLogin = useCallback(
     async ({ credential = "" }: CredentialResponse) => {
       try {
         setErrors([]);
-        await dispatch(loginGoogle({ credential, redirectUrl })).unwrap();
+        await dispatch(
+          loginGoogle({ credential, redirectUrl, remember }),
+        ).unwrap();
       } catch (error) {
         setErrors(getErrors(error));
       }
     },
-    [dispatch, redirectUrl],
+    [dispatch, redirectUrl, remember],
   );
 
   const handleError = useCallback(() => {
@@ -50,33 +53,54 @@ export const GoogleButton = ({ redirectUrl, isCard }: GoogleButtonProps) => {
     ]);
   }, []);
 
+  const [buttonContainer, rect] = useResizeObserver();
+
+  const [width] = useDebouncedValue(rect.width, 200);
+
   return (
-    <GoogleButtonRoot>
+    <Box ref={buttonContainer}>
       {isCard && clientId ? (
         <ErrorBoundary>
-          <GoogleOAuthProvider clientId={clientId} nonce={window.MetabaseNonce}>
+          <GoogleOAuthProvider clientId={clientId} nonce={getCspNonce()}>
             <GoogleLogin
               useOneTap
               onSuccess={handleLogin}
               onError={handleError}
               locale={locale}
+              width={width}
+              theme={
+                resolvedColorScheme === "dark" ? "filled_black" : "outline"
+              }
+              // This is needed to ensure that no white border shows up around the
+              // login button in dark mode (UXW-2138)
+              containerProps={{
+                style: { colorScheme: "light" },
+              }}
             />
           </GoogleOAuthProvider>
+          <Checkbox
+            mt="1rem"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            label={t`Remember me`}
+          />
         </ErrorBoundary>
       ) : (
-        <TextLink to={Urls.login(redirectUrl)}>
+        <Link className={S.Link} to={Urls.login(redirectUrl)}>
           {t`Sign in with Google`}
-        </TextLink>
+        </Link>
       )}
 
       {errors.length > 0 && (
-        <AuthErrorRoot>
+        <Box mt="1rem">
           {errors.map((error, index) => (
-            <AuthError key={index}>{error}</AuthError>
+            <Box c="feedback-negative" ta="center" key={index}>
+              {error}
+            </Box>
           ))}
-        </AuthErrorRoot>
+        </Box>
       )}
-    </GoogleButtonRoot>
+    </Box>
   );
 };
 

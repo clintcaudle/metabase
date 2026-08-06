@@ -3,7 +3,9 @@
   (:require
    [clojure.test :refer :all]
    [java-time.api :as t]
+   [metabase.content-verification.models.moderation-review :as moderation-review]
    [metabase.events.core :as events]
+   [metabase.permissions.core :as perms]
    [metabase.query-processor.util :as qp.util]
    [metabase.test :as mt]
    [metabase.test.fixtures :as fixtures]
@@ -76,7 +78,6 @@
                 (is (= (assoc dash-1 :collection (assoc crowberto-personal-coll :is_personal true) :view_count 1)
                        (mt/user-http-request :crowberto :get 200
                                              "activity/most_recently_viewed_dashboard")))))
-
             (testing "view a dashboard in a public collection"
               (events/publish-event! :event/dashboard-read {:object-id (:id dash-2) :user-id (mt/user->id :crowberto)})
               (is (= (assoc dash-2 :collection (assoc coll :is_personal false) :view_count 1)
@@ -319,9 +320,16 @@
                                          :description "just another dashboard"
                                          :creator_id  (mt/user->id :crowberto)
                                          :view_count  5}
+                 :model/Dashboard archived-dash {:name        "archived-dashboard"
+                                                 :description "archived dashboard"
+                                                 :creator_id  (mt/user->id :crowberto)
+                                                 :view_count  5
+                                                 :archived true}
                  :model/Table     table1 {:name "rand-name"}
                  :model/Table     hidden-table {:name            "hidden table"
                                                 :visibility_type "hidden"}
+                 :model/Table     inactive-table {:name            "inactive table"
+                                                  :active false}
                  :model/Card      dataset {:name                   "rand-name"
                                            :type                   :model
                                            :creator_id             (mt/user->id :crowberto)
@@ -332,7 +340,7 @@
                                            :creator_id             (mt/user->id :crowberto)
                                            :display                "table"
                                            :visualization_settings {}}]
-    (let [test-ids (set (map :id [card1 archived dash1 dash2 table1 hidden-table dataset metric]))]
+    (let [test-ids (set (map :id [card1 archived dash1 dash2 table1 hidden-table dataset metric inactive-table archived-dash]))]
       (testing "Items viewed by multiple users are never duplicated in the popular items list."
         (mt/with-model-cleanup [:model/RecentViews :model/QueryExecution]
           (create-views! [[(mt/user->id :rasta)     "dashboard" (:id dash1)]
@@ -351,7 +359,9 @@
           (create-views! [[(mt/user->id :rasta) "dashboard" (:id dash1)]
                           [(mt/user->id :rasta) "card"      (:id card1)]
                           [(mt/user->id :rasta) "table"     (:id table1)]
-                          [(mt/user->id :rasta) "card"      (:id metric)]])
+                          [(mt/user->id :rasta) "card"      (:id metric)]
+                          [(mt/user->id :rasta) "table"      (:id inactive-table)]
+                          [(mt/user->id :rasta) "dashboard"      (:id archived-dash)]])
           (is (= [["dashboard" (:id dash1)]
                   ["card" (:id card1)]
                   ["metric" (:id metric)]
@@ -394,3 +404,41 @@
   (testing "Context query param controls return values: selections"
     (is (= {:recents []}
            (mt/user-http-request :crowberto :get 200 "activity/recents?context=selections")))))
+
+(deftest post-recents-selection-permission-test
+  (testing "POST /api/activity/recents read-checks the target before recording a selection"
+    (mt/with-model-cleanup [:model/RecentViews]
+      (mt/with-temp [:model/Collection c {} :model/Dashboard d {:collection_id (:id c)}]
+        (perms/revoke-collection-permissions! (perms/all-users-group) (:id c))
+        (mt/user-http-request :rasta :post 403 "activity/recents"
+                              {:model "dashboard" :model_id (:id d) :context "selection"})
+        (perms/grant-collection-read-permissions! (perms/all-users-group) (:id c))
+        (mt/user-http-request :rasta :post 204 "activity/recents"
+                              {:model "dashboard" :model_id (:id d) :context "selection"})))))
+
+(deftest card-query-collection-context-excluded-from-recents-test
+  (testing "A card-query event with a non-question context is not recorded as a recent view (#45003)"
+    (mt/with-test-user :crowberto
+      (mt/with-model-cleanup [:model/RecentViews]
+        (mt/with-temp [:model/Card {card-id :id} {:creator_id (mt/user->id :crowberto)}]
+          (doseq [ctx [:collection :dashboard :dashboard-subscription]]
+            (events/publish-event! :event/card-query {:user-id (mt/user->id :crowberto) :card-id card-id :context ctx}))
+          (is (empty? (filter (comp #{card-id} :id)
+                              (:recents (mt/user-http-request :crowberto :get 200 "activity/recents?context=views"))))))))))
+
+(deftest recent-views-verified-status-test
+  (testing "moderated_status reflects a verified moderation review (metabase#18021)"
+    (mt/with-premium-features #{:content-verification}
+      (clear-recent-views-for-user :crowberto)
+      (mt/with-model-cleanup [:model/RecentViews :model/ModerationReview]
+        (mt/with-temp [:model/Card card {:name "verified card"}]
+          (moderation-review/create-review! {:moderated_item_id   (:id card)
+                                             :moderated_item_type "card"
+                                             :moderator_id        (mt/user->id :crowberto)
+                                             :status              "verified"})
+          (events/publish-event! :event/card-query {:user-id (mt/user->id :crowberto) :card-id (:id card)})
+          (is (=? {:model "card" :moderated_status "verified"}
+                  (->> (mt/user-http-request :crowberto :get 200 "activity/recents?context=views")
+                       :recents
+                       (filter (comp #{(:id card)} :id))
+                       first))))))))

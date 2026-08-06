@@ -1,18 +1,25 @@
-import { useKBar } from "kbar";
+import { VisualState, useKBar } from "kbar";
 import { useEffect } from "react";
-import { Route, type WithRouterProps, withRouter } from "react-router";
 import _ from "underscore";
 
 import { setupEnterprisePlugins } from "__support__/enterprise";
 import {
+  setupCollectionByIdEndpoint,
   setupDatabasesEndpoints,
   setupRecentViewsEndpoints,
   setupSearchEndpoints,
 } from "__support__/server-mocks";
 import { mockSettings } from "__support__/settings";
 import { renderWithProviders } from "__support__/ui";
-import { getAdminPaths } from "metabase/admin/app/reducers";
+import { useCommandPalette } from "metabase/palette/hooks/useCommandPalette";
 import { useCommandPaletteBasicActions } from "metabase/palette/hooks/useCommandPaletteBasicActions";
+import {
+  createMockAdminAppState,
+  createMockAdminState,
+  createMockState,
+} from "metabase/redux/store/mocks";
+import { Route, useLocation, useParams } from "metabase/router";
+import { parseSearchQuery } from "metabase/utils/browser";
 import type { RecentItem, Settings } from "metabase-types/api";
 import {
   createMockCollection,
@@ -21,30 +28,51 @@ import {
   createMockRecentCollectionItem,
   createMockTokenFeatures,
   createMockUser,
+  createMockUserPermissions,
 } from "metabase-types/api/mocks";
-import {
-  createMockAdminAppState,
-  createMockAdminState,
-  createMockState,
-} from "metabase-types/store/mocks";
 
 import { PaletteResults } from "../../PaletteResults";
 
-const TestComponent = withRouter(
-  ({ q, ...props }: WithRouterProps & { q?: string; isLoggedIn: boolean }) => {
-    useCommandPaletteBasicActions(props);
+const TestComponent = ({
+  q,
+  isLoggedIn,
+}: {
+  q?: string;
+  isLoggedIn: boolean;
+}) => {
+  const location = useLocation();
+  const params = useParams();
+  const locationQuery = parseSearchQuery(location.search);
+  useCommandPaletteBasicActions({ location, params, isLoggedIn });
+  const {
+    searchRequestId,
+    searchResults,
+    liveSearchTerm,
+    debouncedSearchTerm,
+  } = useCommandPalette({
+    disabled: false,
+    locationQuery,
+  });
 
-    const { query } = useKBar();
+  const { query } = useKBar();
 
-    useEffect(() => {
-      if (q) {
-        query.setSearch(q);
-      }
-    }, [q, query]);
+  useEffect(() => {
+    query.setVisualState(VisualState.showing);
+    if (q) {
+      query.setSearch(q);
+    }
+  }, [q, query]);
 
-    return <PaletteResults />;
-  },
-);
+  return (
+    <PaletteResults
+      locationQuery={locationQuery}
+      searchRequestId={searchRequestId}
+      searchResults={searchResults}
+      liveSearchTerm={liveSearchTerm}
+      debouncedSearchTerm={debouncedSearchTerm}
+    />
+  );
+};
 
 const DATABASE = createMockDatabase();
 
@@ -88,14 +116,15 @@ const recents_2 = createMockRecentCollectionItem({
   ..._.pick(dashboard, "id", "name"),
   model: "dashboard",
   parent_collection: {
+    // Unjustified type cast. FIXME
     id: dashboard.collection?.id as number,
+    // Unjustified type cast. FIXME
     name: dashboard.collection?.name as string,
   },
 });
 
 const TOKEN_FEATURES = createMockTokenFeatures({
   content_verification: true,
-  metabot_v3: true,
 });
 
 export interface CommonSetupProps {
@@ -116,10 +145,20 @@ export const commonSetup = ({
   setupDatabasesEndpoints([DATABASE]);
   setupSearchEndpoints([model_1, model_2, dashboard]);
   setupRecentViewsEndpoints(recents);
+  setupCollectionByIdEndpoint({
+    collections: [createMockCollection({ id: "root", can_write: true })],
+  });
   const adminState = isAdmin
     ? createMockAdminState({
         app: createMockAdminAppState({
-          paths: getAdminPaths(),
+          paths: [
+            {
+              name: "Permissions",
+              path: "/admin/permissions",
+              key: "permissions",
+            },
+            { name: "Settings", path: "/admin/settings", key: "settings" },
+          ],
         }),
       })
     : createMockAdminState();
@@ -129,6 +168,10 @@ export const commonSetup = ({
     settings: mockSettings({ ...settings, "token-features": TOKEN_FEATURES }),
     currentUser: createMockUser({
       is_superuser: isAdmin,
+      permissions: createMockUserPermissions({
+        can_create_queries: true,
+        can_create_native_queries: true,
+      }),
     }),
   });
 
@@ -137,7 +180,7 @@ export const commonSetup = ({
   }
 
   renderWithProviders(
-    <Route path="/" component={() => <TestComponent q={query} isLoggedIn />} />,
+    <Route path="/" element={<TestComponent q={query} isLoggedIn />} />,
     {
       withKBar: true,
       withRouter: true,

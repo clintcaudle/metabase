@@ -12,7 +12,7 @@
      replaced as usual and the rest of the clause (`AND ...`) is included in the query as-is
 
   Native parameter parsing and substution logic shared by multiple drivers lives in
-  `metabase.driver.common.parameters.*`. Driver-specific parsing/substitution logic is implemented in
+  `metabase.query-processor.parameters.*` (for MBQL 5). Driver-specific parsing/substitution logic is implemented in
   `metabase.driver.sql.parameters.*` (for SQL drivers) or similar namespaces for others.
 
   The different steps of this process, are similar between existing driver implementations, and are as follows:
@@ -25,22 +25,21 @@
   3.  `substitute` (and the related namespace `substitution`) replace optional and param objects with appropriate SQL
       snippets and prepared statement args, and combine the sequence of fragments back into a single SQL string."
   (:require
-   [clojure.set :as set]
    [metabase.driver :as driver]
    [metabase.driver.util :as driver.u]
    [metabase.lib.metadata :as lib.metadata]
-   [metabase.query-processor.store :as qp.store]))
+   [metabase.lib.schema :as lib.schema]
+   [metabase.lib.schema.metadata :as lib.schema.metadata]
+   [metabase.util.malli :as mu]))
 
-(defn expand-inner
+(mu/defn expand-stage :- ::lib.schema/stage.native
   "Expand parameters inside an *inner* native `query`. Not recursive -- recursive transformations are handled in
   the `middleware.parameters` functions that invoke this function."
-  [inner-query]
-  (if-not (driver.u/supports? driver/*driver* :native-parameters (lib.metadata/database (qp.store/metadata-provider)))
-    inner-query
-    ;; Totally ridiculous, but top-level native queries use the key `:query` for SQL or equivalent, while native
-    ;; source queries use `:native`. So we need to handle either case.
-    (let [source-query?           (:native inner-query)
-          substituted-inner-query (driver/substitute-native-parameters driver/*driver*
-                                                                       (set/rename-keys inner-query {:native :query}))]
-      (cond-> (dissoc substituted-inner-query :parameters :template-tags)
-        source-query? (set/rename-keys {:query :native})))))
+  [metadata-providerable :- ::lib.schema.metadata/metadata-providerable
+   stage                 :- ::lib.schema/stage.native]
+  (if-not (driver.u/supports? driver/*driver* :native-parameters (lib.metadata/database metadata-providerable))
+    stage
+    (let [substituted-stage (driver/substitute-native-parameters-in-stage driver/*driver* metadata-providerable stage)]
+      (->
+       substituted-stage
+       (dissoc :parameters :template-tags)))))

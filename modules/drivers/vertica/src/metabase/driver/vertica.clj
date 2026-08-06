@@ -1,21 +1,22 @@
 (ns metabase.driver.vertica
   (:require
    [clojure.java.jdbc :as jdbc]
-   [clojure.set :as set]
    [honey.sql :as sql]
    [java-time.api :as t]
    [metabase.driver :as driver]
+   [metabase.driver-api.core :as driver-api]
    [metabase.driver.sql-jdbc :as sql-jdbc]
    [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
    [metabase.driver.sql-jdbc.execute.legacy-impl :as sql-jdbc.legacy]
    [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
+   [metabase.driver.sql.pivot :as sql.pivot]
    [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.driver.sql.query-processor.empty-string-is-null
     :as sql.qp.empty-string-is-null]
+   [metabase.driver.sql.query-processor.util :as sql.qp.u]
    [metabase.driver.sql.util :as sql.u]
-   [metabase.query-processor.timezone :as qp.timezone]
    [metabase.util :as u]
    [metabase.util.date-2 :as u.date]
    [metabase.util.honey-sql-2 :as h2x]
@@ -29,13 +30,19 @@
                                       ::sql-jdbc.legacy/use-legacy-classes-for-read-and-set
                                       ::sql.qp.empty-string-is-null/empty-string-is-null})
 
-(doseq [[feature supported?] {:convert-timezone          true
-                              :datetime-diff             true
-                              :expression-literals       true
-                              :now                       true
-                              :identifiers-with-spaces   true
-                              :percentile-aggregations   false
-                              :test/jvm-timezone-setting false}]
+(doseq [[feature supported?] {:convert-timezone                 true
+                              :database-routing                 false
+                              :datetime-diff                    true
+                              :describe-default-expr            true
+                              :describe-is-nullable             true
+                              :expression-literals              true
+                              :identifiers-with-spaces          true
+                              :native-pivot-tables              true
+                              :now                              true
+                              :percentile-aggregations          false
+                              :regex/lookaheads-and-lookbehinds false
+                              :test/jvm-timezone-setting        false
+                              :uuid-type                        true}]
   (defmethod driver/database-supports? [:vertica feature] [_driver _feature _db] supported?))
 
 (defmethod driver/db-start-of-week :vertica
@@ -55,6 +62,7 @@
     :Numeric                   :type/Decimal
     :Double                    :type/Decimal
     :Float                     :type/Float
+    :Uuid                      :type/UUID
     :Date                      :type/Date
     :Time                      :type/Time
     :TimeTz                    :type/TimeWithLocalTZ
@@ -78,9 +86,18 @@
   [_driver]
   (h2x/with-database-type-info [:current_timestamp [:inline 6]] "timestamptz"))
 
+;; Vertica's `GROUPING()` is single-arg only. `GROUPING_ID(a, b, ...)` is its multi-arg counterpart.
+(defmethod sql.pivot/pivot-grouping-hsql :vertica
+  [_driver exprs]
+  (into [::sql.pivot/grouping-id-fn] exprs))
+
 (defmethod sql.qp/unix-timestamp->honeysql [:vertica :seconds]
   [_driver _seconds-or-milliseconds honeysql-expr]
   (h2x/with-database-type-info [:to_timestamp honeysql-expr] "timestamp"))
+
+(defmethod sql.qp/cast-temporal-string [:vertica :Coercion/YYYYMMDDHHMMSSString->Temporal]
+  [_driver _coercion-strategy expr]
+  [:to_timestamp expr (h2x/literal "YYYYMMDDHH24MISS")])
 
 ;; TODO - not sure if needed or not
 (defn- cast-timestamp
@@ -130,18 +147,19 @@
   (sql.qp/adjust-day-of-week :vertica [:dayofweek_iso expr]))
 
 (defmethod sql.qp/->honeysql [:vertica :convert-timezone]
-  [driver [_ arg target-timezone source-timezone]]
+  [driver [_ _opts arg target-timezone source-timezone]]
   (let [expr         (cast-timestamp (sql.qp/->honeysql driver arg))
-        timestamptz? (h2x/is-of-type? expr "timestamptz")]
+        timestamptz? (or (sql.qp.u/field-with-tz? arg)
+                         (h2x/is-of-type? expr "timestamptz"))]
     (sql.u/validate-convert-timezone-args timestamptz? target-timezone source-timezone)
     (-> (if timestamptz?
           expr
-          (h2x/at-time-zone expr (or source-timezone (qp.timezone/results-timezone-id))))
+          (h2x/at-time-zone expr (or source-timezone (driver-api/results-timezone-id))))
         (h2x/at-time-zone target-timezone)
         (h2x/with-database-type-info "timestamp"))))
 
 (defmethod sql.qp/->honeysql [:vertica :concat]
-  [driver [_ & args]]
+  [driver [_ _opts & args]]
   (transduce
    (map #(sql.qp/->honeysql driver %))
    (completing (fn [x y]
@@ -203,7 +221,7 @@
   "DOUBLE PRECISION")
 
 (defmethod sql.qp/->honeysql [:vertica :regex-match-first]
-  [driver [_ arg pattern]]
+  [driver [_ _opts arg pattern]]
   [:regexp_substr (sql.qp/->honeysql driver arg) (sql.qp/->honeysql driver pattern)])
 
 (defn- format-percentile
@@ -222,13 +240,11 @@
 (sql/register-fn! ::percentile #'format-percentile)
 
 (defmethod sql.qp/->honeysql [:vertica :percentile]
-  [driver [_ arg p]]
-  (let [arg (sql.qp/->honeysql driver arg)
-        p   (sql.qp/->honeysql driver p)]
-    [::percentile arg p]))
+  [driver [_ _opts arg p]]
+  [::percentile (sql.qp/->honeysql driver arg) (sql.qp/->honeysql driver p)])
 
 (defmethod sql.qp/->honeysql [:vertica :median]
-  [driver [_ arg]]
+  [driver [_ _opts arg]]
   [:approximate_median (sql.qp/->honeysql driver arg)])
 
 (defmethod sql.qp/->honeysql [:vertica java.time.LocalDate]
@@ -261,13 +277,13 @@
   (sql.qp/->honeysql driver (t/offset-date-time t)))
 
 (defmethod sql.qp/->honeysql [:vertica ::sql.qp/expression-literal-text-value]
-  [driver [_ value]]
+  [driver [_ _opts value]]
   (->> (sql.qp/->honeysql driver value)
        (h2x/cast "long varchar")))
 
 (defmethod sql.qp/add-interval-honeysql-form :vertica
   [_ hsql-form amount unit]
-  ;; using `timestampadd` instead of `+ (INTERVAL)` because vertica add inteval for month, or year
+  ;; using `timestampadd` instead of `+ (INTERVAL)` because vertica add interval for month, or year
   ;; by adding the equivalent number of days, not adding the unit compoinent.
   ;; For example `select date '2004-02-02' + interval '1 year' will return `2005-02-01` because it's adding
   ;; 365 days under the hood and 2004 is a leap year. Whereas other dbs will return `2006-02-02`.
@@ -285,12 +301,14 @@
   (try (set (jdbc/query (sql-jdbc.conn/db->pooled-connection-spec database)
                         ["SELECT TABLE_SCHEMA AS \"schema\", TABLE_NAME AS \"name\" FROM V_CATALOG.VIEWS;"]))
        (catch Throwable e
-         (log/error e "Failed to fetch materialized views for this database"))))
+         (log/errorf "Failed to fetch materialized views for this database: %s" (ex-message e)))))
 
-(defmethod driver/describe-database :vertica
+(defmethod driver/describe-database* :vertica
   [driver database]
-  (-> ((get-method driver/describe-database :sql-jdbc) driver database)
-      (update :tables set/union (materialized-views database))))
+  ;; the JDBC default returns `:tables` as a reducible; fold it (and the materialized views) into a
+  ;; set rather than `set/union`, which would call `count` on the reducible
+  (-> ((get-method driver/describe-database* :sql-jdbc) driver database)
+      (update :tables #(into (materialized-views database) %))))
 
 (defmethod driver/db-default-timezone :vertica
   [_driver _database]
@@ -306,7 +324,7 @@
   (fn read-time []
     (when-let [s (.getString rs i)]
       (let [t (u.date/parse s)]
-        (log/tracef "(.getString rs %d) [TIME] -> %s -> %s" i s t)
+        (log/tracef "(.getString rs %d) [TIME]" i)
         t))))
 
 (defmethod sql-jdbc.execute/read-column-thunk [:vertica Types/TIME_WITH_TIMEZONE]
@@ -314,7 +332,7 @@
   (fn read-time-with-timezone []
     (when-let [s (.getString rs i)]
       (let [t (u.date/parse s)]
-        (log/tracef "(.getString rs %d) [TIME_WITH_TIMEZONE] -> %s -> %s" i s t)
+        (log/tracef "(.getString rs %d) [TIME_WITH_TIMEZONE]" i)
         t))))
 
 ;; for some reason vertica `TIMESTAMP WITH TIME ZONE` columns still come back as `Type/TIMESTAMP`, which seems like a
@@ -326,13 +344,16 @@
     (fn read-timestamp []
       (when-let [s (.getString rs i)]
         (let [t (u.date/parse s timezone)]
-          (log/tracef "(.getString rs %d) [TIME_WITH_TIMEZONE] -> %s -> %s" i s t)
+          (log/tracef "(.getString rs %d) [TIME_WITH_TIMEZONE]" i)
           t)))))
 
 (defmethod sql.qp/->honeysql [:vertica ::sql.qp/cast-to-text]
-  [driver [_ expr]]
-  (sql.qp/->honeysql driver [::sql.qp/cast expr "varchar"]))
+  [driver [_ _opts expr]]
+  (sql.qp/->honeysql driver [::sql.qp/cast {} expr "varchar"]))
 
 (defmethod sql-jdbc/impl-table-known-to-not-exist? :vertica
   [_ e]
   (= (sql-jdbc/get-sql-state e) "42V01"))
+
+(defmethod driver/llm-sql-dialect-resource :vertica [_]
+  "metabot/prompts/dialects/vertica.md")

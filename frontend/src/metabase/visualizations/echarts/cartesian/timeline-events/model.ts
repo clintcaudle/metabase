@@ -1,36 +1,41 @@
 import type { OpUnitType } from "dayjs";
 import dayjs from "dayjs";
+import type { SupportedUnit } from "types/dayjs";
 import _ from "underscore";
 
 import { CHART_STYLE } from "metabase/visualizations/echarts/cartesian/constants/style";
 import type {
   BaseCartesianChartModel,
   DateRange,
+  TimeSeriesInterval,
 } from "metabase/visualizations/echarts/cartesian/model/types";
 import type { TimelineEventGroup } from "metabase/visualizations/echarts/cartesian/timeline-events/types";
-import type { RenderingContext } from "metabase/visualizations/types";
 import type { TimelineEvent } from "metabase-types/api";
 
-import type { ChartMeasurements } from "../chart-measurements/types";
+import type { ChartLayout } from "../layout/types";
 import { isTimeSeriesAxis } from "../model/guards";
 
-const getDayWidth = (
+const getIntervalWidth = (
   range: DateRange,
-  chartMeasurements: ChartMeasurements,
+  interval: TimeSeriesInterval,
+  chartLayout: ChartLayout,
 ) => {
-  const daysCount = Math.abs(dayjs(range[1]).diff(range[0], "day"));
+  const intervalsCount = Math.abs(
+    dayjs(range[1]).diff(range[0], interval.unit) / interval.count,
+  );
 
-  return chartMeasurements.boundaryWidth / daysCount;
+  return chartLayout.boundaryWidth / intervalsCount;
 };
 
 const groupEventsByUnitStart = (
   events: TimelineEvent[],
-  unit: string = "day",
+  unit: SupportedUnit = "day",
 ): TimelineEventGroup[] => {
   const groupedEvents = events.reduce<Map<string, TimelineEvent[]>>(
     (acc, event) => {
       const unitStart = dayjs
         .utc(event.timestamp)
+        // Unjustified type cast. FIXME
         .startOf(unit as OpUnitType)
         .toISOString();
 
@@ -51,32 +56,10 @@ const groupEventsByUnitStart = (
   }));
 };
 
-const getMinDistanceFromTimelineEventGroup = (
-  eventGroup: TimelineEventGroup,
-  renderingContext: RenderingContext,
-) => {
-  const eventsCount = eventGroup.events.length;
-  if (eventsCount === 1) {
-    return CHART_STYLE.timelineEvents.minDistance;
-  }
-
-  const countLabelWidth = renderingContext.measureText(eventsCount.toString(), {
-    ...CHART_STYLE.axisTicks,
-    size: renderingContext.theme.cartesian.label.fontSize,
-    family: renderingContext.fontFamily,
-  });
-
-  return (
-    CHART_STYLE.timelineEvents.minDistance +
-    CHART_STYLE.timelineEvents.countLabelMargin +
-    countLabelWidth
-  );
-};
-
 export const mergeOverlappingTimelineEventGroups = (
   eventGroups: TimelineEventGroup[],
-  dayWidth: number,
-  renderingContext: RenderingContext,
+  interval: TimeSeriesInterval,
+  intervalWidth: number,
 ): TimelineEventGroup[] => {
   const sortedGroups = [...eventGroups].sort((a, b) =>
     dayjs.utc(a.date).isAfter(dayjs.utc(b.date)) ? 1 : -1,
@@ -98,14 +81,11 @@ export const mergeOverlappingTimelineEventGroups = (
     const lastGroupDate = dayjs.utc(lastGroup.date);
     const currentGroupDate = dayjs.utc(currentGroup.date);
 
-    const daysDiff = currentGroupDate.diff(lastGroupDate, "day");
-    const pixelDiff = daysDiff * dayWidth;
-    const lastGroupMinDistance = getMinDistanceFromTimelineEventGroup(
-      lastGroup,
-      renderingContext,
-    );
+    const intervalsDiff =
+      currentGroupDate.diff(lastGroupDate, interval.unit) / interval.count;
+    const pixelDiff = intervalsDiff * intervalWidth;
 
-    if (pixelDiff < lastGroupMinDistance) {
+    if (pixelDiff < CHART_STYLE.timelineEvents.minDistance) {
       const combinedEvents = [...lastGroup.events, ...currentGroup.events];
       mergedGroups[mergedGroups.length - 1] = {
         date: lastGroup.date,
@@ -122,21 +102,19 @@ export const mergeOverlappingTimelineEventGroups = (
 const getTimelineEventsInsideRange = (
   timelineEvents: TimelineEvent[],
   range: DateRange,
+  unit: SupportedUnit,
 ) => {
   const [min, max] = range;
+
   return timelineEvents.filter((event) => {
-    return (
-      (min.isSame(event.timestamp) || min.isBefore(event.timestamp)) &&
-      (max.isSame(event.timestamp) || max.isAfter(event.timestamp))
-    );
+    return dayjs(event.timestamp).isBetween(min, max, unit, "[]");
   });
 };
 
 export const getTimelineEventsModel = (
   chartModel: BaseCartesianChartModel,
-  chartMeasurements: ChartMeasurements,
+  chartLayout: ChartLayout,
   timelineEvents: TimelineEvent[],
-  renderingContext: RenderingContext,
 ) => {
   if (timelineEvents.length === 0 || !isTimeSeriesAxis(chartModel.xAxisModel)) {
     return null;
@@ -150,6 +128,7 @@ export const getTimelineEventsModel = (
   const visibleTimelineEvents = getTimelineEventsInsideRange(
     timelineEvents,
     dimensionRange,
+    chartModel.xAxisModel.interval.unit,
   );
 
   const hasTimelineEvents = visibleTimelineEvents.length !== 0;
@@ -158,14 +137,18 @@ export const getTimelineEventsModel = (
   }
 
   const timelineEventsByUnitStart = groupEventsByUnitStart(
-    timelineEvents,
+    visibleTimelineEvents,
     chartModel.xAxisModel.interval.unit,
   );
 
-  const dayWidth = getDayWidth(dimensionRange, chartMeasurements);
+  const intervalWidth = getIntervalWidth(
+    dimensionRange,
+    chartModel.xAxisModel.interval,
+    chartLayout,
+  );
   return mergeOverlappingTimelineEventGroups(
     timelineEventsByUnitStart,
-    dayWidth,
-    renderingContext,
+    chartModel.xAxisModel.interval,
+    intervalWidth,
   );
 };

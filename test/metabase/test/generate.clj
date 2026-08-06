@@ -5,7 +5,7 @@
    [clojure.test.check.generators :as gen]
    [java-time.api :as t]
    [medley.core :as m]
-   [metabase.legacy-mbql.util :as mbql.u]
+   [metabase.lib.core :as lib]
    [metabase.util.log :as log]
    [reifyhealth.specmonstah.core :as rs]
    [reifyhealth.specmonstah.spec-gen :as rsg]
@@ -97,8 +97,8 @@
 
 ;; * card
 (s/def ::display #{:table})
-(s/def ::visualization_settings #{"{}"})
-(s/def ::dataset_query #{"{}"})
+(s/def ::visualization_settings #{{}})
+(s/def ::dataset_query #{{}})
 
 ;; * dashboardcard_series
 (s/def ::position pos-int?)
@@ -120,7 +120,7 @@
 (s/def ::content ::not-empty-string)
 
 (s/def :parameter/id   ::not-empty-string)
-(s/def :parameter/type ::base_type)
+(s/def :parameter/type #{:text})
 (s/def ::parameter  (s/keys :req-un [:parameter/id :parameter/type]))
 (s/def ::parameters (s/coll-of ::parameter))
 
@@ -138,7 +138,7 @@
 (s/def ::col pos-int?)
 (s/def ::size_x pos-int?)
 (s/def ::size_y pos-int?)
-(s/def ::parameter_mappings #{[{}]})
+(s/def ::parameter_mappings #{[]})
 
 (s/def ::action (s/keys :req-un [::id :action/type ::name]))
 (s/def ::query-action (s/keys :req-un [::dataset_query]))
@@ -147,7 +147,6 @@
 
 (s/def ::core-user (s/keys :req-un [::id ::first_name ::last_name ::email ::password]))
 (s/def ::collection (s/keys :req-un [::id ::name]))
-(s/def ::activity (s/keys :req-un [::id ::topic ::details ::timestamp]))
 (s/def ::pulse (s/keys :req-un [::id ::name]))
 (s/def ::permissions-group (s/keys :req-un [::id ::name]))
 (s/def ::permissions-group-membership (s/keys :req-un [::user_id ::group_id]))
@@ -157,6 +156,7 @@
 
 (s/def ::field (s/keys :req-un [::id ::name ::base_type ::database_type ::position ::description]))
 
+(s/def ::measure (s/keys :req-un [::id ::name ::definition ::description]))
 (s/def ::metric (s/keys :req-un [::id ::name ::definition ::description]))
 (s/def ::segment (s/keys :req-un [::id ::name ::definition ::description]))
 (s/def ::table  (s/keys :req-un [::id ::active ::name ::description]))
@@ -300,16 +300,21 @@
                                   :spec      ::segment
                                   :insert!   {:model :model/Segment}
                                   :relations {:creator_id [:core-user :id]
-                                              :table_id   [:table :id]}}})
-   ;; :revision {}
-   ;; :task-history {}
+                                              :table_id   [:table :id]}}
+   :measure                       {:prefix    :msr
+                                   :spec      ::measure
+                                   :insert!   {:model :model/Measure}
+                                   :relations {:creator_id [:core-user :id]
+                                               :table_id   [:table :id]}}})
+;; :revision {}
+;; :task-history {}
 
 ;; * inserters
 (defn- spec-gen
   [query]
   (rsg/ent-db-spec-gen {:schema schema} query))
 
-(def ^:private unique-name (mbql.u/unique-name-generator))
+(def ^:private unique-name (lib/non-truncating-unique-name-generator))
 
 (defn- unique-email [^String email]
   (let [at (.indexOf email "@")]
@@ -369,8 +374,8 @@
     (catch clojure.lang.ExceptionInfo e
       (if (and (pos? num-retries)
                (str/includes? (ex-message e) "Couldn't satisfy such-that predicate"))
-           ;; We can't recur from here, and I don't think it's worth using a more complex trampoline.
-           ;; We are not going to overflow the stack, so this should be fine.
+        ;; We can't recur from here, and I don't think it's worth using a more complex trampoline.
+        ;; We are not going to overflow the stack, so this should be fine.
         (spec-gen-with-retries query (dec num-retries))
         (throw e)))))
 
@@ -390,7 +395,6 @@
        :insert! (fn [sm-db {:keys [schema-opts attrs] :as visit-opts}]
                   (try
                     (first (t2/insert-returning-instances! (:model schema-opts)
-                                                           #_{:clj-kondo/ignore [:deprecated-var]}
                                                            (rsg/spec-gen-assoc-relations
                                                             sm-db
                                                             (assoc visit-opts :visit-val (:spec-gen attrs)))))

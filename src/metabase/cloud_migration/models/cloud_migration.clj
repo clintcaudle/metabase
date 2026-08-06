@@ -11,6 +11,7 @@
    [metabase.config.core :as config]
    [metabase.models.interface :as mi]
    [metabase.settings.core :as setting]
+   [metabase.store-api.core :as store-api]
    [metabase.task.bootstrap :as task.bootstrap]
    [metabase.task.core :as task]
    [metabase.util :as u]
@@ -76,7 +77,7 @@
 (defn migration-url
   "Store API URL for migrations."
   ([]
-   (str (cloud-migration.settings/store-api-url) "/api/v2/migration"))
+   (str (store-api/store-api-url) "/api/v2/migration"))
   ([external-id path]
    (str (migration-url) "/" external-id path)))
 
@@ -168,7 +169,9 @@
     (if-not (> file-length part-size)
       ;; single put uses SSE, but multipart doesn't support it.
       (put-file upload_url file on-progress :headers {"x-amz-server-side-encryption" "aws:kms"})
-      (let [parts
+      (let [;; seq of up to part-size ranges
+            ;; e.g. for a 250mb file [[0 100e6] [100e6 200e6] [200e6 250e6]]
+            parts
             (partition 2 1 (-> (range 0 file-length part-size)
                                vec
                                (conj file-length)))
@@ -178,14 +181,28 @@
                           {:form-params  {:part_count (count parts)}
                            :content-type :json})
                 :body
-                json/decode+kw)
+                json/decode+kw
+                ;; This endpoint, and only this one in this ns, needs a backwards and forward compatible
+                ;; key conversion. This can be removed when Harbormaster does only underscores in the API,
+                ;; and the keys above (multipart-upload-id multipart-urls) renamed to use underscores.
+                ;; But it can also stay here indefinitely and will be correct.
+                u/deep-kebab-keys)
 
             etags
-            (->> (map (fn [[start end] [part-number url]]
-                        [part-number
-                         (get-in (put-file url file on-progress :start start :end end)
-                                 [:headers "ETag"])])
-                      parts multipart-urls)
+            (->> parts
+                 (map-indexed (fn [idx [start end]]
+                                (let [;; look up idx in multipart-urls, which starts at :1 up to (count parts)
+                                      part-id (-> idx inc str keyword)
+                                      url (or (multipart-urls part-id)
+                                              (throw (ex-info "Missing upload part url" {:keys (keys multipart-urls)
+                                                                                         :attempted part-id})))
+                                      ;; upload and get the etag from the headers
+                                      resp (put-file url file on-progress :start start :end end)
+                                      etag (or (get-in resp [:headers "ETag"])
+                                               (throw (ex-info "No ETag header returned"
+                                                               {:part-id part-id
+                                                                :headers (-> resp :headers keys)})))]
+                                  [part-id etag])))
                  (into {}))]
         (http/put (migration-url external_id "/multipart/complete")
                   {:form-params  {:multipart_upload_id multipart-upload-id
@@ -197,7 +214,7 @@
   Will exit early if migration has been cancelled in any cluster instance.
   Should run in a separate thread since it can take a long time to complete."
   [{:keys [id external_id] :as migration} & {:keys [retry?]}]
-  ;; dump-to-h2 starts behaving oddly if you try to dump repeatly to the same file
+  ;; dump-to-h2 starts behaving oddly if you try to dump repeatedly to the same file
   ;; in the same process, so use a random name.
   ;; The docker image process runs in non-root, so write to a dir it can access.
   (let [dump-file (io/file (System/getProperty "java.io.tmpdir")
@@ -205,7 +222,6 @@
     (try
       (when retry?
         (t2/update! :model/CloudMigration :id id {:state :init}))
-
       (log/info "Setting read-only mode")
       (set-progress id :setup 1)
       (cloud-migration.settings/read-only-mode! true)
@@ -214,7 +230,6 @@
         (Thread/sleep (int (* 1.5 setting/cache-update-check-interval-ms))))
       (log/info "Stopping scheduler")
       (task/stop-scheduler!)
-
       (log/info "Dumping h2 backup to" (.getAbsolutePath dump-file))
       (set-progress id :dump 20)
       (dump-to-h2/dump-to-h2! (.getAbsolutePath dump-file) {:dump-plaintext? true})
@@ -222,26 +237,22 @@
         (throw (ex-info "Read-only mode disabled before h2 dump was completed, contents might not be self-consistent!"
                         {:id id})))
       (cloud-migration.settings/read-only-mode! false)
-
       (log/info "Uploading dump to store")
       (set-progress id :upload 50)
       (upload migration dump-file)
-
       (log/info "Notifying store that upload is done")
       (http/put (migration-url external_id "/uploaded"))
-
       ;; Need to restore the previous scheduler configuration because the database quartz is pointing at has changed
       ;; after finishing the dump to h2 migration
       (task.bootstrap/set-jdbc-backend-properties! (mdb/db-type))
       (log/info "Restarting scheduler")
       (task/start-scheduler!)
-
       (log/info "Migration finished")
       (set-progress id :done 100)
       (catch Exception e
         ;; See set-progress for when :terminal is set.
         (if (-> e ex-data :terminal)
-          (log/info "Migration interruped due to terminal state")
+          (log/info "Migration interrupted due to terminal state")
           (do
             (t2/update! :model/CloudMigration id {:state :error})
             (log/info "Migration failed")
@@ -267,13 +278,14 @@
   (read-only-mode)
 
   ;; test settings you might want to change manually
-  ;; force prod if even in dev
-  #_(migration-use-staging! false)
+  ;; local HM store api url
+  #_(store-api/store-api-url! "http://localhost:5010")
   ;; make sure to use a version that store supports, and a dump for that version.
-  #_(migration-dump-version! "v0.49.7")
+  #_(cloud-migration.settings/migration-dump-version! "v0.49.7")
   ;; make a new dump with any released metabase jar using the command below:
   ;;   java --add-opens java.base/java.nio=ALL-UNNAMED -jar metabase.jar dump-to-h2 dump --dump-plaintext
-  #_(migration-dump-file! "/path/to/dump.mv.db")
+  ;; you can also upload a random file you have lying around if you just want to test file splitting.
+  #_(cloud-migration.settings/migration-dump-file! "/path/to/dump.mv.db")
   ;; force migration with a smaller multipart threshold (~6mb is minimum)
   #_(def ^:private part-size 6e6)
 

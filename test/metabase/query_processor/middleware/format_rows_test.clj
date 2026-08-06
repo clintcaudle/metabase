@@ -1,4 +1,6 @@
 (ns ^:mb/driver-tests metabase.query-processor.middleware.format-rows-test
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.query-processor.middleware.format-rows-test]}
+                                                            metabase.test.data/run-mbql-query {:namespaces [metabase.query-processor.middleware.format-rows-test]}}}}}}
   (:require
    [clojure.test :refer :all]
    [java-time.api :as t]
@@ -106,79 +108,60 @@
           [[(t/zoned-date-time 2011 4 18 0 0 0 0 (t/zone-id "Asia/Tokyo"))
             "2011-04-17T15:00:00Z"
             "UTC"]
-
            [(t/zoned-date-time 2011 4 18 0 0 0 0 (t/zone-id "Asia/Tokyo"))
             "2011-04-18T00:00:00+09:00"
             "Asia/Tokyo"]
-
            [(t/zoned-date-time 2011 4 18 0 0 0 0 (t/zone-id "UTC"))
             "2011-04-18T09:00:00+09:00"
             "Asia/Tokyo"]
-
            [(t/zoned-date-time 2011 4 18 0 0 0 0 (t/zone-id "UTC"))
             "2011-04-18T00:00:00Z"
             "UTC"]
-
            [(t/offset-date-time 2011 4 18 0 0 0 0 (t/zone-offset 9))
             "2011-04-17T15:00:00Z"
             "UTC"]
-
            [(t/offset-date-time 2011 4 18 0 0 0 0 (t/zone-offset 9))
             "2011-04-18T00:00:00+09:00"
             "Asia/Tokyo"]
-
            [(t/offset-date-time 2011 4 18 0 0 0 0 (t/zone-offset 0))
             "2011-04-18T09:00:00+09:00"
             "Asia/Tokyo"]
-
            [(t/instant (t/offset-date-time 2011 4 18 0 0 0 0 (t/zone-offset 0)))
             "2011-04-18T00:00:00Z"
             "UTC"]
-
            [(t/instant (t/offset-date-time 2011 4 18 0 0 0 0 (t/zone-offset 0)))
             "2011-04-18T09:00:00+09:00"
             "Asia/Tokyo"]
-
            [(t/instant (t/offset-date-time 2011 4 18 0 0 0 0 (t/zone-offset 0)))
             "2011-04-18T00:00:00Z"
             "UTC"]
-
            [(t/local-date-time 2011 4 18 0 0 0 0)
             "2011-04-18T00:00:00+09:00"
             "Asia/Tokyo"]
-
            [(t/local-date-time 2011 4 18 0 0 0 0)
             "2011-04-18T00:00:00Z"
             "UTC"]
-
            [(t/local-date 2011 4 18)
             "2011-04-18T00:00:00+09:00"
             "Asia/Tokyo"]
-
            [(t/local-date 2011 4 18)
             "2011-04-18T00:00:00Z"
             "UTC"]
-
            [(t/offset-time 19 55 0 0 (t/zone-offset 9))
             "10:55:00Z"
             "UTC"]
-
            [(t/offset-time 19 55 0 0 (t/zone-offset 9))
             "19:55:00+09:00"
             "Asia/Tokyo"]
-
            [(t/offset-time 19 55 0 0 (t/zone-offset 0))
             "19:55:00Z"
             "UTC"]
-
            [(t/offset-time 19 55 0 0 (t/zone-offset 0))
             "04:55:00+09:00"
             "Asia/Tokyo"]
-
            [(t/local-time 19 55)
             "19:55:00Z"
             "UTC"]
-
            [(t/local-time 19 55)
             "19:55:00+09:00"
             "Asia/Tokyo"]]]
@@ -203,7 +186,7 @@
         rf  (rff metadata)]
     (transduce identity rf rows)))
 
-(deftest results-timezone-test
+(deftest ^:parallel results-timezone-test
   (driver/with-driver ::timezone-driver
     (testing "Make sure ISO-8601 timestamps are written correctly based on the report-timezone"
       (doseq [[timezone-id expected-rows] {"UTC"        [["2011-04-18T10:12:47.232Z"
@@ -218,8 +201,10 @@
                          (t/local-date 2011 4 18)
                          (t/offset-date-time "2011-04-18T10:12:47.232Z")]]]
               (is (= expected-rows
-                     (format-rows rows {:cols [{} {} {}]}))))))))
+                     (format-rows rows {:cols [{} {} {}]}))))))))))
 
+(deftest ^:parallel results-timezone-test-2
+  (driver/with-driver ::timezone-driver
     (testing "Make sure ISO-8601 timestamps respects the converted_timezone metadata"
       (doseq [timezone-id ["UTC" "Asia/Tokyo"]]
         (mt/with-results-timezone-id timezone-id

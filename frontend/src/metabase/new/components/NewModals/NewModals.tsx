@@ -1,46 +1,69 @@
-import { useCallback } from "react";
-import type { WithRouterProps } from "react-router";
-import { withRouter } from "react-router";
-import { push } from "react-router-redux";
+import { useCallback, useEffect } from "react";
 
 import ActionCreator from "metabase/actions/containers/ActionCreator";
-import CreateCollectionModal from "metabase/collections/containers/CreateCollectionModal";
-import Modal from "metabase/components/Modal";
-import { CreateDashboardModal } from "metabase/dashboard/containers/CreateDashboardModal";
-import Collections from "metabase/entities/collections/collections";
-import { useDispatch, useSelector } from "metabase/lib/redux";
-import * as Urls from "metabase/lib/urls";
+import { CreateDashboardModal } from "metabase/common/CreateDashboard/CreateDashboardModal";
+import CreateCollectionModal, {
+  type CreateCollectionModalOwnProps,
+} from "metabase/common/collections/containers/CreateCollectionModal";
+import { useInitialCollectionId } from "metabase/common/collections/hooks";
+import { UpgradeModal } from "metabase/common/components/upsells/components/UpgradeModal";
+import { STATIC_LEGACY_EMBEDDING_TYPE } from "metabase/embedding/constants";
+import { LegacyStaticEmbeddingModal } from "metabase/embedding/embedding-iframe-sdk-setup/components/LegacyStaticEmbeddingModal";
+import { SdkIframeEmbedSetupModal } from "metabase/embedding/embedding-iframe-sdk-setup/components/SdkIframeEmbedSetupModal";
 import { PaletteShortcutsModal } from "metabase/palette/components/PaletteShortcutsModal/PaletteShortcutsModal";
 import { useRegisterShortcut } from "metabase/palette/hooks/useRegisterShortcut";
+import type {
+  LegacyStaticEmbeddingModalProps,
+  SdkIframeEmbedSetupModalProps,
+} from "metabase/plugins";
+import { useDispatch, useSelector } from "metabase/redux";
+import type { State } from "metabase/redux/store";
+import type { ModalState } from "metabase/redux/store/modal";
 import { closeModal, setOpenModal } from "metabase/redux/ui";
-import { currentOpenModal } from "metabase/selectors/ui";
+import { useLocation, useNavigate, useParams } from "metabase/router";
+import { Modal, PREVENT_AUTOCOMPLETE_CLIPPING_MODAL_PROPS } from "metabase/ui";
+import * as Urls from "metabase/urls";
 import type { WritebackAction } from "metabase-types/api";
 
-export const NewModals = withRouter((props: WithRouterProps) => {
-  const currentNewModal = useSelector(currentOpenModal);
-  const dispatch = useDispatch();
-  const collectionId = useSelector((state) =>
-    Collections.selectors.getInitialCollectionId(state, props),
+const getCurrentOpenModalState = <TProps,>(state: State) =>
+  // Unjustified type cast. FIXME
+  state.modal as ModalState<TProps>;
+
+export const NewModals = () => {
+  const location = useLocation();
+  const params = useParams();
+  const { pathname } = location;
+  const { id: currentNewModalId, props: currentNewModalProps } = useSelector(
+    getCurrentOpenModalState<CreateCollectionModalOwnProps>,
   );
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const collectionId =
+    useInitialCollectionId({ location, params }) ?? undefined;
 
   const handleActionCreated = useCallback(
     (action: WritebackAction) => {
       const nextLocation = Urls.modelDetail({ id: action.model_id }, "actions");
-      dispatch(push(nextLocation));
+      navigate(nextLocation);
     },
-    [dispatch],
+    [navigate],
   );
 
   const handleModalClose = useCallback(() => {
     dispatch(closeModal());
   }, [dispatch]);
 
+  useEffect(() => {
+    // Hide the modals on location change
+    handleModalClose();
+  }, [handleModalClose, pathname]);
+
   useRegisterShortcut(
     [
       {
         id: "shortcuts-modal",
         perform: () => {
-          if (currentNewModal) {
+          if (currentNewModalId) {
             handleModalClose();
           } else {
             dispatch(setOpenModal("help"));
@@ -48,17 +71,21 @@ export const NewModals = withRouter((props: WithRouterProps) => {
         },
       },
     ],
-    [currentNewModal],
+    [currentNewModalId],
   );
 
-  switch (currentNewModal) {
-    case "collection":
+  switch (currentNewModalId) {
+    case "collection": {
+      const collectionProps = currentNewModalProps || null;
+
       return (
         <CreateCollectionModal
           onClose={handleModalClose}
-          collectionId={collectionId}
+          {...collectionProps}
+          collectionId={collectionProps?.collectionId ?? collectionId}
         />
       );
+    }
 
     case "dashboard":
       return (
@@ -70,19 +97,53 @@ export const NewModals = withRouter((props: WithRouterProps) => {
       );
     case "action":
       return (
-        <Modal wide onClose={handleModalClose} enableTransition={false}>
+        <Modal
+          {...PREVENT_AUTOCOMPLETE_CLIPPING_MODAL_PROPS}
+          opened
+          onClose={handleModalClose}
+          size="95%"
+          withCloseButton={false}
+          padding={0}
+        >
           <ActionCreator
             onClose={handleModalClose}
             onSubmit={handleActionCreated}
           />
         </Modal>
       );
+    case "embed": {
+      // Unjustified type cast. FIXME
+      const props = currentNewModalProps as SdkIframeEmbedSetupModalProps;
+      return (
+        <SdkIframeEmbedSetupModal
+          opened
+          initialState={props?.initialState}
+          onClose={handleModalClose}
+        />
+      );
+    }
+    case STATIC_LEGACY_EMBEDDING_TYPE: {
+      // Unjustified type cast. FIXME
+      const props = currentNewModalProps as LegacyStaticEmbeddingModalProps;
+
+      return (
+        <LegacyStaticEmbeddingModal
+          experience={props?.experience}
+          dashboardId={props?.dashboardId}
+          questionId={props?.questionId}
+          parentInitialState={props?.parentInitialState}
+          onClose={handleModalClose}
+        />
+      );
+    }
+    case "upgrade":
+      return <UpgradeModal opened onClose={handleModalClose} />;
     default:
       return (
         <PaletteShortcutsModal
           onClose={handleModalClose}
-          open={currentNewModal === "help"}
+          open={currentNewModalId === "help"}
         />
       );
   }
-});
+};

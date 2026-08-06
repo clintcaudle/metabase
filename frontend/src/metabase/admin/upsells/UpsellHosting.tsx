@@ -1,59 +1,31 @@
 import { jt, t } from "ttag";
 
-const RocketGlobeIllustrationSrc = "app/assets/img/rocket-globe.svg";
-import { useSelector } from "metabase/lib/redux";
-import { getIsHosted } from "metabase/setup/selectors";
+import { UpsellBanner } from "metabase/common/components/upsells/components";
+import { getPlan, isProPlan } from "metabase/common/utils/plan";
+import { useSetting } from "metabase/settings";
 
-import { UpsellCard } from "./components";
+export const UpsellHostingBanner = ({ location }: { location: string }) => {
+  const isHosted = useSetting("is-hosted?");
+  const features = useSetting("token-features");
 
-// the default 200px width will break the title into two lines
-const UPSELL_CARD_WIDTH = 202;
-const CLOUD_PAGE = "/admin/settings/cloud";
+  const plan = getPlan(features);
+  const isPro = isProPlan(plan);
 
-export const UpsellHosting = ({ source }: { source: string }) => {
-  const isHosted = useSelector(getIsHosted);
-
-  if (isHosted) {
+  if (isHosted || isPro) {
     return null;
   }
 
   return (
-    <UpsellCard
+    <UpsellBanner
       title={t`Minimize maintenance`}
       campaign="hosting"
       buttonText={t`Learn more`}
-      internalLink={CLOUD_PAGE}
-      illustrationSrc={RocketGlobeIllustrationSrc}
-      source={source}
-      maxWidth={UPSELL_CARD_WIDTH}
+      internalLink="/admin/settings/cloud"
+      location={location}
     >
       {jt`${(
         <strong key="migrate">{t`Migrate to Metabase Cloud`}</strong>
       )} for fast, reliable, and secure deployment.`}
-    </UpsellCard>
-  );
-};
-
-export const UpsellHostingUpdates = ({ source }: { source: string }) => {
-  const isHosted = useSelector(getIsHosted);
-
-  if (isHosted) {
-    return null;
-  }
-
-  return (
-    <UpsellCard
-      title={t`Get automatic updates`}
-      campaign="hosting"
-      buttonText={t`Learn more`}
-      internalLink={CLOUD_PAGE}
-      illustrationSrc={RocketGlobeIllustrationSrc}
-      source={source}
-      maxWidth={UPSELL_CARD_WIDTH}
-    >
-      {jt`${(
-        <strong key="migrate">{t`Migrate to Metabase Cloud`}</strong>
-      )} for fast, reliable, and secure deployment.`}
-    </UpsellCard>
+    </UpsellBanner>
   );
 };

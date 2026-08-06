@@ -12,13 +12,12 @@ export const setupUserKeyValueEndpoints = ({
 
   const getName = `get-${name}`;
   const putName = `put-${name}`;
-
   fetchMock.get(
     `path:/api/user-key-value/namespace/${namespace}/key/${key}`,
-    {
+    new Response(JSON.stringify(value), {
       status: 200,
-      body: value,
-    },
+      headers: { "Content-Type": "application/json" },
+    }),
     {
       name: getName,
     },
@@ -26,9 +25,7 @@ export const setupUserKeyValueEndpoints = ({
 
   fetchMock.put(
     `path:/api/user-key-value/namespace/${namespace}/key/${key}`,
-    {
-      status: 200,
-    },
+    { status: 200 },
     {
       name: putName,
     },
@@ -48,18 +45,24 @@ export const setupUserKeyValueEndpoints = ({
 };
 
 export function setupGetUserKeyValueEndpoint(kv: UserKeyValue) {
-  return fetchMock.get(
+  fetchMock.get(
     `path:/api/user-key-value/namespace/${kv.namespace}/key/${kv.key}`,
-    { status: 200, body: kv.value },
-    { overwriteRoutes: true },
+    new Response(JSON.stringify(kv.value), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+
+    { name: "get-key-value" },
   );
 }
 
 export function setupNullGetUserKeyValueEndpoints() {
+  // A missing key has no stored value, so the backend returns 204 No Content
+  // (the `defendpoint` handler returns nil, which the response middleware maps
+  // to a 204). The client normalizes that to `null`.
   return fetchMock.get(
     `express:/api/user-key-value/namespace/:namespace/key/:key`,
-    { status: 200 },
-    { overwriteRoutes: true },
+    { status: 204 },
   );
 }
 
@@ -67,7 +70,6 @@ export function setupUpdateUserKeyValueEndpoint(kv: UserKeyValue) {
   return fetchMock.put(
     `path:/api/user-key-value/namespace/${kv.namespace}/key/${kv.key}`,
     { status: 200, body: kv.value },
-    { overwriteRoutes: true },
   );
 }
 
@@ -75,7 +77,6 @@ export function setupDeleteUserKeyValueEndpoint(k: UserKeyValueKey) {
   return fetchMock.delete(
     `path:/api/user-key-value/namespace/${k.namespace}/key/${k.key}`,
     { status: 200 },
-    { overwriteRoutes: true },
   );
 }
 

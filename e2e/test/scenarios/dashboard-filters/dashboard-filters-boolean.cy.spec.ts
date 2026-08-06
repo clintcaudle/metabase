@@ -73,15 +73,15 @@ describe(
             .findByText(PARAMETER_NAME)
             .click();
         });
-        H.popover().findByText(COLUMN_NAME).click();
+        H.selectDropdown().findByText(COLUMN_NAME).click();
         H.saveDashboard();
 
         cy.log("assert click behavior");
         H.getDashboardCard().findAllByText("true").first().click();
-        H.filterWidget().findByText("true").should("be.visible");
+        H.filterWidget().findByText("True").should("be.visible");
         H.getDashboardCard().findByText("1 row").should("be.visible");
         H.getDashboardCard().findAllByText("true").first().click();
-        H.filterWidget().findByText("true").should("not.exist");
+        H.filterWidget().findByText("True").should("not.exist");
         H.getDashboardCard().findByText("200 rows").should("be.visible");
       });
 
@@ -105,7 +105,7 @@ describe(
           .findByTestId("unset-click-mappings")
           .findByText(COLUMN_NAME)
           .click();
-        H.popover().findByText(COLUMN_NAME).click();
+        H.selectDropdown().findByText(COLUMN_NAME).click();
         H.saveDashboard();
 
         cy.log("assert click behavior");
@@ -124,7 +124,7 @@ describe(
         cy.log("assert click behavior");
         H.getDashboardCard().findAllByText("true").first().click();
         H.dashboardHeader().findByText(DASHBOARD_NAME).should("be.visible");
-        H.filterWidget().findByText("true").should("be.visible");
+        H.filterWidget().findByText("True").should("be.visible");
       });
 
       it("should allow to use a 'Go to a custom destination - Dashboard' click behavior with a parameter", () => {
@@ -137,14 +137,14 @@ describe(
         H.popover().button("Add filter").click();
         H.getDashboardCard().findAllByText("true").first().click();
         H.dashboardHeader().findByText(DASHBOARD_NAME).should("be.visible");
-        H.filterWidget().findByText("true").should("be.visible");
+        H.filterWidget().findByText("True").should("be.visible");
       });
     });
 
-    describe("native queries", () => {
+    describe("native queries with field filters", () => {
       it("should allow to map a boolean parameter to a boolean field filter of a SQL query and drill-thru", () => {
-        createNativeQuestionAndDashboard().then(({ dashboardId }) =>
-          H.visitDashboard(dashboardId),
+        createNativeQuestionWithFieldFilterAndDashboard().then(
+          ({ dashboardId }) => H.visitDashboard(dashboardId),
         );
         H.editDashboard();
         createAndMapParameter();
@@ -160,13 +160,14 @@ describe(
         H.filterWidget().click();
         H.popover().button("Add filter").click();
         H.getDashboardCard().findByText(QUESTION_NAME).click();
+        H.queryBuilderHeader().findByText(QUESTION_NAME).should("be.visible");
         H.assertQueryBuilderRowCount(1);
-        H.filterWidget().findByText("true").should("be.visible");
+        H.filterWidget().findByText("True").should("be.visible");
       });
 
       it("should allow to use a 'Go to a custom destination - Saved question' click behavior", () => {
-        createNativeQuestionAndDashboard().then(({ dashboardId }) =>
-          H.visitDashboard(dashboardId),
+        createNativeQuestionWithFieldFilterAndDashboard().then(
+          ({ dashboardId }) => H.visitDashboard(dashboardId),
         );
 
         cy.log("set up click behavior");
@@ -184,17 +185,17 @@ describe(
           .findByTestId("unset-click-mappings")
           .findByText(COLUMN_NAME)
           .click();
-        H.popover().findByText(FIELD_NAME).click();
+        H.selectDropdown().findByText(FIELD_NAME).click();
         H.saveDashboard();
 
         cy.log("assert click behavior");
         H.getDashboardCard().findAllByText("true").first().click();
         H.assertTableRowsCount(1);
-        H.filterWidget().findByText("true").should("be.visible");
+        H.filterWidget().findByText("True").should("be.visible");
       });
 
       it("should allow to use a 'Go to a custom destination - URL' click behavior", () => {
-        createNativeQuestionAndDashboard().then(
+        createNativeQuestionWithFieldFilterAndDashboard().then(
           ({ dashboardId, questionId }) => {
             H.visitDashboard(dashboardId);
 
@@ -222,9 +223,33 @@ describe(
             cy.log("assert click behavior");
             H.getDashboardCard().findAllByText("true").first().click();
             H.assertTableRowsCount(1);
-            H.filterWidget().findByText("true").should("be.visible");
+            H.filterWidget().findByText("True").should("be.visible");
           },
         );
+      });
+    });
+
+    describe("native queries with variables", () => {
+      it("should allow to map a boolean parameter to a boolean variable of a SQL query and drill-thru", () => {
+        createNativeQuestionWithVariableAndDashboard().then(({ dashboardId }) =>
+          H.visitDashboard(dashboardId),
+        );
+        H.editDashboard();
+        createAndMapParameter();
+        H.saveDashboard();
+
+        testParameterWidget({
+          allRowCountText: "200 rows",
+          trueRowCountText: "53 rows",
+          falseRowCountText: "54 rows",
+        });
+
+        H.filterWidget().click();
+        H.popover().button("Add filter").click();
+        H.getDashboardCard().findByText(QUESTION_NAME).click();
+        H.queryBuilderHeader().findByText(QUESTION_NAME).should("be.visible");
+        H.assertQueryBuilderRowCount(53);
+        H.filterWidget().findByText("True").should("be.visible");
       });
     });
   },
@@ -258,7 +283,7 @@ function createQuestionAndDashboard({
   });
 }
 
-function createNativeQuestionAndDashboard({
+function createNativeQuestionWithFieldFilterAndDashboard({
   questionName = QUESTION_NAME,
   dashboardName = DASHBOARD_NAME,
 } = {}) {
@@ -294,6 +319,40 @@ function createNativeQuestionAndDashboard({
         return { dashboardId: dashboard_id, questionId };
       });
     });
+  });
+}
+
+function createNativeQuestionWithVariableAndDashboard() {
+  cy.log("create a dashboard");
+
+  const questionDetails: NativeQuestionDetails = {
+    name: QUESTION_NAME,
+    native: {
+      query:
+        "select id from products [[where category = (case when {{boolean}} then 'Gadget' else 'Widget' end)]]",
+      "template-tags": {
+        boolean: {
+          id: "0b004110-d64a-a413-5aa2-5a5314fc8fec",
+          name: "boolean",
+          "display-name": "Boolean",
+          type: "boolean",
+          default: null,
+        },
+      },
+    },
+  };
+  const dashboardDetails: DashboardDetails = {
+    name: DASHBOARD_NAME,
+  };
+  return H.createNativeQuestionAndDashboard({
+    questionDetails,
+    dashboardDetails,
+  }).then(({ body: { dashboard_id, id }, questionId }) => {
+    return {
+      dashboardId: Number(dashboard_id),
+      dashcardId: id,
+      questionId,
+    };
   });
 }
 
@@ -335,11 +394,10 @@ function setupDashboardClickBehavior({ targetName }: { targetName: string }) {
       cy.findByText("Dashboard").click();
     });
     H.entityPickerModal().within(() => {
-      H.entityPickerModalTab("Dashboards").click();
       cy.findByText(DASHBOARD_NAME).click();
     });
     H.sidebar().findByText(PARAMETER_NAME).click();
-    H.popover().findByText(targetName).click();
+    H.selectDropdown().findByText(targetName).click();
     H.saveDashboard();
   });
 }

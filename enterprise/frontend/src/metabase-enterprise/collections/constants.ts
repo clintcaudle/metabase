@@ -1,10 +1,10 @@
 import { t } from "ttag";
 
 import type {
-  BaseEntityId,
   CollectionAuthorityLevelConfig,
   CollectionInstanceAnaltyicsConfig,
-} from "metabase-types/api";
+} from "metabase/common/collections/types";
+import type { BaseEntityId } from "metabase-types/api";
 
 export const REGULAR_COLLECTION: CollectionAuthorityLevelConfig = {
   type: null,
@@ -13,12 +13,17 @@ export const REGULAR_COLLECTION: CollectionAuthorityLevelConfig = {
   icon: "folder",
 };
 
+export const REMOTE_SYNC_COLLECTION: CollectionInstanceAnaltyicsConfig = {
+  type: null,
+  icon: "synced_collection",
+};
+
 export const OFFICIAL_COLLECTION: CollectionAuthorityLevelConfig = {
   type: "official",
   // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
   name: t`Official`,
   icon: "official_collection",
-  color: "saturated-yellow",
+  color: "core-yellow-saturated" as const,
   tooltips: {
     // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
     default: t`Official collection`,
@@ -51,4 +56,5 @@ export const COLLECTION_TYPES: Record<
 };
 
 export const CUSTOM_INSTANCE_ANALYTICS_COLLECTION_ENTITY_ID =
+  // Unjustified type cast. FIXME
   "okNLSZKdSxaoG58JSQY54" as BaseEntityId;

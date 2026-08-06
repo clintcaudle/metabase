@@ -1,4 +1,4 @@
-import type { CollectionId } from "./collection";
+import type { CollectionId, CollectionType } from "./collection";
 import type { DashboardId } from "./dashboard";
 import type { DatabaseId, InitialSyncStatus } from "./database";
 import type { ModerationReviewStatus } from "./moderation";
@@ -11,11 +11,13 @@ export const ACTIVITY_MODELS = [
   "metric",
   "dashboard",
   "collection",
+  "document",
 ] as const;
 
 export type ActivityModel = (typeof ACTIVITY_MODELS)[number];
 
 export const isActivityModel = (model: string): model is ActivityModel =>
+  // Unjustified type cast. FIXME
   (ACTIVITY_MODELS as unknown as string[]).includes(model);
 
 export const isLoggableActivityModel = (item: {
@@ -47,7 +49,13 @@ export type RecentTableItem = BaseRecentItem & {
 };
 
 export type RecentCollectionItem = BaseRecentItem & {
-  model: "collection" | "dashboard" | "card" | "dataset" | "metric";
+  model:
+    | "collection"
+    | "dashboard"
+    | "card"
+    | "dataset"
+    | "metric"
+    | "document";
   can_write: boolean;
   database_id?: DatabaseId; // for models and questions
   parent_collection: {
@@ -63,17 +71,20 @@ export type RecentCollectionItem = BaseRecentItem & {
     id: DashboardId;
     moderation_status: ModerationReviewStatus;
   };
+  collection_type?: CollectionType;
 };
+
+/**
+ * Model retrieved through the recent views endpoint
+ */
+export interface RecentModel extends RecentCollectionItem {
+  model: "dataset";
+}
 
 export type RecentItem = RecentTableItem | RecentCollectionItem;
 
 export const isRecentTableItem = (item: RecentItem): item is RecentTableItem =>
   item.model === "table";
-
-export const isRecentCollectionItem = (
-  item: RecentItem,
-): item is RecentCollectionItem =>
-  ["collection", "dashboard", "card", "dataset", "metric"].includes(item.model);
 
 export interface RecentItemsResponse {
   recent_views: RecentItem[];

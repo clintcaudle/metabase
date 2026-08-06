@@ -1,10 +1,12 @@
 (ns metabase.lib.schema.aggregation
+  (:refer-clojure :exclude [some #?(:clj doseq)])
   (:require
    [metabase.lib.hierarchy :as lib.hierarchy]
    [metabase.lib.schema.expression :as expression]
    [metabase.lib.schema.mbql-clause :as mbql-clause]
    [metabase.util.i18n :as i18n]
-   [metabase.util.malli.registry :as mr]))
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.performance :refer [some #?(:clj doseq)]]))
 
 ;; count has an optional expression arg. This is the number of non-NULL values -- corresponds to count(<expr>) in SQL
 (mbql-clause/define-catn-mbql-clause :count :- :type/Integer
@@ -17,12 +19,19 @@
 (mbql-clause/define-tuple-mbql-clause :avg :- :type/Float
   [:schema [:ref ::expression/number]])
 
+(mr/def ::distinct.arg
+  [:and
+   [:ref ::expression/expression]
+   ;; you're not allowed to do distinct values of nil
+   [:some
+    {:error/message "You're not allowed to do distinct values of nil"}]])
+
 ;;; number of distinct values of something.
 (mbql-clause/define-tuple-mbql-clause :distinct :- :type/Integer
-  [:schema [:ref ::expression/expression]])
+  [:schema [:ref ::distinct.arg]])
 
 (mbql-clause/define-tuple-mbql-clause :distinct-where :- :type/Integer
-  [:schema [:ref ::expression/expression]]
+  [:schema [:ref ::distinct.arg]]
   [:schema [:ref ::expression/boolean]])
 
 (mbql-clause/define-tuple-mbql-clause :count-where :- :type/Integer
@@ -96,7 +105,8 @@
 (mbql-clause/define-tuple-mbql-clause :var :- :type/Float
   #_expr [:schema [:ref ::expression/number]])
 
-(doseq [tag [:avg
+(doseq [tag [:aggregation
+             :avg
              :count
              :cum-count
              :count-where
@@ -113,30 +123,86 @@
              :cum-sum
              :sum-where
              :var
-             :metric]]
+             :metric
+             :measure]]
   (lib.hierarchy/derive tag ::aggregation-clause-tag))
+
+;; Window-function aggregations: clauses whose value at a given row depends on other rows in the result set (running
+;; totals, offsets, etc.). Consumers that need to reason about "does this aggregation compose with GROUPING SETS / row
+;; splitting / etc." should test for this hierarchy tag.
+(doseq [tag [:cum-count
+             :cum-sum
+             :offset]]
+  (lib.hierarchy/derive tag ::window-aggregation-clause-tag))
+
+(defn- contains-clause-with-tag?
+  "True if `x` is a clause whose tag derives from `hierarchy-tag`, or an expression that transitively contains one."
+  [hierarchy-tag x]
+  (letfn [(walk [x]
+            (when-let [[tag _opts & args] (when (vector? x) x)]
+              (or (lib.hierarchy/isa? tag hierarchy-tag)
+                  ;; Case has shape [:case opts [[cond expr]...] default-expr?].
+                  ;; `:if` is an alias for `:case`.
+                  (if (#{:case :if} tag)
+                    (or (some walk (ffirst args))
+                        (some walk (fnext args)))
+                    (some walk args)))))]
+    (walk x)))
 
 (defn- aggregation-expression?
   "A clause is a valid aggregation if it is an aggregation clause, or it is an expression that transitively contains
   a single aggregation clause."
   [x]
-  (when-let [[tag _opts & args] (and (vector? x) x)]
-    (or (lib.hierarchy/isa? tag ::aggregation-clause-tag)
-        ;; Case has the following shape [:case opts [[cond expr]...] default-expr?]
-        (if (= :case tag)
-          (or (some aggregation-expression? (ffirst args))
-              (some aggregation-expression? (fnext args)))
-          (some aggregation-expression? args)))))
+  (contains-clause-with-tag? ::aggregation-clause-tag x))
+
+(defn window-aggregation-expression?
+  "True if `x` is a window-function aggregation clause, or an expression that transitively contains one."
+  [x]
+  (contains-clause-with-tag? ::window-aggregation-clause-tag x))
 
 (mr/def ::aggregation
   [:and
    [:ref :metabase.lib.schema.mbql-clause/clause]
    [:fn
-    {:error/message "Valid aggregation clause"}
+    {:error/message #(i18n/tru "Aggregations should contain at least one aggregation function.")
+     :error/friendly true}
     aggregation-expression?]])
 
 (mr/def ::aggregations
   [:sequential {:min 1} [:ref ::aggregation]])
+
+(defn- has-unaggregated-ref?
+  "Checks if `x` contains a column reference that is not wrapped in an aggregation
+  function, e.g. the `[:field 2]` in `[:+ [:sum [:field 1]] [:field 2]]`."
+  [x]
+  (when (vector? x)
+    (let [[tag _opts & args] x]
+      (cond
+        (#{:field :expression} tag)
+        true
+
+        (lib.hierarchy/isa? tag ::aggregation-clause-tag)
+        false
+
+        ;; case/if conditions can reference unaggregated refs, we
+        ;; only need to check the result branches are aggregated
+        (#{:case :if} tag)
+        (let [[pairs default] args]
+          (boolean (or (some (fn [[_cond expr]] (has-unaggregated-ref? expr)) pairs)
+                       (has-unaggregated-ref? default))))
+
+        :else
+        (boolean (some has-unaggregated-ref? args))))))
+
+(mr/def ::aggregation-with-no-unaggregated-refs
+  "Stricter variant of ::aggregation used for query builder verification. Not enforced
+  on whole queries, so saved questions with unaggregated fields keep working."
+  [:and
+   [:ref ::aggregation]
+   [:fn
+    {:error/message #(i18n/tru "Fields in custom aggregations must be wrapped with a function like Sum.")
+     :error/friendly true}
+    (complement has-unaggregated-ref?)]])
 
 (def aggregation-operators
   "The list of available aggregation operator.

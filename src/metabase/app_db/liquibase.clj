@@ -23,13 +23,13 @@
    (java.sql Connection)
    (java.util ArrayList List Map)
    (javax.sql DataSource)
-   (liquibase Contexts LabelExpression Liquibase RuntimeEnvironment Scope Scope$Attr Scope$ScopedRunner)
+   (liquibase Contexts LabelExpression Liquibase RuntimeEnvironment Scope Scope$Attr Scope$ScopedRunner UpdateSummaryOutputEnum)
    (liquibase.change.custom CustomChangeWrapper)
    (liquibase.changelog ChangeLogIterator ChangeSet ChangeSet$ExecType)
    (liquibase.changelog.filter AlreadyRanChangeSetFilter ChangeSetFilter ChangeSetFilterResult DbmsChangeSetFilter IgnoreChangeSetFilter)
    (liquibase.changelog.visitor AbstractChangeExecListener ChangeExecListener UpdateVisitor)
    (liquibase.command.core AbstractRollbackCommandStep)
-   (liquibase.database Database DatabaseFactory)
+   (liquibase.database Database DatabaseFactory ObjectQuotingStrategy)
    (liquibase.database.jvm JdbcConnection)
    (liquibase.exception LockException)
    (liquibase.lockservice LockService LockServiceFactory)
@@ -61,6 +61,9 @@
 (doto ^liquibase.ui.ConsoleUIService (.getUI (Scope/getCurrentScope))
   ;; we can't use `java.io.OutputStream/nullOutputStream` here because it's not available on Java 8
   (.setOutputStream (java.io.PrintStream. (org.apache.commons.io.output.NullOutputStream.))))
+
+;; Disable phoning home to Liquibase analytics (since 4.28)
+(System/setProperty "liquibase.analytics.enabled" "false")
 
 (def ^{:private true
        :doc     "Liquibase setting used for upgrading instances running version < 45."}
@@ -122,10 +125,11 @@
     (.findCorrectDatabaseImplementation (DatabaseFactory/getInstance) liquibase-conn)))
 
 (defn- liquibase ^Liquibase [^Connection conn ^Database database]
-  (Liquibase.
-   ^String (decide-liquibase-file conn database)
-   (ClassLoaderResourceAccessor. (classloader/the-classloader))
-   database))
+  (u/prog1 (Liquibase.
+            ^String (decide-liquibase-file conn database)
+            (ClassLoaderResourceAccessor. (classloader/the-classloader))
+            database)
+    (.setObjectQuotingStrategy (.getDatabaseChangeLog <>) ObjectQuotingStrategy/QUOTE_ALL_OBJECTS)))
 
 (mu/defn do-with-liquibase
   "Impl for [[with-liquibase-macro]]."
@@ -136,6 +140,7 @@
              ;; trigger creation of liquibase's databasechangelog tables if needed, without updating any checksums
              ;; we need to do this until https://github.com/liquibase/liquibase/issues/5537 is fixed
              (.checkLiquibaseTables liquibase false (.getDatabaseChangeLog liquibase) nil nil)
+             (.setShowSummaryOutput liquibase UpdateSummaryOutputEnum/LOG)
              (f liquibase))]
     (binding [t2.conn/*current-connectable* conn-or-data-source]
       (if (instance? Connection conn-or-data-source)
@@ -222,7 +227,7 @@
       (when (= (mdb.connection/db-type) :h2)
         (force-release-locks! liquibase))
       (catch Exception e
-        (log/error e "Unable to release the Liquibase lock")))))
+        (log/errorf "Unable to release the Liquibase lock: %s" (ex-message e))))))
 
 (defn- lock-service ^LockService [^Liquibase liquibase]
   (.getLockService (LockServiceFactory/getInstance) (.getDatabase liquibase)))
@@ -366,18 +371,18 @@
     (do
       (log/info "Database has unrun migrations. Checking if migration lock is taken...")
       (with-scope-locked liquibase
-      ;; while we were waiting for the lock, it was possible that another instance finished the migration(s), so make
-      ;; sure something still needs to be done...
+        ;; while we were waiting for the lock, it was possible that another instance finished the migration(s), so make
+        ;; sure something still needs to be done...
         (let [to-run-migrations      (unrun-migrations data-source)
               unrun-migrations-count (count to-run-migrations)]
           (if (pos? unrun-migrations-count)
             (let [^Contexts contexts nil
-                  start-time         (System/currentTimeMillis)]
+                  timer              (u/start-timer)]
               (log/infof "Running %s migrations ..." unrun-migrations-count)
               (doseq [^ChangeSet change to-run-migrations]
                 (log/tracef "To run migration %s" (.getId change)))
               (.update liquibase contexts)
-              (log/infof "Migration complete in %s" (u/format-milliseconds (- (System/currentTimeMillis) start-time))))
+              (log/infof "Migration complete in %s" (u/format-milliseconds (u/since-ms timer))))
             (log/info "Migration lock cleared, but nothing to do here! Migrations were finished by another instance.")))))
     (log/info "No unrun migrations found.")))
 
@@ -446,7 +451,7 @@
               (.setFailOnError change-set fail-on-error?))))))))
 
 (def ^:private legacy-migrations-file "migrations/000_legacy_migrations.yaml")
-(def ^:private update-migrations-file "migrations/001_update_migrations.yaml")
+(def ^:private update001-migrations-file "migrations/001_update_migrations.yaml")
 
 (mu/defn consolidate-liquibase-changesets!
   "Consolidate all previous DB migrations so they come from single file.
@@ -454,6 +459,10 @@
   Previously migrations where stored in many small files which added seconds per file to the startup time because
   liquibase was checking the jar signature for each file. This function is required to correct the liquibase tables to
   reflect that these migrations were grouped into 2 files.
+
+  NOTE: we are going back to more granular changelog files in v60, but should not as many as before.
+  If we do end up seeing a performance issue similar to what caused a need for this file, we can do a similar
+  (but different) consolidation function for the v60+ changelogs.
 
   See https://github.com/metabase/metabase/issues/3715
   Also see https://github.com/metabase/metabase/pull/34400"
@@ -464,23 +473,36 @@
     (when-not (fresh-install? conn (.getDatabase ^Liquibase liquibase))
       ;; Skip mutating the table if the filenames are already correct. It assumes we have never moved the boundary
       ;; between the two files, i.e. that update-migrations still start from v45.
-      (when-not (= #{legacy-migrations-file update-migrations-file}
-                   (->> (str "SELECT DISTINCT(FILENAME) AS filename FROM " liquibase-table-name)
-                        (jdbc/query conn-spec)
-                        (into #{} (map :filename))))
+      (when (->> (str "SELECT DISTINCT(FILENAME) AS filename FROM " liquibase-table-name)
+                 (jdbc/query conn-spec)
+                 (into #{} (map :filename))
+                 (filter #(or (= % legacy-migrations-file)
+                              (str/ends-with? % "update_migrations.yaml"))))
         (log/info "Updating liquibase table to reflect consolidated changeset filenames")
         (with-scope-locked liquibase
           (jdbc/execute!
            conn-spec
-           [(format "UPDATE %s SET FILENAME = CASE WHEN ID = ? THEN ? WHEN ID < ? THEN ? ELSE ? END" liquibase-table-name)
-            "v00.00-000" update-migrations-file
+           [(format "UPDATE %s SET FILENAME = CASE WHEN ID = ? THEN ? WHEN ID < ? THEN ? WHEN ID < ? THEN ? ELSE FILENAME END" liquibase-table-name)
+            "v00.00-000" update001-migrations-file
             "v45.00-001" legacy-migrations-file
-            update-migrations-file]))))))
+            "v56.0000-00-00T00:00:00" update001-migrations-file]))))))
+
+(def ^:private special-case-migrations #{"v56.2025-06-05T16:48:48" "v56.2025-05-19T16:48:48"})
+
+(defn- handle-special-case-migrations
+  "This handles v56 migrations that were checked into the v55 branch to resolve an issue with
+  inadventently backported migrations in 55. We check if this or the bad backports are the most recent
+  available migration and explicitly return 55 as the available major version if so."
+  [s]
+  (when (contains? special-case-migrations s)
+    55))
 
 (defn- extract-numbers
   "Returns contiguous integers parsed from string s"
   [s]
-  (map #(Integer/parseInt %) (re-seq #"\d+" s)))
+  (if-let [special-cased (handle-special-case-migrations s)]
+    [special-cased]
+    (map #(Integer/parseInt %) (re-seq #"\d+" s))))
 
 (defn latest-available-major-version
   "Get the latest version that Liquibase would apply if we ran migrations right now."
@@ -502,6 +524,15 @@
           changeset-id (last (map :id (jdbc/query {:connection conn} [changeset-query])))]
       (some-> changeset-id extract-numbers first))))
 
+(defn changesets-from-later-version
+  "Returns changeset IDs applied from versions later than `latest-available` up to `latest-applied`, ordered by execution date."
+  [conn ^Database database latest-available latest-applied]
+  (let [table    (.getDatabaseChangeLogTableName database)
+        versions (range (inc latest-available) (inc latest-applied))
+        clauses  (str/join " OR " (map #(format "id LIKE 'v%d.%%'" %) versions))
+        query    (format "SELECT id FROM %s WHERE %s ORDER BY dateexecuted ASC" table clauses)]
+    (mapv :id (jdbc/query {:connection conn} [query]))))
+
 (defn rollback-major-version!
   "Roll back migrations later than given Metabase major version. If force is true, it will ignore any checks and always
   roll back"
@@ -517,8 +548,8 @@
              (format "target version must be a number between 44 and the previous major version (%d), inclusive"
                      (config/current-major-version)))))
    (with-scope-locked liquibase
-    ;; count and rollback only the applied change set ids which come after the target version (only the "v..." IDs need
-    ;; to be considered)
+     ;; count and rollback only the applied change set ids which come after the target version (only the "v..." IDs need
+     ;; to be considered)
      (let [changeset-query (format "SELECT id FROM %s WHERE id LIKE 'v%%'" (changelog-table-name liquibase))
            changeset-ids   (map :id (jdbc/query {:connection conn} [changeset-query]))
            ;; IDs in changesets do not include the leading 0/1 digit, so the major version is the first number
@@ -543,23 +574,37 @@
                                                      [(AlreadyRanChangeSetFilter. ran-changesets)
                                                       (IgnoreChangeSetFilter.)
                                                       (DbmsChangeSetFilter. lb-db)
-                                                      changeset-filter])))]
+                                                      changeset-filter])))
+           error-ids (atom [])]
        (when (and (not force) (> latest-applied latest-available))
          (throw (ex-info
                  (format "Cannot downgrade a database at version %d from Metabase version %d. You must run 'migrate down' from Metabase version >= %d."
                          latest-applied latest-available latest-applied)
                  {:latest-available latest-available
                   :latest-applied   latest-applied})))
-
        (log/infof "Rolling back app database schema to version %d" target-version)
        (if (empty? ids-to-drop)
          (log/info "No changesets to roll back")
          (do
-           (AbstractRollbackCommandStep/doRollback lb-db update-migrations-file nil changelog-iterator (.getChangeLogParameters liquibase) changelog nil nil)
+           (let [change-listener (proxy [liquibase.changelog.visitor.AbstractChangeExecListener] []
+                                   (rollbackFailed [^ChangeSet change-set _dbchangelog _db ^Exception e]
+                                     (swap! error-ids conj (.getId change-set))
+                                     (log/errorf "Error rolling back migration %s: %s" (.getId change-set) (ex-message e))))]
+             (AbstractRollbackCommandStep/doRollback lb-db
+                                                     changelog-file
+                                                     nil
+                                                     changelog-iterator
+                                                     (.getChangeLogParameters liquibase)
+                                                     changelog
+                                                     change-listener))
            (let [remaining-query (-> (sql.helpers/select :id)
                                      (sql.helpers/from (keyword (changelog-table-name liquibase)))
                                      (sql.helpers/where [:in :id ids-to-drop]))
                  formatted-sql (sql/format remaining-query)
                  remaining-ids   (map :id (t2/query conn formatted-sql))]
              (when (seq remaining-ids)
-               (log/warnf "The following changesets were not rolled back. Likely because they are not in the changelog file: %s" (str/join ", " remaining-ids))))))))))
+               (log/warnf "The following changesets were not rolled back. Likely because %s: %s"
+                          (if (seq @error-ids)
+                            (format "there were errors in rollback (%s)" (str/join ", " @error-ids))
+                            "they are not in the changelog file")
+                          (str/join ", " remaining-ids))))))))))

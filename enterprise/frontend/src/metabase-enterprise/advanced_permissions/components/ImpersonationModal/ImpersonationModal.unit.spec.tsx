@@ -1,7 +1,6 @@
 import { combineReducers } from "@reduxjs/toolkit";
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
-import { Route } from "react-router";
 
 import {
   setupDatabaseEndpoints,
@@ -15,16 +14,25 @@ import {
   waitFor,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
+import { Route, useLocation, useParams } from "metabase/router";
 import { ImpersonationModal } from "metabase-enterprise/advanced_permissions/components/ImpersonationModal/ImpersonationModal";
 import { advancedPermissionsSlice } from "metabase-enterprise/advanced_permissions/reducer";
 import { getImpersonations } from "metabase-enterprise/advanced_permissions/selectors";
-import type { AdvancedPermissionsStoreState } from "metabase-enterprise/advanced_permissions/types";
 import { shared } from "metabase-enterprise/shared/reducer";
 import {
   createMockDatabase,
   createMockImpersonation,
   createMockTable,
 } from "metabase-types/api/mocks";
+
+/** Feeds the modal its route props the way `modalRoute` does in the app. */
+function RoutedImpersonationModal({ onClose }: { onClose: () => void }) {
+  const params = useParams();
+  const location = useLocation();
+  return (
+    <ImpersonationModal params={params} location={location} onClose={onClose} />
+  );
+}
 
 const groupId = 2;
 const databaseId = 1;
@@ -36,19 +44,18 @@ const setup = async ({
   hasImpersonation = true,
   databaseDetails = {},
 } = {}) => {
+  const onClose = jest.fn();
   const database = createMockDatabase({
     id: databaseId,
     tables: [createMockTable()],
     ...databaseDetails,
   });
   setupDatabaseEndpoints(database);
-  fetchMock.get(
-    {
-      url: `path:/api/database/${databaseId}/metadata`,
-      query: { include_hidden: true },
-    },
-    database,
-  );
+  fetchMock.get({
+    url: `path:/api/database/${databaseId}/metadata`,
+    query: { include_hidden: true },
+    response: database,
+  });
   setupUserAttributesEndpoint(userAttributes);
 
   if (hasImpersonation) {
@@ -68,7 +75,7 @@ const setup = async ({
       <Route path="/" />
       <Route
         path="database/:databaseId/impersonated/group/:groupId"
-        component={ImpersonationModal}
+        element={<RoutedImpersonationModal onClose={onClose} />}
       />
     </>,
     {
@@ -85,7 +92,7 @@ const setup = async ({
 
   await waitForLoaderToBeRemoved();
 
-  return store;
+  return { store, onClose };
 };
 
 describe("impersonation modal", () => {
@@ -135,28 +142,26 @@ describe("impersonation modal", () => {
   });
 
   it("should not update impersonation if it has not changed", async () => {
-    const store = await setup({ userAttributes: ["foo"] });
+    const { store } = await setup({ userAttributes: ["foo"] });
 
     await userEvent.click(screen.getByText(/save/i));
 
-    expect(
-      getImpersonations(store.getState() as AdvancedPermissionsStoreState),
-    ).toHaveLength(0);
+    expect(getImpersonations(store.getState())).toHaveLength(0);
   });
 
   it("should create impersonation", async () => {
-    const store = await setup({ hasImpersonation: false });
+    const { store, onClose } = await setup({ hasImpersonation: false });
 
-    await userEvent.click(await screen.findByText(/pick a user attribute/i));
+    await userEvent.click(
+      await screen.findByPlaceholderText("Pick a user attribute"),
+    );
     await userEvent.click(await screen.findByText("foo"));
 
     expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
     await userEvent.click(await screen.findByRole("button", { name: /save/i }));
 
     await waitFor(() => {
-      expect(
-        getImpersonations(store.getState() as AdvancedPermissionsStoreState),
-      ).toStrictEqual([
+      expect(getImpersonations(store.getState())).toStrictEqual([
         {
           attribute: "foo",
           db_id: 1,
@@ -164,21 +169,23 @@ describe("impersonation modal", () => {
         },
       ]);
     });
+
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("should update impersonation", async () => {
-    const store = await setup();
+    const { store, onClose } = await setup();
 
-    await userEvent.click(await screen.findByText(selectedAttribute));
+    await userEvent.click(
+      await screen.findByPlaceholderText("Pick a user attribute"),
+    );
     await userEvent.click(await screen.findByText("bar"));
 
     expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
     await userEvent.click(await screen.findByRole("button", { name: /save/i }));
 
     await waitFor(() => {
-      expect(
-        getImpersonations(store.getState() as AdvancedPermissionsStoreState),
-      ).toStrictEqual([
+      expect(getImpersonations(store.getState())).toStrictEqual([
         {
           attribute: "bar",
           db_id: 1,
@@ -186,12 +193,16 @@ describe("impersonation modal", () => {
         },
       ]);
     });
+
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("should show only already selected attribute if attributes array is empty", async () => {
     await setup({ hasImpersonation: true, userAttributes: [] });
 
-    await screen.findByText(selectedAttribute);
+    await expect(
+      screen.getByPlaceholderText("Pick a user attribute"),
+    ).toHaveValue(selectedAttribute);
     expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
   });
 

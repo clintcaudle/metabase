@@ -10,10 +10,11 @@ describe("Instance Analytics Collection Header", () => {
   const defaultOptions = {
     collection: {
       name: "Usage Analytics",
+      // Unjustified type cast. FIXME
       type: "instance-analytics" as CollectionType,
       can_write: false,
     },
-    hasEnterprisePlugins: true,
+    enterprisePlugins: ["audit_app" as const, "collections" as const],
     // 😬 this test needs the official_collections feature flag so that it
     // doesn't cause the following test block to fail
     tokenFeatures: { audit_app: true, official_collections: true },
@@ -76,7 +77,7 @@ describe("instance analytics custom reports collection", () => {
       can_write: true,
       entity_id: createMockEntityId("okNLSZKdSxaoG58JSQY54"),
     },
-    hasEnterprisePlugins: true,
+    enterprisePlugins: "*" as const, // TODO: specify exact plugins needed
     // 😬 this test needs the official_collections feature flag so that it
     // doesn't cause the following test block to fail
     tokenFeatures: { audit_app: true, official_collections: true },
@@ -111,7 +112,7 @@ describe("Official Collections Header", () => {
       name: "Rock Collection",
       can_write: true,
     },
-    hasEnterprisePlugins: true,
+    enterprisePlugins: ["collections" as const, "audit_app" as const],
     tokenFeatures: { official_collections: true },
     isAdmin: true,
   };

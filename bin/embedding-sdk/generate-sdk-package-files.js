@@ -4,29 +4,14 @@
 const fs = require("fs");
 const path = require("path");
 
-const IGNORED_PACKAGES = [
-  "react",
-  "react-dom",
-  "@types/react",
-  "@types/react-dom",
-  "@types/react-router",
-  "@types/redux-auth-wrapper",
-  "@visx/axis",
-  "@visx/clip-path",
-  "@visx/grid",
-  "@visx/group",
-  "@visx/shape",
-  "@visx/text",
-  "formik",
-  "react-beautiful-dnd",
-];
 const SDK_DIST_DIR = path.resolve("./resources/embedding-sdk");
+const DEPENDENCIES = [];
 
 function filterOuDependencies(object) {
   const result = {};
 
   Object.entries(object).forEach(([packageName, version]) => {
-    if (!IGNORED_PACKAGES.includes(packageName)) {
+    if (DEPENDENCIES.includes(packageName)) {
       result[packageName] = version;
     }
   });
@@ -51,21 +36,26 @@ function generateSdkPackage() {
 
   const sdkPackageTemplateJson = fs.readFileSync(
     path.resolve(
-      "./enterprise/frontend/src/embedding-sdk/package.template.json",
+      "./enterprise/frontend/src/embedding-sdk-package/package.template.json",
     ),
     "utf-8",
   );
   const sdkPackageTemplateJsonContent = JSON.parse(sdkPackageTemplateJson);
 
+  // `sdkRelease` is release-process metadata (distTag/tagAsLatest) read by
+  // .github/workflows/release-embedding-sdk.yml — it must never ship inside
+  // the published npm package.json.
+  const { sdkRelease: _sdkRelease, ...publishableTemplateJsonContent } =
+    sdkPackageTemplateJsonContent;
+
   const todayDate = new Date().toJSON().slice(0, 10).replaceAll("-", "");
 
   const mergedContent = {
-    ...sdkPackageTemplateJsonContent,
-    dependencies: filterOuDependencies(mainPackageJsonContent.dependencies),
-    resolutions: filterOuDependencies(mainPackageJsonContent.resolutions),
+    ...publishableTemplateJsonContent,
     version: maybeCommitHash
       ? `${sdkPackageTemplateJsonContent.version}-${todayDate}-${maybeCommitHash}`
       : sdkPackageTemplateJsonContent.version,
+    dependencies: filterOuDependencies(mainPackageJsonContent.dependencies),
   };
 
   const mergedContentString = JSON.stringify(mergedContent, null, 2);
@@ -103,5 +93,8 @@ if (!fs.existsSync(SDK_DIST_DIR)) {
 
 generateSdkPackage();
 copyFileToOutput("LICENSE.txt");
-copyFileToOutput("frontend/src/embedding-sdk/README.md", "README.md");
-copyFileToOutput("frontend/src/embedding-sdk/CHANGELOG.md", "CHANGELOG.md");
+copyFileToOutput("frontend/src/embedding-sdk-package/README.md", "README.md");
+copyFileToOutput(
+  "frontend/src/embedding-sdk-package/CHANGELOG.md",
+  "CHANGELOG.md",
+);

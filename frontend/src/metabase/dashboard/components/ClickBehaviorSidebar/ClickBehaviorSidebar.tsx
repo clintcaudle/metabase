@@ -2,21 +2,19 @@ import { getIn } from "icepick";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMount, usePrevious } from "react-use";
 
-import { useDashboardQuery } from "metabase/common/hooks";
-import { Sidebar } from "metabase/dashboard/components/Sidebar";
-import { isTableDisplay } from "metabase/lib/click-behavior";
-import type { UiParameter } from "metabase-lib/v1/parameters/types";
+import { skipToken, useGetDashboardQuery } from "metabase/api";
+import { Sidebar } from "metabase/common/components/Sidebar";
 import {
-  canSaveClickBehavior,
-  clickBehaviorIsValid,
-} from "metabase-lib/v1/parameters/utils/click-behavior";
+  type DashboardContextReturned,
+  useDashboardContext,
+} from "metabase/dashboard/context";
+import { isTableDisplay } from "metabase/dashboard/utils";
+import { canSaveClickBehavior } from "metabase/dashboard/utils/click-behavior";
+import { clickBehaviorIsValid } from "metabase/visualizations/lib/formatting/click-data";
 import { getColumnKey } from "metabase-lib/v1/queries/utils/column-key";
 import type {
   ClickBehavior,
-  DashCardId,
   DashCardVisualizationSettings,
-  Dashboard,
-  DashboardCard,
   DatasetColumn,
 } from "metabase-types/api";
 
@@ -28,35 +26,23 @@ function shouldShowTypeSelector(clickBehavior?: ClickBehavior) {
   return !clickBehavior || clickBehavior.type == null;
 }
 
-interface Props {
-  dashboard: Dashboard;
-  dashcard: DashboardCard;
-  parameters: UiParameter[];
-  hideClickBehaviorSidebar: () => void;
-  onUpdateDashCardColumnSettings: (
-    id: DashCardId,
-    columnKey: string,
-    settings?: Record<string, unknown> | null,
-  ) => void;
-  onUpdateDashCardVisualizationSettings: (
-    id: DashCardId,
-    settings: DashCardVisualizationSettings | null | undefined,
-  ) => void;
-  onReplaceAllDashCardVisualizationSettings: (
-    id: DashCardId,
-    settings: DashCardVisualizationSettings | null | undefined,
-  ) => void;
-}
-
-export function ClickBehaviorSidebar({
+export function ClickBehaviorSidebarInner({
   dashboard,
-  dashcard,
-  parameters,
-  hideClickBehaviorSidebar,
-  onUpdateDashCardColumnSettings,
-  onUpdateDashCardVisualizationSettings,
-  onReplaceAllDashCardVisualizationSettings,
-}: Props) {
+  clickBehaviorSidebarDashcard: dashcard,
+}: {
+  dashboard: NonNullable<DashboardContextReturned["dashboard"]>;
+  clickBehaviorSidebarDashcard: NonNullable<
+    DashboardContextReturned["clickBehaviorSidebarDashcard"]
+  >;
+}) {
+  const {
+    parameters,
+    closeSidebar: hideClickBehaviorSidebar,
+    onUpdateDashCardColumnSettings,
+    onUpdateDashCardVisualizationSettings,
+    onReplaceAllDashCardVisualizationSettings,
+  } = useDashboardContext();
+
   const [isTypeSelectorVisible, setTypeSelectorVisible] = useState<
     boolean | null
   >(null);
@@ -89,10 +75,11 @@ export function ClickBehaviorSidebar({
 
   const isDashboardLink =
     clickBehavior?.type === "link" && clickBehavior.linkType === "dashboard";
-  const { data: targetDashboard } = useDashboardQuery({
-    enabled: isDashboardLink,
-    id: isDashboardLink ? clickBehavior.targetId : undefined,
-  });
+  const { currentData: targetDashboard } = useGetDashboardQuery(
+    isDashboardLink && clickBehavior.targetId != null
+      ? { id: clickBehavior.targetId }
+      : skipToken,
+  );
 
   const isValidClickBehavior = useMemo(
     () => clickBehaviorIsValid(clickBehavior),
@@ -195,6 +182,7 @@ export function ClickBehaviorSidebar({
 
   return (
     <Sidebar
+      data-testid="click-behavior-sidebar"
       onClose={hideClickBehaviorSidebar}
       onCancel={handleCancel}
       isCloseDisabled={isCloseDisabled}
@@ -220,3 +208,18 @@ export function ClickBehaviorSidebar({
     </Sidebar>
   );
 }
+
+export const ClickBehaviorSidebar = () => {
+  const { dashboard, clickBehaviorSidebarDashcard } = useDashboardContext();
+
+  if (!clickBehaviorSidebarDashcard || !dashboard) {
+    return null;
+  }
+
+  return (
+    <ClickBehaviorSidebarInner
+      dashboard={dashboard}
+      clickBehaviorSidebarDashcard={clickBehaviorSidebarDashcard}
+    />
+  );
+};

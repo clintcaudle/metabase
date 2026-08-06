@@ -3,8 +3,7 @@ import styled from "@emotion/styled";
 export const ToggleRoot = styled.div`
   display: flex;
   flex: 1 1 auto;
-  max-width: 36rem;
-  border: 1px solid var(--mb-color-border);
+  border: 1px solid var(--mb-color-border-neutral);
   border-radius: 0.5rem;
 `;
 
@@ -13,7 +12,7 @@ export const ImageContainer = styled.div`
   width: 7.5rem;
   justify-content: center;
   align-items: center;
-  border-right: 1px solid var(--mb-color-border);
+  border-right: 1px solid var(--mb-color-border-neutral);
 `;
 
 export const ToggleContainer = styled.div`

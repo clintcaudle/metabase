@@ -5,11 +5,12 @@
 
   Drivers can call boolean->comparison to convert boolean literals and refs into comparison expressions. See the
   sqlserver or oracle drivers for examples."
+  (:refer-clojure :exclude [some mapv update-keys])
   (:require
+   [metabase.driver-api.core :as driver-api]
    [metabase.driver.sql.query-processor :as sql.qp]
-   [metabase.legacy-mbql.util :as mbql.u]
-   [metabase.lib.metadata :as lib.metadata]
-   [metabase.query-processor.store :as qp.store]))
+   [metabase.lib.schema.filter :as lib.schema.filter]
+   [metabase.util.performance :refer [some mapv update-keys]]))
 
 ;; Oracle and SQLServer (and maybe others) use 0 and 1 for boolean constants, but, for example, none of the following
 ;; queries are valid in such databases:
@@ -48,26 +49,26 @@
         (some-isa? ((some-fn :base-type :effective-type)
                     ;; :value clauses have snake keys like :base_type, but field metadata is a snake-hating-map and
                     ;; will throw if you try to access snake keys, so normalize them first.
-                    (update-keys m mbql.u/normalize-token))
+                    (update-keys m driver-api/normalize-token))
                    boolean-types))))
 
-(defn- boolean-typed-clause? [[_tag _x options]]
+(defn- boolean-typed-clause? [[_tag options _x]]
   (boolean-typed? options))
 
 (defn- boolean-field-clause? [clause boolean-types]
-  (and (mbql.u/is-clause? :field clause)
-       (let [[_ id-or-name options] clause
+  (and (driver-api/is-clause? :field clause)
+       (let [[_ options id-or-name] clause
              has-some-type? (some-fn :base-type :base_type :effective-type :effective_type)]
          (or (boolean-typed? options boolean-types)
              ;; If :base-type is not present in the options, try looking it up in the metadata provider.
              (and (integer? id-or-name)
                   (not (has-some-type? options))
-                  (boolean-typed? (lib.metadata/field (qp.store/metadata-provider) id-or-name)
+                  (boolean-typed? (driver-api/field (driver-api/metadata-provider) id-or-name)
                                   boolean-types))))))
 
 (defn- boolean-value-clause? [clause]
-  (and (mbql.u/is-clause? :value clause)
-       (or (boolean? (second clause))
+  (and (driver-api/is-clause? :value clause)
+       (or (boolean? (nth clause 2))
            (boolean-typed-clause? clause))))
 
 (defn boolean-expression-clause?
@@ -76,9 +77,21 @@
   This function expects to be called in a context where sql.qp/*inner-query* is bound, so that it can lookup
   expression refs by name, if necessary, to determine whether their value is a boolean literal."
   [clause]
-  (and (mbql.u/is-clause? :expression clause)
-       (or (boolean-typed-clause? clause)
-           (boolean-value-clause? (mbql.u/expression-with-name sql.qp/*inner-query* (second clause))))))
+  (and (driver-api/is-clause? :expression clause)
+       (->> (nth clause 2)
+            (sql.qp/expression-by-name sql.qp/*inner-query*)
+            (boolean-value-clause?))))
+
+(defn predicate-expression-clause?
+  "Is `clause` an :expression clause containing a predicate operator (e.g. :and, :=, :contains, etc.)?
+
+  This function expects to be called in a context where sql.qp/*inner-query* is bound, so that it can lookup
+   expression refs by name, if necessary, to determine whether the expression is a predicate operator."
+  [clause]
+  (and (driver-api/is-clause? :expression clause)
+       (->> (nth clause 2)
+            (sql.qp/expression-by-name sql.qp/*inner-query*)
+            (driver-api/is-clause? lib.schema.filter/predicate-operators))))
 
 (defn boolean->comparison
   "Convert boolean field refs or expression literals to equivalent boolean comparison expressions.
@@ -98,15 +111,16 @@
            (boolean-value-clause? clause)
            (boolean-field-clause? clause boolean-field-types)
            (boolean-expression-clause? clause))
-     [:= clause true]
+     [:= {} clause true]
      clause)))
 
 (defn case-boolean->comparison
   "Replace booleans with comparisons in a CASE clause."
   ([clause]
    (case-boolean->comparison clause default-boolean-types))
-  ([[_ cond-cases :as clause] boolean-field-types]
-   (->> cond-cases
-        (mapv (fn [[e1 e2]]
-                [(boolean->comparison e1 boolean-field-types) e2]))
-        (assoc clause 1))))
+  ([clause boolean-field-types]
+   (let [rewrite-cases (fn [cond-cases]
+                         (mapv (fn [[e1 e2]]
+                                 [(boolean->comparison e1 boolean-field-types) e2])
+                               cond-cases))]
+     (update clause 2 rewrite-cases))))

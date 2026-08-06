@@ -56,8 +56,7 @@ describe("scenarios > admin > settings > API keys", () => {
     H.createApiKey("Test API Key Two", NOSQL_GROUP_ID);
     H.createApiKey("Test API Key Three", READONLY_GROUP_ID);
 
-    H.visitApiKeySettings();
-    cy.findByTestId("api-keys-settings-header").findByText("Manage API Keys");
+    visitApiKeySettings();
 
     cy.findByTestId("api-keys-table").within(() => {
       cy.findByText("Test API Key One");
@@ -77,11 +76,11 @@ describe("scenarios > admin > settings > API keys", () => {
   it("should allow creating an API key", () => {
     const name = "New key";
     const group = "Administrators";
-    H.visitApiKeySettings();
+    visitApiKeySettings();
     H.tryToCreateApiKeyViaModal({ name, group });
     cy.wait("@getKeys");
 
-    cy.findByLabelText("Copy and save the API key").findByLabelText(
+    cy.findByLabelText("Copy and save this API key").findByLabelText(
       /the api key/i,
     );
 
@@ -92,7 +91,7 @@ describe("scenarios > admin > settings > API keys", () => {
   it("should show an error when a previously used key name is submitted", () => {
     const name = "New key";
     const group = "Administrators";
-    H.visitApiKeySettings();
+    visitApiKeySettings();
     H.tryToCreateApiKeyViaModal({ name, group });
     cy.button("Done").click();
     H.tryToCreateApiKeyViaModal({ name, group }).then(({ response }) => {
@@ -106,36 +105,42 @@ describe("scenarios > admin > settings > API keys", () => {
 
   it("should allow deleting an API key", () => {
     H.createApiKey("Test API Key One", ALL_USERS_GROUP_ID);
-    H.visitApiKeySettings();
+    visitApiKeySettings();
 
     cy.findByTestId("api-keys-table")
       .contains("Test API Key One")
-      .closest("tr")
-      .icon("trash")
+      .closest('[role="row"]')
+      .findByLabelText("API key actions")
       .click();
-    cy.findByLabelText("Delete API Key").button("Delete API Key").click();
+    cy.findByRole("menuitem", { name: /delete/i }).click();
+    H.modal().button("Delete API key").click();
 
     cy.wait("@deleteKey");
     cy.wait("@getKeys");
 
-    cy.findByTestId("empty-table-warning").findByText("No API keys here yet");
+    cy.findByTestId("empty-table-warning").findByText("No API keys yet");
   });
 
   it("should allow editing an API key", () => {
     H.createApiKey("Development API Key", ALL_USERS_GROUP_ID);
-    H.visitApiKeySettings();
+    visitApiKeySettings();
 
     cy.findByTestId("api-keys-table")
       .should("include.text", "Development API Key")
       .and("include.text", "All Users");
 
-    cy.findByTestId("api-keys-table").icon("pencil").click();
+    cy.findByTestId("api-keys-table")
+      .contains("Development API Key")
+      .closest('[role="row"]')
+      .findByLabelText("API key actions")
+      .click();
+    cy.findByRole("menuitem", { name: /edit/i }).click();
 
     cy.findByLabelText(/Key name/)
       .clear()
       .type("Different key name");
 
-    cy.findByLabelText(/group/).click();
+    cy.findByLabelText(/group/i).click();
     cy.findByRole("listbox").findByText("collection").click();
 
     cy.button("Save").click();
@@ -145,30 +150,27 @@ describe("scenarios > admin > settings > API keys", () => {
     cy.findByTestId("api-keys-table")
       .should("not.contain", "Development API Key")
       .contains("Different key name")
-      .closest("tr")
+      .closest('[role="row"]')
       .should("contain", "collection");
   });
 
   it("should allow regenerating an API key", () => {
     H.createApiKey("Personal API Key", ALL_USERS_GROUP_ID);
 
-    H.visitApiKeySettings().then(({ response }) => {
-      const { created_at, updated_at } = response?.body[0];
-      // on creation, created_at and updated_at should be the same
-      expect(created_at).to.equal(updated_at);
-    });
+    visitApiKeySettings();
     cy.findByTestId("api-keys-table")
       .contains("Personal API Key")
-      .closest("tr")
-      .icon("pencil")
+      .closest('[role="row"]')
+      .findByLabelText("API key actions")
       .click();
-    cy.button("Regenerate API Key").click();
+    cy.findByRole("menuitem", { name: /edit/i }).click();
+    cy.button("Regenerate API key").click();
     cy.button("Regenerate").click();
     cy.wait("@regenerateKey");
     cy.findByLabelText("The API key").should("include.value", "mb_");
 
     cy.wait("@getKeys").then(({ response }) => {
-      const { created_at, updated_at } = response?.body[0];
+      const { created_at, updated_at } = response?.body?.[0] ?? {};
       // after regeneration, created_at and updated_at should be different
       // they're too close to check via UI though
       expect(created_at).to.not.equal(updated_at);
@@ -261,6 +263,12 @@ describe("scenarios > admin > settings > API keys", () => {
     });
   });
 });
+
+export const visitApiKeySettings = () => {
+  cy.visit("/admin/settings/authentication/api-keys");
+  cy.wait("@getKeys");
+  cy.findByTestId("api-keys-settings-header");
+};
 
 const createQuestionForApiKey = (apiKey: string) => {
   cy.signOut();

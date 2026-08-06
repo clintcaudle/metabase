@@ -4,11 +4,15 @@ title: Databricks
 
 # Databricks
 
-To add a database connection, click on the **gear** icon in the top right, and navigate to **Admin settings** > **Databases** > **Add a database**. Then select **Databricks**.
+To add a database connection, click the **grid** icon in the top right, and navigate to **Admin** > **Databases** > **Add a database**. Then select **Databricks**.
 
 You can edit these settings at any time. Just remember to save your changes.
 
 ## Edit connection details
+
+### Connection string
+
+Paste a connection string here to pre-fill the remaining fields below.
 
 ### Display name
 
@@ -33,26 +37,32 @@ There are two ways to authenticate with Databricks. You can use a personal acces
 The Databricks driver supports both options. Use the toggle to select the authentication method you want to use.
 
 #### Personal access token authentication
+
 See [Personal Access Token (PAT)](https://docs.databricks.com/en/dev-tools/auth/pat.html).
 
 #### Authenticate access with a service principal using OAuth (OAuth M2M)
 
 See [Authenticate access with a service principal using OAuth](https://docs.databricks.com/en/dev-tools/auth/oauth-m2m.html).
 
-### Catalog
-For now, you can only select one catalog. Metabase doesn't support multi-catalog connections. If you want to use more than one catalog in Metabase, you can set up multiple connections, each selecting a different catalog.
+### Enable multiple catalogs
+
+Toggle on to sync multiple catalogs. If you enable this, you'll be able to [specify which catalogs to sync](#catalogs-and-schemas).
+
+### Default catalog
+
+Required. You must specify a default catalog (so you don't have to deal with catalog qualification in native queries).
 
 You can't sync Databricks's legacy catalogs, however, including the `samples` or `hive_metastore` catalogs.
 
-### Schemas
+### Catalogs and schemas
 
-You can specify which schemas you want to sync and scan. Options are:
+You can specify which catalogs and schemas you want to sync and scan. Options are:
 
 - All
 - Only these...
 - All except...
 
-For the **Only these** and **All except** options, you can input a comma-separated list of values to tell Metabase which schemas you want to include (or exclude). For example:
+For the **Only these** and **All except** options, you can input a comma-separated list of values to tell Metabase which catalogs and schemas you want to include (or exclude). For example:
 
 ```
 foo,bar,baz
@@ -77,7 +87,7 @@ See [Compute settings for the Databricks JDBC Driver](https://docs.databricks.co
 
 Turn this option **OFF** if people want to click **Run** (the play button) before applying any summarizations or filters in the query builder.
 
-By default, Metabase will execute a query as soon as you choose an grouping option from the **Summarize** menu or a filter condition from the [drill-through menu](https://www.metabase.com/learn/metabase-basics/querying-and-dashboards/questions/drill-through). If your database is slow, you may want to disable re-running to avoid loading data on each click.
+By default, Metabase will execute a query as soon as you choose an grouping option from the **Summarize** menu or a filter condition from the [drill-through menu](../../questions/visualizations/drill-through.md). If your database is slow, you may want to disable re-running to avoid loading data on each click.
 
 ### Choose when syncs and scans happen
 
@@ -91,11 +101,19 @@ Turn this option **ON** to scan a sample of values every time Metabase runs a [s
 
 A fingerprinting query examines the first 10,000 rows from each column and uses that data to guesstimate how many unique values each column has, what the minimum and maximum values are for numeric and timestamp columns, and so on. If you leave this option **OFF**, Metabase will only fingerprint your columns once during setup.
 
+## Writable connection
+
+Set up an additional connection used for write operations. See [Writable connections](../writable-connection.md).
+
 ## Model features
 
 There aren't (yet) any model features available for Databricks.
 
 ## Database routing
+
+With database routing, an admin can build a question once using one database, and the question will run its query against a different database with the same schema depending on who is viewing the question.
+
+When **multi-catalog is not enabled**, you can route between catalogs on the same host. If multi-catalog is enabled, then you can only route between databases on separate hosts.
 
 See [Database routing](../../permissions/database-routing.md).
 

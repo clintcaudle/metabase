@@ -2,12 +2,11 @@
 import { css } from "@emotion/react";
 
 import GlobalDashboardS from "metabase/css/dashboard.module.css";
-import DashboardS from "metabase/dashboard/components/Dashboard/Dashboard.module.css";
-import DashboardGridS from "metabase/dashboard/components/DashboardGrid.module.css";
-import { DASHBOARD_PARAMETERS_PDF_EXPORT_NODE_ID } from "metabase/dashboard/constants";
-import { isEmbeddingSdk, isStorybookActive } from "metabase/env";
-import { openImageBlobOnStorybook } from "metabase/lib/loki-utils";
-import EmbedFrameS from "metabase/public/components/EmbedFrame/EmbedFrame.module.css";
+import EmbedFrameS from "metabase/embedding/theme.module.css";
+import { isEmbeddingSdk } from "metabase/embedding-sdk/config";
+import { isStorybookActive } from "metabase/env";
+import { utf8_to_b64 } from "metabase/utils/encoding";
+import { openImageBlobOnStorybook } from "metabase/utils/loki-utils";
 
 import { getCardKey } from "./utils";
 
@@ -15,6 +14,8 @@ export const SAVING_DOM_IMAGE_CLASS = "saving-dom-image";
 export const SAVING_DOM_IMAGE_HIDDEN_CLASS = "saving-dom-image-hidden";
 export const SAVING_DOM_IMAGE_DISPLAY_NONE_CLASS =
   "saving-dom-image-display-none";
+export const SAVING_DOM_IMAGE_OVERFLOW_VISIBLE_CLASS =
+  "saving-dom-image-overflow-visible";
 export const PARAMETERS_MARGIN_BOTTOM = 12;
 
 export const saveDomImageStyles = css`
@@ -25,31 +26,60 @@ export const saveDomImageStyles = css`
     .${SAVING_DOM_IMAGE_DISPLAY_NONE_CLASS} {
       display: none;
     }
-
-    .${DashboardS.FixedWidthContainer} {
-      legend {
-        top: -9px;
-      }
+    .${SAVING_DOM_IMAGE_OVERFLOW_VISIBLE_CLASS} {
+      overflow: visible;
     }
 
-    .${DashboardGridS.DashboardCardContainer} .${GlobalDashboardS.Card} {
+    [data-dashcard-key].${GlobalDashboardS.Card} {
       /* the renderer we use for saving to image/pdf doesn't support box-shadow
         so we replace it with a border */
       box-shadow: none;
-      border: 1px solid var(--mb-color-border);
+      border: 1px solid var(--mb-color-border-neutral);
     }
 
     /* the renderer for saving to image/pdf does not support text overflow
      with line height in custom themes in the embedding sdk.
      this is a workaround to make sure the text is not clipped vertically */
-    ${isEmbeddingSdk &&
+    ${isEmbeddingSdk() &&
     css`
-      .${DashboardGridS.DashboardCardContainer} .${GlobalDashboardS.Card} * {
+      [data-dashcard-key].${GlobalDashboardS.Card} * {
         overflow: visible !important;
       }
     `};
   }
 `;
+
+const SVG_VAR_PAINT_ATTRIBUTES = [
+  "fill",
+  "stroke",
+  "stop-color",
+  "flood-color",
+  "lighting-color",
+];
+
+// html2canvas serializes <svg> to a standalone image where :root custom props are out of
+// scope, so var() paint (e.g. white pie-slice borders) is lost. Bake in the resolved value.
+export const resolveSvgVarPaint = (root: HTMLElement) => {
+  root.querySelectorAll<SVGElement>("svg, svg *").forEach((el) => {
+    SVG_VAR_PAINT_ATTRIBUTES.forEach((attr) => {
+      const value = el.getAttribute(attr);
+      if (value?.includes("var(")) {
+        const resolved = getComputedStyle(el).getPropertyValue(attr);
+        if (resolved) {
+          el.setAttribute(attr, resolved);
+        }
+      }
+    });
+  });
+};
+
+// html2canvas's clone wipes inline styles off SVG nodes (empty computed cssText in Chrome),
+// dropping overflow:visible so nested label <svg>s clip their text. Restore it for export.
+export const restoreNestedSvgOverflow = (root: HTMLElement) => {
+  root.querySelectorAll<SVGElement>("svg svg").forEach((svg) => {
+    svg.style.overflow = "visible";
+  });
+};
 
 export const getDomToCanvas = async (
   element: HTMLElement,
@@ -64,10 +94,15 @@ export const getDomToCanvas = async (
   const { default: html2canvas } = await import("html2canvas-pro");
   return html2canvas(element, {
     useCORS: options.useCORS ?? true,
+    cspNonce: window.MetabaseNonce,
     width: options.width,
     height: options.height,
     scale: options.scale,
-    onclone: options.onclone,
+    onclone: (doc, node) => {
+      options.onclone?.(doc, node);
+      resolveSvgVarPaint(node);
+      restoreNestedSvgOverflow(node);
+    },
   });
 };
 
@@ -80,12 +115,14 @@ export const canvasToBlob = (
   });
 };
 
-export const blobToFile = (
-  blob: Blob,
-  filename: string,
-  type = "image/png",
-): File => {
-  return new File([blob], filename, { type });
+// html2canvas renders fieldset legends shifted down; nudge them back up in the
+// cloned parameter bar before capture.
+export const fixParameterLegendOffsetForExport = (
+  parametersNode: HTMLElement,
+) => {
+  parametersNode.querySelectorAll<HTMLElement>("legend").forEach((el) => {
+    el.style.top = "-9px";
+  });
 };
 
 export interface DashboardRenderSetup {
@@ -98,27 +135,27 @@ export interface DashboardRenderSetup {
 }
 
 export const setupDashboardForRendering = (
-  selector: string,
+  dashboardRoot: HTMLElement,
+  getParametersNode: (dashboardRoot: HTMLElement) => HTMLElement | null,
 ): DashboardRenderSetup | undefined => {
-  const dashboardRoot = document.querySelector(selector);
-  const gridNode = dashboardRoot?.querySelector(".react-grid-layout");
+  const gridNode = dashboardRoot.querySelector(".react-grid-layout");
 
   if (!gridNode || !(gridNode instanceof HTMLElement)) {
-    console.warn("No dashboard content found", selector);
+    console.warn("No dashboard content found");
     return undefined;
   }
 
-  const parametersNode = dashboardRoot
-    ?.querySelector(`#${DASHBOARD_PARAMETERS_PDF_EXPORT_NODE_ID}`)
-    ?.cloneNode(true);
+  const pageHeaderParametersNode =
+    getParametersNode(dashboardRoot)?.cloneNode(true);
 
   let parametersHeight = 0;
-  if (parametersNode instanceof HTMLElement) {
-    gridNode.append(parametersNode);
-    parametersNode.style.cssText = `margin-bottom: ${PARAMETERS_MARGIN_BOTTOM}px`;
+  if (pageHeaderParametersNode instanceof HTMLElement) {
+    gridNode.append(pageHeaderParametersNode);
+    pageHeaderParametersNode.style.cssText = `margin-bottom: ${PARAMETERS_MARGIN_BOTTOM}px`;
     parametersHeight =
-      parametersNode.getBoundingClientRect().height + PARAMETERS_MARGIN_BOTTOM;
-    gridNode.removeChild(parametersNode);
+      pageHeaderParametersNode.getBoundingClientRect().height +
+      PARAMETERS_MARGIN_BOTTOM;
+    gridNode.removeChild(pageHeaderParametersNode);
   }
 
   const contentWidth = gridNode.offsetWidth;
@@ -133,7 +170,9 @@ export const setupDashboardForRendering = (
     contentWidth,
     contentHeight,
     parametersNode:
-      parametersNode instanceof HTMLElement ? parametersNode : null,
+      pageHeaderParametersNode instanceof HTMLElement
+        ? pageHeaderParametersNode
+        : null,
     parametersHeight,
     backgroundColor,
   };
@@ -141,8 +180,17 @@ export const setupDashboardForRendering = (
 
 export const getDashboardImage = async (
   selector: string,
+  parametersNodeSelector: string,
 ): Promise<string | undefined> => {
-  const setup = setupDashboardForRendering(selector);
+  const dashboardRoot = document.querySelector(selector);
+  if (!(dashboardRoot instanceof HTMLElement)) {
+    console.warn("No dashboard root found", selector);
+    return undefined;
+  }
+
+  const setup = setupDashboardForRendering(dashboardRoot, (root) =>
+    root.querySelector<HTMLElement>(parametersNodeSelector),
+  );
   if (!setup) {
     return undefined;
   }
@@ -163,12 +211,35 @@ export const getDashboardImage = async (
       node.style.height = `${contentHeight}px`;
       node.style.backgroundColor = backgroundColor;
       if (parametersNode) {
+        fixParameterLegendOffsetForExport(parametersNode);
         node.insertBefore(parametersNode, node.firstChild);
       }
     },
   });
 
   return canvas.toDataURL("image/png").split(",")[1];
+};
+
+export const getVisualizationSvgDataUri = (
+  selector: string,
+): string | undefined => {
+  const element = document.querySelector(selector)?.cloneNode(true);
+  if (element && !(element instanceof SVGElement)) {
+    throw new Error("Selector did not provide an SVG element");
+  }
+
+  const backgroundColor = getComputedStyle(document.documentElement)
+    .getPropertyValue("--mb-color-bg-dashboard")
+    .trim();
+  if (backgroundColor && element instanceof SVGElement) {
+    element.style.backgroundColor = backgroundColor;
+  }
+  if (!element) {
+    return undefined;
+  }
+
+  const svgString = new XMLSerializer().serializeToString(element);
+  return `data:image/svg+xml;base64,${utf8_to_b64(svgString)}`;
 };
 
 export const getChartSelector = (
@@ -181,7 +252,15 @@ export const getChartSelector = (
   }
 };
 
-export const getBase64ChartImage = async (
+export const getChartSvgSelector = (
+  input: { dashcardId: number | undefined } | { cardId: number | undefined },
+) => {
+  // :not selector shouldn't be needed, but just an extra check to make sure
+  // we don't accidentally get some kind of svg icon
+  return `${getChartSelector(input)} svg:not([role="img"])`;
+};
+
+export const getChartImagePngDataUri = async (
   selector: string,
 ): Promise<string | undefined> => {
   const chartRoot = document.querySelector(selector);
@@ -197,7 +276,7 @@ export const getBase64ChartImage = async (
     },
   });
 
-  return canvas.toDataURL("image/png").split(",")[1];
+  return canvas.toDataURL("image/png");
 };
 
 export const saveChartImage = async (selector: string, fileName: string) => {

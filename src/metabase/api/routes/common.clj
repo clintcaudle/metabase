@@ -7,7 +7,8 @@
    [metabase.api.response :as api.response]
    [metabase.api.settings :as api.settings]
    [metabase.util.i18n :refer [deferred-trs deferred-tru]]
-   [metabase.util.log :as log]))
+   [metabase.util.log :as log]
+   [metabase.util.malli :as mu]))
 
 ;;; these use vars rather than plain functions so changes to the underlying functions get propagated during REPL usage.
 
@@ -26,7 +27,7 @@
   [handler]
   (fn [request respond _raise]
     (let [raise (fn [e]
-                  (log/warn e "Exception in API call")
+                  (log/warnf "Exception in API call: %s" (ex-message e))
                   (if (= 404 (:status-code (ex-data e)))
                     (respond {:status 404, :body (deferred-tru "Not found.")})
                     (respond {:status 400, :body (deferred-tru "An error occurred.")})))]
@@ -42,11 +43,11 @@
   [handler]
   (fn [request respond _raise]
     (let [raise (fn [^Throwable e]
+                  (log/errorf "Exception in API call: %s" (ex-message e))
                   (respond {:status 400, :body (ex-message e)}))]
       (try
         (handler request respond raise)
         (catch Throwable e
-          (log/error e "Exception in API call")
           (raise e))))))
 
 (def ^:private mb-api-key-doc-url
@@ -83,9 +84,9 @@
           :else
           (respond api.response/response-forbidden))))
 
-(defn- enforce-authentication
+(mu/defn- enforce-authentication :- ifn?
   "Middleware that returns a 401 response if `request` has no associated `:metabase-user-id`."
-  [handler]
+  [handler :- ifn?]
   (fn [{:keys [metabase-user-id] :as request} respond raise]
     (if metabase-user-id
       (handler request respond raise)

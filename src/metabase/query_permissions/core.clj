@@ -11,10 +11,14 @@
   can-query-table?
   can-run-query?
   check-card-read-perms
+  check-card-result-metadata-data-perms
   check-data-perms
+  check-result-metadata-data-perms
   check-run-permissions-for-query
   has-perm-for-query?
   perms-exception
+  query->resolved-source-ids
+  query->resolved-source-table-ids
   query->source-ids
   query->source-table-ids
   required-perms-for-query])

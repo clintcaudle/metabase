@@ -7,46 +7,6 @@ const { PRODUCTS, PRODUCTS_ID } = SAMPLE_DATABASE;
 const { PEOPLE, PEOPLE_ID } = SAMPLE_DATABASE;
 const { REVIEWS, REVIEWS_ID } = SAMPLE_DATABASE;
 
-describe("issue 13504", () => {
-  const questionDetails = {
-    name: "13504",
-    display: "line",
-    query: {
-      "source-query": {
-        "source-table": ORDERS_ID,
-        filter: [">", ["field", ORDERS.TOTAL, null], 50],
-        aggregation: [["count"]],
-        breakout: [["field", ORDERS.CREATED_AT, { "temporal-unit": "month" }]],
-      },
-      filter: [">", ["field", "count", { "base-type": "type/Integer" }], 100],
-    },
-    visualization_settings: {
-      "graph.dimensions": ["CREATED_AT"],
-      "graph.metrics": ["count"],
-    },
-  };
-
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-    cy.intercept("POST", "/api/dataset").as("dataset");
-  });
-
-  it("should remove post-aggregation filters from a multi-stage query (metabase#13504)", () => {
-    H.createQuestion(questionDetails, { visitQuestion: true });
-
-    H.cartesianChartCircle().eq(0).click({ force: true });
-
-    H.popover().findByText("See these Orders").click();
-    cy.wait("@dataset");
-
-    cy.findByTestId("qb-filters-panel").within(() => {
-      cy.findByText("Total is greater than 50").should("be.visible");
-      cy.findByText("Created At is Mar 1–31, 2023").should("be.visible");
-    });
-  });
-});
-
 const externalDatabaseId = 2;
 
 describe("issue 16170", { tags: "@mongo" }, () => {
@@ -56,6 +16,10 @@ describe("issue 16170", { tags: "@mongo" }, () => {
     });
 
     H.popover().contains(value).click();
+    H.popover().findByDisplayValue(value);
+
+    // click outside popover
+    cy.findByTestId("chartsettings-list-container").click();
   }
 
   function assertOnTheYAxis() {
@@ -92,13 +56,12 @@ describe("issue 16170", { tags: "@mongo" }, () => {
 
       replaceMissingValuesWith(replacementValue);
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Done").click();
-
       assertOnTheYAxis();
 
-      // eslint-disable-next-line no-unsafe-element-filtering
-      H.cartesianChartCircle().eq(-2).trigger("mousemove");
+      H.cartesianChartCircle()
+        .should("have.length", 6)
+        .eq(-2)
+        .trigger("mousemove");
 
       H.assertEChartsTooltip({
         header: "2019",
@@ -163,11 +126,11 @@ describe("issue 17524", () => {
 
       cy.get("polygon");
 
-      // eslint-disable-next-line no-unsafe-element-filtering
+      // eslint-disable-next-line metabase/no-unsafe-element-filtering
       cy.icon("play").last().click();
 
       cy.get("polygon");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+      // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Save").should("not.exist");
     });
   });
@@ -321,7 +284,7 @@ describe("issue 18061", () => {
       addFilter("Twitter");
 
       cy.wait("@dashCardQuery");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+      // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Something went wrong").should("not.exist");
 
       cy.location("search").should("eq", "?category=Twitter");
@@ -332,9 +295,9 @@ describe("issue 18061", () => {
     it("should handle data sets that contain only null values for longitude/latitude (metabase#18061-3)", () => {
       H.visitAlias("@publicLink");
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+      // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
       cy.findByText("18061D");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+      // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
       cy.findByText("18061");
       cy.get("[data-element-id=pin-map]");
 
@@ -396,7 +359,7 @@ describe("issue 18063", () => {
 
     cy.get(".leaflet-marker-icon").trigger("mousemove");
 
-    H.popover().within(() => {
+    H.tooltip().within(() => {
       H.testPairedTooltipValues("LATITUDE", "55.68");
       H.testPairedTooltipValues("LONGITUDE", "12.57");
       H.testPairedTooltipValues("COUNT", "1");
@@ -432,7 +395,7 @@ describe("issue 18776", () => {
 
   it("should not freeze when opening a timeseries chart with sparse data and without the X-axis", () => {
     H.visitQuestionAdhoc(questionDetails);
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Visualization").should("be.visible");
   });
 });
@@ -549,7 +512,7 @@ describe("issue 21452", () => {
     H.cartesianChartCircle().first().trigger("mousemove");
 
     H.assertEChartsTooltip({
-      header: "2022",
+      header: "2025",
       rows: [
         {
           color: "#88BF4D",
@@ -588,7 +551,7 @@ describe("issue 21504", () => {
     H.openVizSettingsSidebar();
 
     H.leftSidebar().within(() => {
-      cy.findByText("January 2025").should("be.visible");
+      cy.findByText("January 2028").should("be.visible");
     });
   });
 });
@@ -642,18 +605,17 @@ describe("issue 21665", () => {
       H.editDashboard();
     });
 
-    H.findDashCardAction(
-      H.getDashboardCard(0),
-      "Visualize another way",
-    ).click();
+    H.getDashboardCard(0)
+      .realHover({ scrollBehavior: "bottom" })
+      .findByLabelText("Visualize another way")
+      .click();
     H.modal().within(() => {
       H.switchToAddMoreData();
-      H.addDataset(Q2.name);
+      H.selectDataset(Q2.name);
       cy.button("Save").click();
     });
 
     H.saveDashboard();
-    cy.wait("@getDashboard");
   });
 
   it("multi-series cards shouldnt cause frontend to reload (metabase#21665)", () => {
@@ -663,14 +625,17 @@ describe("issue 21665", () => {
 
     H.visitDashboard("@dashboardId");
 
-    cy.get("@dashboardLoaded").should("have.callCount", 3);
+    // The dashboard loads twice: once on the initial visit, once on re-visit.
+    cy.get("@dashboardLoaded").should("have.callCount", 2);
     cy.findByTestId("dashcard")
-      .findByText("There was a problem displaying this chart.")
+      .findByText(
+        "Some columns are missing, this card might not render correctly.",
+      )
       .should("be.visible");
   });
 });
 
-describe.skip("issue 22527", () => {
+describe("issue 22527", { tags: "@skip" }, () => {
   const questionDetails = {
     native: {
       query:
@@ -708,45 +673,12 @@ describe.skip("issue 22527", () => {
       cy.findByTextEnsureVisible("Data").click();
     });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Bubble size").parent().contains("Select a field").click();
 
     H.popover().contains(/size/i).click();
 
     assertion();
-  });
-});
-
-describe("issue 25007", () => {
-  const questionDetails = {
-    name: "11435",
-    display: "line",
-    native: {
-      query: `SELECT dateadd('day', CAST((1 - CASE WHEN ((iso_day_of_week("PUBLIC"."ORDERS"."CREATED_AT") + 1) % 7) = 0 THEN 7 ELSE ((iso_day_of_week("PUBLIC"."ORDERS"."CREATED_AT") + 1) % 7) END) AS long), CAST("PUBLIC"."ORDERS"."CREATED_AT" AS date)) AS "CREATED_AT", count(*) AS "count"
-  FROM "PUBLIC"."ORDERS"
-  GROUP BY dateadd('day', CAST((1 - CASE WHEN ((iso_day_of_week("PUBLIC"."ORDERS"."CREATED_AT") + 1) % 7) = 0 THEN 7 ELSE ((iso_day_of_week("PUBLIC"."ORDERS"."CREATED_AT") + 1) % 7) END) AS long), CAST("PUBLIC"."ORDERS"."CREATED_AT" AS date))
-  ORDER BY dateadd('day', CAST((1 - CASE WHEN ((iso_day_of_week("PUBLIC"."ORDERS"."CREATED_AT") + 1) % 7) = 0 THEN 7 ELSE ((iso_day_of_week("PUBLIC"."ORDERS"."CREATED_AT") + 1) % 7) END) AS long), CAST("PUBLIC"."ORDERS"."CREATED_AT" AS date)) ASC`,
-    },
-    visualization_settings: {
-      "graph.dimensions": ["CREATED_AT"],
-      "graph.metrics": ["count"],
-    },
-  };
-
-  const clickLineDot = ({ index } = {}) => {
-    // eslint-disable-next-line no-unsafe-element-filtering
-    H.cartesianChartCircle().eq(index).click({ force: true });
-  };
-
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-  });
-
-  it("should display weeks correctly in tooltips for native questions (metabase#25007)", () => {
-    H.createNativeQuestion(questionDetails, { visitQuestion: true });
-    clickLineDot({ index: 1 });
-    H.echartsTooltip().findByText("May 1–7, 2022");
   });
 });
 
@@ -778,11 +710,11 @@ describe("issue 25156", () => {
     H.createQuestion(questionDetails, { visitQuestion: true });
 
     H.echartsContainer()
-      .should("contain", "2022")
-      .and("contain", "2023")
-      .and("contain", "2023")
-      .and("contain", "2024")
-      .and("contain", "2025");
+      .should("contain", "2025")
+      .and("contain", "2026")
+      .and("contain", "2026")
+      .and("contain", "2027")
+      .and("contain", "2028");
   });
 });
 
@@ -911,53 +843,12 @@ describe("issue 27279", () => {
   });
 });
 
-describe("issue 27427", () => {
-  const questionDetails = {
-    name: "27427",
-    native: {
-      query:
-        "select 1 as sortorder, year(current_timestamp), 1 v1, 2 v2\nunion all select 1, year(current_timestamp)-1, 1, 2",
-      "template-tags": {},
-    },
-    display: "bar",
-    visualization_settings: {
-      "graph.dimensions": ["EXTRACT(YEAR FROM CURRENT_TIMESTAMP)"],
-      "graph.metrics": ["V1", "V2"],
-      "graph.series_order_dimension": null,
-      "graph.series_order": null,
-    },
-  };
-
-  function assertStaticVizRender(questionDetails, callback) {
-    H.createNativeQuestion(questionDetails).then(({ body: { id } }) => {
-      cy.request({
-        method: "GET",
-        url: `/api/pulse/preview_card/${id}`,
-        failOnStatusCode: false,
-      }).then((response) => {
-        callback(response);
-      });
-    });
-  }
-
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-  });
-
-  it("static-viz should not fail if there is unused returned column: 'divide by zero' (metabase#27427)", () => {
-    assertStaticVizRender(questionDetails, ({ status, body }) => {
-      expect(status).to.eq(200);
-      expect(body).to.not.include(
-        "An error occurred while displaying this card.",
-      );
-    });
-  });
-});
+// Test for issue 27427 (static-viz with unused returned column)
+// has been moved to backend test in metabase.channel.render.card-test
 
 const addCountGreaterThan2Filter = () => {
   H.openNotebook();
-  // eslint-disable-next-line no-unsafe-element-filtering
+  // eslint-disable-next-line metabase/no-unsafe-element-filtering
   cy.findAllByTestId("action-buttons").last().button("Filter").click();
   H.popover().findByText("Count").click();
   H.selectFilterOperator("Greater than");
@@ -1197,7 +1088,7 @@ describe("issue 49160", () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
   });
 
   it("pie chart should have a placeholder", () => {
@@ -1218,7 +1109,7 @@ describe("issue 49160", () => {
 
     cy.findByLabelText("Rating").click();
     H.echartsContainer().findByText("200").should("be.visible");
-    H.echartsContainer().findByText("TOTAL").should("be.visible");
+    H.echartsContainer().findByText("Total").should("be.visible");
   });
 
   it("pie chart should work when instance colors have overrides", () => {
@@ -1275,5 +1166,44 @@ describe("issue 54271", () => {
 
     cy.log("no clear expectations but the app should not crash");
     H.assertQueryBuilderRowCount(1076);
+  });
+});
+
+describe("issue 63671", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+
+    H.createQuestion(
+      {
+        query: {
+          "source-table": PRODUCTS_ID,
+          aggregation: [["count"]],
+          breakout: [
+            [
+              "field",
+              PRODUCTS.CREATED_AT,
+              {
+                "temporal-unit": "year",
+              },
+            ],
+          ],
+          filter: [
+            "between",
+            ["field", PRODUCTS.CREATED_AT, null],
+            "2028-01-01",
+            "2028-12-31",
+          ],
+        },
+        display: "bar",
+      },
+      { visitQuestion: true },
+    );
+  });
+
+  it("should not show an extra value on bar charts when there is only value on the x axis (metabase#63671)", () => {
+    cy.findByTestId("query-visualization-root")
+      .findByText("2028")
+      .should("have.length", 1);
   });
 });

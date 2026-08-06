@@ -1,12 +1,14 @@
 import { useState } from "react";
 
-import AutocompleteInput from "metabase/core/components/AutocompleteInput";
+import { AutocompleteInput } from "metabase/common/components/AutocompleteInput";
+import type { VisualizationSettings } from "metabase-types/api";
 
 interface ChartSettingLinkUrlInputProps {
   value: string | undefined | null;
   onChange: (value: string) => void;
   id?: string;
   options?: string[];
+  onChangeSettings?: (settings: Partial<VisualizationSettings>) => void;
 }
 
 const linkVariablePattern = /.*{{([^{}]*)$/;
@@ -28,7 +30,8 @@ const ChartSettingLinkUrlInput = ({
   value,
   onChange,
   options,
-  ...props
+  id,
+  onChangeSettings,
 }: ChartSettingLinkUrlInputProps) => {
   const valueOrDefault = value ?? "";
   const [isFocused, setIsFocused] = useState(false);
@@ -52,13 +55,16 @@ const ChartSettingLinkUrlInput = ({
 
   const handleBlur = () => {
     setIsFocused(false);
-    onChange(focusedValue);
+    if (focusedValue !== (value ?? "")) {
+      onChange(focusedValue);
+    }
   };
 
   return (
     <AutocompleteInput
-      {...props}
-      data-testid={props.id}
+      id={id}
+      data-testid={id}
+      onChangeSettings={onChangeSettings}
       options={options}
       onChange={setFocusedValue}
       value={isFocused ? focusedValue : valueOrDefault}

@@ -82,6 +82,11 @@
   [_ _ expr]
   (h2x/->timestamp [:from_unixtime expr]))
 
+(defmethod sql.qp/unix-timestamp->honeysql [:hive-like :milliseconds]
+  [_ _ expr]
+  (-> [:timestamp_millis expr]
+      (h2x/with-database-type-info "timestamp")))
+
 (defn- date-format [format-str expr]
   [:date_format expr (h2x/literal format-str)])
 
@@ -167,22 +172,22 @@
           3)])
 
 (defmethod sql.qp/->honeysql [:hive-like :replace]
-  [driver [_ arg pattern replacement]]
+  [driver [_ _opts arg pattern replacement]]
   [:regexp_replace
    (sql.qp/->honeysql driver arg)
    (sql.qp/->honeysql driver pattern)
    (sql.qp/->honeysql driver replacement)])
 
 (defmethod sql.qp/->honeysql [:hive-like :regex-match-first]
-  [driver [_ arg pattern]]
+  [driver [_ _opts arg pattern]]
   [:regexp_extract (sql.qp/->honeysql driver arg) (sql.qp/->honeysql driver pattern) 0])
 
 (defmethod sql.qp/->honeysql [:hive-like :median]
-  [driver [_ arg]]
+  [driver [_ _opts arg]]
   [:percentile (sql.qp/->honeysql driver arg) 0.5])
 
 (defmethod sql.qp/->honeysql [:hive-like :percentile]
-  [driver [_ arg p]]
+  [driver [_ _opts arg p]]
   [:percentile (sql.qp/->honeysql driver arg) (sql.qp/->honeysql driver p)])
 
 (defmethod sql.qp/add-interval-honeysql-form :hive-like
@@ -224,6 +229,10 @@
   [_driver _unit x y]
   [:- [:unix_timestamp y] [:unix_timestamp x]])
 
+(defmethod sql.qp/cast-temporal-string [:hive-like :Coercion/YYYYMMDDHHMMSSString->Temporal]
+  [_driver _coercion-strategy expr]
+  [:to_timestamp expr (h2x/literal "yyyyMMddHHmmss")])
+
 (def ^:dynamic *inline-param-style*
   "How we should include inline params when compiling SQL. `:friendly` (the default) or `:paranoid`. `:friendly` makes a
   best-effort attempt to escape strings and generate SQL that is nice to look at, but should not be considered safe
@@ -236,7 +245,7 @@
   ;; Because Spark SQL doesn't support parameterized queries (e.g. `?`) convert the entire String to hex and decode.
   ;; e.g. encode `abc` as `decode(unhex('616263'), 'utf-8')` to prevent SQL injection
   (case *inline-param-style*
-    :friendly (str \' (sql.u/escape-sql s :backslashes) \')
+    :friendly (sql.u/quote-literal s :backslashes)
     :paranoid (format "decode(unhex('%s'), 'utf-8')" (codecs/bytes->hex (.getBytes s "UTF-8")))))
 
 ;; Hive/Spark SQL doesn't seem to like DATEs so convert it to a DATETIME first

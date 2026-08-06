@@ -11,27 +11,22 @@
     (with-redefs [config/is-prod? true]
       (http-fake/with-fake-routes-in-isolation
         {{:address #"https://static.metabase.com/version-info(-ee)?.json.*"
-          :query-params {;; 3 query parameters are sent in prod:
-                         ;; - A unique and stable instance UUID,
-                         ;; - The current version, and
-                         ;; - the update channel
+          :query-params {;; 2 query parameters are sent in prod:
+                         ;; - A unique and stable instance UUID, and
+                         ;; - The current version
                          :instance (version.settings/site-uuid-for-version-info-fetching)
-                         :current-version (:tag config/mb-version-info)
-                         :channel (version.settings/update-channel)}}
+                         :current-version (:tag config/mb-version-info)}}
          (constantly {:status 200 :body "{}"})}
         (is (= {} (@#'upgrade-checks/get-version-info))))))
-
   (testing "Empty values are omitted from the query params"
     (with-redefs [config/is-prod? true
                   version.settings/site-uuid-for-version-info-fetching (constantly "")
-                  config/mb-version-info (constantly {:tag ""})
-                  version.settings/update-channel (constantly "")]
+                  config/mb-version-info (constantly {:tag ""})]
       (http-fake/with-fake-routes-in-isolation
         {{:address #"https://static.metabase.com/version-info(-ee)?.json.*"
           :query-params {}}
          (constantly {:status 200 :body "{}"})}
         (is (= {} (@#'upgrade-checks/get-version-info))))))
-
   (testing "No query parameters are sent outside of prod"
     (with-redefs [config/is-prod? false]
       (http-fake/with-fake-routes-in-isolation

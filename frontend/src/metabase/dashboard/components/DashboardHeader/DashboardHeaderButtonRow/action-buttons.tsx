@@ -1,5 +1,4 @@
-import { DashboardSharingMenu } from "metabase/embedding/components/SharingMenu/DashboardSharingMenu";
-import { PLUGIN_AI_ENTITY_ANALYSIS } from "metabase/plugins";
+import { PLUGIN_NOTIFICATIONS_SDK } from "metabase/plugins";
 import { Center, Divider } from "metabase/ui";
 
 import { DashboardBookmark } from "../../DashboardBookmark";
@@ -14,36 +13,18 @@ import {
   CopyAnalyticsDashboardButton,
   DashboardActionMenu,
   DashboardInfoButton,
+  DashboardSubscriptionsButton,
   EditDashboardButton,
+  ExportAsPdfButton,
   FullscreenAnalyticsDashboard,
   FullscreenToggle,
-  NightModeToggleButton,
 } from "../buttons";
 import { AddLinkOrEmbedButton } from "../buttons/AddLinkOrEmbedButton";
+import { RefreshIndicator } from "../buttons/RefreshIndicator";
 
+import { DashboardSharingMenu } from "./DashboardSharingMenu/DashboardSharingMenu";
+import { DASHBOARD_ACTION } from "./dashboard-action-keys";
 import type { DashboardActionButton, DashboardActionKey } from "./types";
-
-export const DASHBOARD_ACTION = {
-  ADD_QUESTION: "ADD_QUESTION",
-  ADD_HEADING_OR_TEXT: "ADD_HEADING_OR_TEXT",
-  ADD_LINK_CARD: "ADD_LINK_CARD",
-  ADD_SECTION: "ADD_SECTION",
-  ADD_FILTER_PARAMETER: "ADD_FILTER_PARAMETER",
-  ADD_ACTION_ELEMENT: "ADD_ACTION_ELEMENT",
-  EXTRA_EDIT_BUTTONS_MENU: "EXTRA_EDIT_BUTTONS_MENU",
-  COPY_ANALYTICS_DASHBOARD: "COPY_ANALYTICS_DASHBOARD",
-  EDIT_DASHBOARD: "EDIT_DASHBOARD",
-  DASHBOARD_SHARING: "DASHBOARD_SHARING",
-  REFRESH_WIDGET: "REFRESH_WIDGET",
-  NIGHT_MODE_TOGGLE: "NIGHT_MODE_TOGGLE",
-  FULLSCREEN_TOGGLE: "FULLSCREEN_TOGGLE",
-  DASHBOARD_HEADER_ACTION_DIVIDER: "DASHBOARD_HEADER_ACTION_DIVIDER",
-  DASHBOARD_BOOKMARK: "DASHBOARD_BOOKMARK",
-  DASHBOARD_INFO: "DASHBOARD_INFO",
-  DASHBOARD_ACTION_MENU: "DASHBOARD_ACTION_MENU",
-  FULLSCREEN_ANALYTICS_DASHBOARD: "FULLSCREEN_ANALYTICS_DASHBOARD",
-  ANALYZE_DASHBOARD: "ANALYZE_DASHBOARD",
-} as const;
 
 export const dashboardActionButtons: Record<
   DashboardActionKey,
@@ -82,9 +63,7 @@ export const dashboardActionButtons: Record<
 
   // VIEW ACTIONS
   [DASHBOARD_ACTION.EDIT_DASHBOARD]: {
-    component: ({ onRefreshPeriodChange }) => (
-      <EditDashboardButton onRefreshPeriodChange={onRefreshPeriodChange} />
-    ),
+    component: EditDashboardButton,
     enabled: ({ isFullscreen, isEditing, canEdit }) =>
       !isFullscreen && !isEditing && canEdit,
   },
@@ -92,77 +71,45 @@ export const dashboardActionButtons: Record<
     component: DashboardSharingMenu,
     enabled: ({ isEditing }) => !isEditing,
   },
+  [DASHBOARD_ACTION.DASHBOARD_SUBSCRIPTIONS_BUTTON]: {
+    component: DashboardSubscriptionsButton,
+    enabled: ({ isEditing, dashboard }) => !isEditing && !dashboard?.archived,
+  },
   [DASHBOARD_ACTION.REFRESH_WIDGET]: {
-    component: ({
-      refreshPeriod,
-      setRefreshElapsedHook,
-      onRefreshPeriodChange,
-    }) => (
-      <RefreshWidget
-        period={refreshPeriod}
-        setRefreshElapsedHook={setRefreshElapsedHook}
-        onChangePeriod={onRefreshPeriodChange}
-      />
-    ),
+    component: () => <RefreshWidget />,
     enabled: ({ dashboard, isEditing }) => !isEditing && !dashboard?.archived,
   },
-  [DASHBOARD_ACTION.NIGHT_MODE_TOGGLE]: {
-    component: ({ isNightMode, onNightModeChange }) => (
-      <NightModeToggleButton
-        isNightMode={isNightMode}
-        onNightModeChange={onNightModeChange}
-      />
-    ),
-    enabled: ({
-      isEditing,
-      isFullscreen,
-      dashboard,
-      hasNightModeToggle,
-      onNightModeChange,
-    }) =>
-      Boolean(
-        !isEditing &&
-          isFullscreen &&
-          !dashboard.archived &&
-          hasNightModeToggle &&
-          onNightModeChange,
-      ),
-  },
   [DASHBOARD_ACTION.FULLSCREEN_TOGGLE]: {
-    component: ({ isFullscreen, onFullscreenChange }) => (
-      <FullscreenToggle
-        isFullscreen={isFullscreen}
-        onFullscreenChange={onFullscreenChange}
-      />
-    ),
-    enabled: ({ isFullscreen, isPublic, isEmbeddingSdk = false }) =>
-      isPublic || isFullscreen || isEmbeddingSdk,
+    component: FullscreenToggle,
+    enabled: ({ isFullscreen, isPublic }) => isPublic || isFullscreen,
   },
   [DASHBOARD_ACTION.DASHBOARD_BOOKMARK]: {
     component: DashboardBookmark,
     enabled: ({ isEditing, dashboard }) => !isEditing && !dashboard.archived,
   },
   [DASHBOARD_ACTION.DASHBOARD_INFO]: {
-    component: DashboardInfoButton,
+    component: () => <DashboardInfoButton />,
     enabled: ({ isEditing }) => !isEditing,
+  },
+  [DASHBOARD_ACTION.AUTO_REFRESH_INDICATOR]: {
+    component: () => <RefreshWidget />,
+    enabled: ({ isEditing, dashboard, refreshPeriod }) =>
+      !isEditing &&
+      !dashboard?.archived &&
+      refreshPeriod != null &&
+      refreshPeriod > 0,
   },
   [DASHBOARD_ACTION.DASHBOARD_ACTION_MENU]: {
     component: ({
       canResetFilters,
       onResetFilters,
-      onFullscreenChange,
-      isFullscreen,
-      dashboard,
       canEdit,
       openSettingsSidebar,
     }) => (
       <DashboardActionMenu
-        dashboard={dashboard}
         canResetFilters={canResetFilters}
         canEdit={canEdit}
         onResetFilters={onResetFilters}
-        isFullscreen={isFullscreen}
-        onFullscreenChange={onFullscreenChange}
         openSettingsSidebar={openSettingsSidebar}
       />
     ),
@@ -172,12 +119,6 @@ export const dashboardActionButtons: Record<
       !isAnalyticsDashboard &&
       !dashboard.archived,
   },
-  [DASHBOARD_ACTION.ANALYZE_DASHBOARD]: {
-    component: () => <PLUGIN_AI_ENTITY_ANALYSIS.AIDashboardAnalysisButton />,
-    enabled: ({ isEditing, dashboard }) =>
-      PLUGIN_AI_ENTITY_ANALYSIS.canAnalyzeDashboard(dashboard) && !isEditing,
-  },
-
   // ACTIONS WHEN DASHBOARD IS ANALYTICS DASHBOARD
   [DASHBOARD_ACTION.COPY_ANALYTICS_DASHBOARD]: {
     component: () => <CopyAnalyticsDashboardButton />,
@@ -186,16 +127,11 @@ export const dashboardActionButtons: Record<
     },
   },
   [DASHBOARD_ACTION.FULLSCREEN_ANALYTICS_DASHBOARD]: {
-    component: ({ isFullscreen, onFullscreenChange }) => (
-      <FullscreenAnalyticsDashboard
-        isFullscreen={isFullscreen}
-        onFullscreenChange={onFullscreenChange}
-      />
-    ),
+    component: FullscreenAnalyticsDashboard,
     enabled: ({ isAnalyticsDashboard = false }) => isAnalyticsDashboard,
   },
 
-  //   UTILITY
+  // UTILITY
   [DASHBOARD_ACTION.DASHBOARD_HEADER_ACTION_DIVIDER]: {
     component: () => (
       <Center h="1.25rem" px="sm">
@@ -203,5 +139,18 @@ export const dashboardActionButtons: Record<
       </Center>
     ),
     enabled: () => true,
+  },
+  DOWNLOAD_PDF: {
+    component: () => <ExportAsPdfButton />,
+    enabled: ({ downloadsEnabled }) => Boolean(downloadsEnabled.pdf),
+  },
+  // Modular embedding
+  [DASHBOARD_ACTION.DASHBOARD_SUBSCRIPTIONS]: {
+    enabled: ({ withSubscriptions }) => withSubscriptions,
+    component: () => <PLUGIN_NOTIFICATIONS_SDK.DashboardSubscriptionsButton />,
+  },
+  [DASHBOARD_ACTION.REFRESH_INDICATOR]: {
+    enabled: ({ refreshPeriod }) => refreshPeriod != null && refreshPeriod > 0,
+    component: () => <RefreshIndicator />,
   },
 };

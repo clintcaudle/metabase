@@ -5,25 +5,24 @@ import {
   VisualizationWrapper,
 } from "__support__/storybook";
 import type { MetabaseTheme } from "metabase/embedding-sdk/theme";
-import { data } from "metabase/static-viz/components/PieChart/stories-data";
+import {
+  createMockSettingsState,
+  createMockState,
+} from "metabase/redux/store/mocks";
 import { Box } from "metabase/ui";
 import { registerVisualization } from "metabase/visualizations";
 import Visualization from "metabase/visualizations/components/Visualization";
 import type { Series } from "metabase-types/api";
 import { createMockTokenFeatures } from "metabase-types/api/mocks";
-import {
-  createMockSettingsState,
-  createMockState,
-} from "metabase-types/store/mocks";
 
 import { PieChart } from "./PieChart";
+import { data } from "./stories-data";
 
 export default {
   title: "viz/PieChart",
   component: PieChart,
 };
 
-// @ts-expect-error: incompatible prop types with registerVisualization
 registerVisualization(PieChart);
 
 const Template: StoryFn = (args) => {
@@ -55,6 +54,7 @@ const Template: StoryFn = (args) => {
       <Box h={500} style={{ backgroundColor }}>
         <Visualization
           {...props}
+          // Unjustified type cast. FIXME
           rawSeries={data.defaultSettings as unknown as Series}
           width={500}
         />
@@ -70,11 +70,6 @@ export const EmbeddedQuestion = {
     isDashboard: false,
     backgroundColor: "#ebe6e2",
   },
-
-  parameters: {
-    // TODO unskip this and the next story once rendering delay is completely gone.
-    loki: { skip: true },
-  },
 };
 
 export const EmbeddedDashcard = {
@@ -84,23 +79,29 @@ export const EmbeddedDashcard = {
     isDashboard: true,
     backgroundColor: "#dee9e9",
   },
-
-  parameters: {
-    loki: { skip: true },
-  },
 };
+
+export const DarkTheme: StoryFn = () => (
+  <VisualizationWrapper displayTheme="dark">
+    <Box h={500}>
+      {/* Unjustified type cast. FIXME */}
+      <Visualization rawSeries={data.defaultSettings as unknown as Series} />
+    </Box>
+  </VisualizationWrapper>
+);
 
 export const Watermark: StoryFn = () => (
   <VisualizationWrapper
     initialStore={createMockState({
       settings: createMockSettingsState({
         "token-features": createMockTokenFeatures({
-          "development-mode": true,
+          development_mode: true,
         }),
       }),
     })}
   >
     <Box h={500}>
+      {/* Unjustified type cast. FIXME */}
       <Visualization rawSeries={data.defaultSettings as unknown as Series} />
     </Box>
   </VisualizationWrapper>

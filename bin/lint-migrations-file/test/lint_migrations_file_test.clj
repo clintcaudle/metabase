@@ -1,8 +1,12 @@
 (ns lint-migrations-file-test
   (:require
+   [clojure.java.io :as io]
    [clojure.spec.alpha :as s]
+   [clojure.string :as str]
    [clojure.test :refer :all]
    [lint-migrations-file :as lint-migrations-file]))
+
+(set! *warn-on-reflection* true)
 
 (defn- mock-change-set
   [& keyvals]
@@ -30,12 +34,21 @@
                         :remarks   "Wow"}
                        (apply array-map keyvals))})
 
+(defn- validate-file [file & changes]
+  (#'lint-migrations-file/validate-migrations
+   {:databaseChangeLog changes}
+   file))
+
+(defn- get-001-update-migrations-file []
+  (first (filter #(str/ends-with? "001_update_migrations.yaml" (.getName %)) (#'lint-migrations-file/migration-files))))
+
 (defn- validate [& changes]
   (#'lint-migrations-file/validate-migrations
-   {:databaseChangeLog changes}))
+   {:databaseChangeLog changes}
+   (get-001-update-migrations-file)))
 
 (defn- validate-ex-info [& changes]
-  (try (#'lint-migrations-file/validate-migrations {:databaseChangeLog changes})
+  (try (#'lint-migrations-file/validate-migrations {:databaseChangeLog changes} (get-001-update-migrations-file))
        (catch Exception e (ex-data e))))
 
 (defmacro is-thrown-with-error-info? [msg info & body]
@@ -59,7 +72,7 @@
        (is (= ~info ex-data#)
            "Error info does not match expected."))))
 
-(deftest require-unique-ids-test
+(deftest ^:parallel require-unique-ids-test
   (testing "Make sure all migration IDs are unique"
     (is-thrown-with-error-info?
      "Change set IDs are not distinct."
@@ -68,7 +81,7 @@
       (mock-change-set :id "v49.2024-01-01T10:30:00")
       (mock-change-set :id "v49.2024-01-01T10:30:00")))))
 
-(deftest require-migrations-in-order-test
+(deftest ^:parallel require-migrations-in-order-test
   (testing "Migrations must be in order"
     (is-thrown-with-error-info?
      "Change set IDs are not in order"
@@ -76,7 +89,6 @@
      (validate
       (mock-change-set :id "v45.00-002")
       (mock-change-set :id "v45.00-001")))
-
     (is-thrown-with-error-info?
      "Change set IDs are not in order"
      {:out-of-order-ids [["v49.2023-12-14T08:54:54"
@@ -85,7 +97,7 @@
       (mock-change-set :id "v49.2023-12-14T08:54:54")
       (mock-change-set :id "v49.2023-12-14T08:54:53")))))
 
-(deftest only-one-column-per-add-column-test
+(deftest ^:parallel only-one-column-per-add-column-test
   (testing "we should only allow one column per addColumn change"
     (doseq [id [1 200]]
       (is (= :ok
@@ -98,11 +110,11 @@
            #"Invalid change set\."
            (validate
             (mock-change-set
-             :id id
+             :id (format "v45.00-%03d" id)
              :changes [(mock-add-column-changes :columns [(mock-column :name "A")
                                                           (mock-column :name "B")])])))))))
 
-(deftest one-change-per-change-set-test
+(deftest ^:parallel one-change-per-change-set-test
   (testing "only allow one change per change set"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
@@ -110,7 +122,7 @@
          (validate
           (mock-change-set :changes [(mock-add-column-changes) (mock-add-column-changes)]))))))
 
-(deftest require-comment-test
+(deftest ^:parallel require-comment-test
   (testing "require a comment for a change set"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
@@ -119,15 +131,15 @@
     (is (= :ok
            (validate (mock-change-set :id "v49.2024-01-01T10:30:00", :comment "Added x.45.0"))))))
 
-(deftest no-on-delete-in-constraints-test
+(deftest ^:parallel no-on-delete-in-constraints-test
   (testing "Make sure we don't use onDelete in constraints"
     (doseq [id         [1 200]
             change-set [(mock-change-set
-                         :id id
+                         :id (str "v45.00-" id)
                          :changes [(mock-add-column-changes
                                     :columns [(mock-column :constraints {:onDelete "CASCADE"})])])
                         (mock-change-set
-                         :id id
+                         :id (str "v45.00-" id)
                          :changes [(mock-create-table-changes
                                     :columns [(mock-column :constraints {:onDelete "CASCADE"})])])]]
       (testing (format "Change set =\n%s" (pr-str change-set))
@@ -136,17 +148,17 @@
              #"Invalid change set\."
              (validate change-set)))))))
 
-(deftest require-remarks-for-create-table-test
+(deftest ^:parallel require-remarks-for-create-table-test
   (testing "require remarks for newly created tables"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
          #"Invalid change set\."
          (validate
           (mock-change-set
-           :id 200
+           :id "v45.00-001"
            :changes [(update (mock-create-table-changes) :createTable dissoc :remarks)]))))))
 
-(deftest allow-multiple-sql-changes-if-dbmses-are-different
+(deftest ^:parallel allow-multiple-sql-changes-if-dbmses-are-different
   (testing "Allow multiple SQL changes if DBMSes are different"
     (is (= :ok
            (validate
@@ -155,7 +167,6 @@
              [{:sql {:dbms "h2", :sql "1"}}
               {:sql {:dbms "postgresql", :sql "2"}}
               {:sql {:dbms "mysql,mariadb", :sql "3"}}])))))
-
   (testing "should fail if *any* change is missing dbms"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
@@ -165,7 +176,6 @@
            :changes
            [{:sql {:dbms "h2", :sql "1"}}
             {:sql {:sql "2"}}])))))
-
   (testing "should fail if a DBMS is repeated"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
@@ -176,7 +186,7 @@
            [{:sql {:dbms "h2", :sql "1"}}
             {:sql {:dbms "postgresql,h2", :sql "2"}}]))))))
 
-(deftest validate-id-test
+(deftest ^:parallel validate-id-test
   (letfn [(validate-id [id]
             (validate (mock-change-set :id id)))]
     (testing "Valid old-style ID"
@@ -185,21 +195,56 @@
     (testing "Valid new-style ID"
       (is (= :ok
              (validate-id "v49.2024-01-01T10:30:00"))))
-
     (testing "invalid date components should throw an error"
-      (are [msg id]
-           (thrown-with-msg?
-            clojure.lang.ExceptionInfo
-            #"Invalid change set\."
-            (validate-id "v49.2024-30-01T10:30:00")
-            msg)
-        "invalid month"  "v49.2024-13-01T10:30:00"
-        "invalid day"    "v49.2024-01-32T10:30:00"
-        "invalid hour"   "v49.2024-01-01T25:30:00"
-        "invalid minute" "v49.2024-01-01T10:60:00"
-        "invalid second" "v49.2024-01-01T10:30:60"))))
+      (let [validate-id-strict (fn [id]
+                                 (validate-file (io/file "049_update_migrations.yaml")
+                                                (mock-change-set :id id)))]
+        (are [msg id]
+             (thrown-with-msg?
+              clojure.lang.ExceptionInfo
+              #"non-timestamp ID formats"
+              (validate-id-strict id))
+          "invalid month"  "v49.2024-13-01T10:30:00"
+          "invalid day"    "v49.2024-01-32T10:30:00"
+          "invalid hour"   "v49.2024-01-01T25:30:00"
+          "invalid minute" "v49.2024-01-01T10:60:00"
+          "invalid second" "v49.2024-01-01T10:30:60")))))
 
-(deftest prevent-text-types-test
+(deftest ^:parallel ^:parallel validate-id-in-file-test
+  (letfn [(validate-id [id file]
+            (validate-file (io/file file) (mock-change-set :id id)))]
+    (testing "001_update_migrations.yaml"
+      (let [file "001_update_migrations.yaml"]
+        (is (= :ok
+               (validate-id "v42.00-000" file)))
+        (is (= :ok
+               (validate-id "v45.00-000" file)))
+        (is (= :ok
+               (validate-id "v55.2024-01-01T10:30:00" file)))
+        (is
+         (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"Change set IDs are in the wrong file"
+          (validate-id "v56.2024-01-01T10:30:00" file)))))
+    (testing "later versions"
+      (is (= :ok
+             (validate-id "v56.2024-01-01T10:30:00" "056_update_migrations.yaml")))
+      (is (= :ok
+             (validate-id "v99.2024-01-01T10:30:00" "099_update_migrations.yaml")))
+      (is (= :ok
+             (validate-id "v500.2024-01-01T10:30:00" "500_update_migrations.yaml")))
+      (is
+       (thrown-with-msg?
+        clojure.lang.ExceptionInfo
+        #"Change set IDs are in the wrong file"
+        (validate-id "v55.2024-01-01T10:30:00" "056_update_migrations.yaml")))
+      (is
+       (thrown-with-msg?
+        clojure.lang.ExceptionInfo
+        #"Change set IDs are in the wrong file"
+        (validate-id "v57.2024-01-01T10:30:00" "056_update_migrations.yaml"))))))
+
+(deftest ^:parallel prevent-text-types-test
   (testing "should allow \"${text.type}\" columns from being added"
     (is (= :ok
            (validate
@@ -217,7 +262,7 @@
            :id "v49.2024-01-01T10:30:00"
            :changes [(mock-add-column-changes :columns [(mock-column :type problem-type)])])))))))
 
-(deftest prevent-bare-boolean-type-test
+(deftest ^:parallel prevent-bare-boolean-type-test
   (testing "should allow adding \"${boolean.type}\" columns"
     (is (= :ok
            (validate
@@ -233,12 +278,12 @@
                   :id "v49.00-033"
                   :changes [(mock-add-column-changes :columns [(mock-column :type "boolean")])]))))))
 
-(deftest require-rollback-test
+(deftest ^:parallel require-rollback-test
   (testing "change types with no automatic rollback support"
     (testing "missing rollback key fails"
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
-           #"Invalid change set\."
+           #"Rollback is required but not present\."
            (validate (update (mock-change-set :id "v49.2024-01-01T10:30:00" :changes [{:sql {:sql "select 1"}}])
                              :changeSet dissoc :rollback)))))
     (testing "nil rollback is allowed"
@@ -252,7 +297,7 @@
   (testing "change types with automatic rollback support are allowed"
     (is (= :ok (validate (mock-change-set :id "v49.2024-01-01T10:30:00" :changes [(mock-add-column-changes)]))))))
 
-(deftest disallow-deletecascade-in-addcolumn-test
+(deftest ^:parallel disallow-deletecascade-in-addcolumn-test
   (testing "addColumn with deleteCascade fails"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
@@ -261,7 +306,7 @@
                                     :changes [(mock-add-column-changes
                                                :columns [(mock-column :constraints {:deleteCascade true})])]))))))
 
-(deftest custom-changes-test
+(deftest ^:parallel custom-changes-test
   (let [change-set (mock-change-set
                     :changes
                     [{:customChange {:class "metabase.app_db.custom_migrations.ReversibleUppercaseCards"}}])]
@@ -288,7 +333,7 @@
         (is (= [:change.strict/customChange :custom-change/class]
                (take-last 2 (:via specific))))))))
 
-(deftest forbidden-new-types-test
+(deftest ^:parallel forbidden-new-types-test
   (testing "should throw if changes contains text type"
     (is (is-thrown-with-error-info?
          "Migration(s) ['v45.12-345'] uses invalid types (in 'blob','text')"
@@ -307,8 +352,9 @@
                                                          :columns [{:column {:name "foo"
                                                                              :remarks "none"
                                                                              :type "text"}}]}}]
-                                :rollback nil))))
+                                :rollback nil)))))
 
+(deftest ^:parallel forbidden-new-types-test-2
   (testing "should throw if changes contains boolean type"
     (is-thrown-with-error-info?
      "Migration(s) ['v49.00-033'] uses invalid types (in 'boolean')"
@@ -317,7 +363,6 @@
      (validate (mock-change-set :id "v49.00-033"
                                 :changes [{:modifyDataType {:newDataType "boolean"}}]
                                 :rollback nil)))
-
     (is-thrown-with-error-info?
      "Migration(s) ['v49.00-033'] uses invalid types (in 'boolean')"
      {:invalid-ids ["v49.00-033"]
@@ -334,8 +379,9 @@
                                                               :remarks "meow"
                                                               :columns [{:column {:name "foo"
                                                                                   :remarks "none"
-                                                                                  :type "boolean"}}]}}])))))
+                                                                                  :type "boolean"}}]}}]))))))
 
+(deftest ^:parallel forbidden-new-types-test-3
   (testing "should throw if changes contains datetime type"
     (is-thrown-with-error-info?
      "Migration(s) ['v49.00-033'] uses invalid types (in 'timestamp','timestamp without time zone','datetime')"
@@ -344,7 +390,6 @@
      (validate (mock-change-set :id "v49.00-033"
                                 :changes [{:modifyDataType {:newDataType "datetime"}}]
                                 :rollback nil)))
-
     (testing "(but not if it's an older migration)"
       (is (validate (mock-change-set :id "v45.12-345"
                                      :changes [{:createTable {:tableName "my_table"
@@ -353,3 +398,40 @@
                                                                                   :remarks "none"
                                                                                   :type "timestamp with time zone"}}]}}]
                                      :rollback nil))))))
+
+(deftest ^:parallel require-table-scoped-existence-preconditions-test
+  (testing "foreignKeyConstraintExists without foreignKeyTableName is rejected"
+    (is-thrown-with-error-info?
+     "Migration 'v49.2024-01-01T10:30:00' has foreignKeyConstraintExists precondition without foreignKeyTableName: without it Liquibase snapshots the entire schema to answer the check (~2s per precondition on a large postgres appdb)"
+     {:id "v49.2024-01-01T10:30:00"}
+     (validate
+      (mock-change-set
+       :preConditions [{:onFail "MARK_RAN"}
+                       {:not [{:foreignKeyConstraintExists {:foreignKeyName "fk_my_table_other_id"}}]}]))))
+  (testing "foreignKeyConstraintExists with foreignKeyTableName passes"
+    (is (= :ok
+           (validate
+            (mock-change-set
+             :preConditions [{:onFail "MARK_RAN"}
+                             {:not [{:foreignKeyConstraintExists {:foreignKeyName      "fk_my_table_other_id"
+                                                                  :foreignKeyTableName "my_table"}}]}])))))
+  (testing "indexExists without tableName is rejected, including in flat-map not form"
+    (is-thrown-with-error-info?
+     "Migration 'v49.2024-01-01T10:30:00' has indexExists precondition without tableName: without it Liquibase snapshots the entire schema to answer the check (~2s per precondition on a large postgres appdb)"
+     {:id "v49.2024-01-01T10:30:00"}
+     (validate
+      (mock-change-set
+       :preConditions [{:not {:indexExists {:indexName "idx_my_table_other_id"}}}]))))
+  (testing "indexExists with tableName passes"
+    (is (= :ok
+           (validate
+            (mock-change-set
+             :preConditions [{:not {:indexExists {:indexName "idx_my_table_other_id"
+                                                  :tableName "my_table"}}}])))))
+  (testing "primaryKeyExists without tableName is still rejected (previous rule subsumed)"
+    (is-thrown-with-error-info?
+     "Migration 'v49.2024-01-01T10:30:00' has primaryKeyExists precondition without tableName: without it Liquibase snapshots the entire schema to answer the check (~2s per precondition on a large postgres appdb)"
+     {:id "v49.2024-01-01T10:30:00"}
+     (validate
+      (mock-change-set
+       :preConditions [{:primaryKeyExists {:primaryKeyName "pk_my_table"}}])))))

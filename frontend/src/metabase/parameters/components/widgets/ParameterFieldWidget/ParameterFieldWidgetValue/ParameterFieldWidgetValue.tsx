@@ -1,14 +1,15 @@
 import { renderNumberOfSelections } from "metabase/parameters/utils/formatting";
-import type Field from "metabase-lib/v1/metadata/Field";
+import Field from "metabase-lib/v1/metadata/Field";
+import { hasRemappedParameterValues } from "metabase-lib/v1/parameters/utils/parameter-source";
 import type { CardId, DashboardId, Parameter } from "metabase-types/api";
 
-import Value from "../Value";
+import { Value } from "../Value";
 import { normalizeValue } from "../normalizeValue";
 
 type ParameterFieldWidgetValueProps = {
   value: unknown;
   fields: Field[];
-  parameter: Parameter;
+  parameter?: Parameter;
   cardId?: CardId;
   dashboardId?: DashboardId;
   displayValue?: string;
@@ -23,12 +24,11 @@ export function ParameterFieldWidgetValue({
   displayValue,
 }: ParameterFieldWidgetValueProps) {
   const values = normalizeValue(value);
-
   const numberOfValues = values.length;
-
-  // If there are multiple fields, turn off remapping since they might
-  // be remapped to different fields.
-  const shouldRemap = fields.length === 1;
+  const shouldRemap =
+    (parameter != null
+      ? hasRemappedParameterValues(parameter, fields)
+      : Field.remappedField(fields) != null) || displayValue != null;
 
   return numberOfValues > 1 ? (
     <>{renderNumberOfSelections(numberOfValues)}</>

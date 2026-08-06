@@ -2,70 +2,6 @@ const { H } = cy;
 
 import { setupSaml } from "./sso/shared/helpers.js";
 
-describe("scenarios > admin > settings > authentication", () => {
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-  });
-
-  describe("page layout", () => {
-    describe("oss", { tags: "@OSS" }, () => {
-      it("should not implement a tab layout for oss customers", () => {
-        cy.visit("/admin/settings/authentication");
-
-        cy.log(
-          "should have the api keys as a auth card (and should be able to access the page)",
-        );
-        cy.findByTestId("api-keys-setting").should("exist");
-
-        cy.log("should show an upsell");
-        cy.findByTestId("upsell-card").should("exist");
-
-        cy.log("should not have tabs");
-        // no tabs on authentication page
-        cy.findByRole("tab").should("not.exist");
-        // no tabs on api keys
-        cy.visit("/admin/settings/authentication/api-keys");
-        cy.findByTestId("admin-layout-content").findByText("Manage API Keys");
-        cy.findByRole("tab").should("not.exist");
-      });
-    });
-
-    describe("ee", () => {
-      it("should implement a tab layout for enterprise customers", () => {
-        H.setTokenFeatures("all");
-
-        cy.visit("/admin/settings/authentication");
-
-        authTab("Authentication")
-          .should("exist")
-          .should("have.attr", "data-active", "true");
-        authTab("User Provisioning").should("exist");
-        authTab("API Keys").should("exist");
-
-        cy.log("should not upsell enterprise customer");
-        cy.findByTestId("upsell-card").should("not.exist");
-
-        cy.log("should not show api keys under authentication tab");
-        cy.findByTestId("api-keys-setting").should("not.exist");
-
-        cy.log("should be able to go to the user provisioning page via a tab");
-        authTab("User Provisioning").click();
-        authTab("User Provisioning").should("have.attr", "data-active", "true");
-        cy.url().should(
-          "include",
-          "/admin/settings/authentication/user-provisioning",
-        );
-
-        cy.log("should be able to go to the api keys page via a tab");
-        authTab("API Keys").click();
-        authTab("API Keys").should("have.attr", "data-active", "true");
-        cy.url().should("include", "/admin/settings/authentication/api-keys");
-      });
-    });
-  });
-});
-
 describe("scenarios > admin > settings > user provisioning", () => {
   beforeEach(() => {
     H.restore();
@@ -73,7 +9,7 @@ describe("scenarios > admin > settings > user provisioning", () => {
   });
 
   describe("oss", { tags: "@OSS" }, () => {
-    it("user provisioning page should not be availble for OSS customers", () => {
+    it("user provisioning page should not be available for OSS customers", () => {
       cy.visit("/admin/settings/authentication/user-provisioning");
 
       // falls back to the authentication page
@@ -88,19 +24,11 @@ describe("scenarios > admin > settings > user provisioning", () => {
 
   describe("scim settings management", () => {
     beforeEach(() => {
-      H.setTokenFeatures("all");
+      H.activateToken("pro-self-hosted");
     });
 
     it("should be able to setup and manage scim feature", () => {
-      cy.visit("/admin/settings/authentication");
-
-      cy.log("can go to user provisioning tab");
-      authTab("User Provisioning").should("exist");
-      authTab("User Provisioning").click();
-      cy.url().should(
-        "include",
-        "/admin/settings/authentication/user-provisioning",
-      );
+      cy.visit("/admin/settings/authentication/user-provisioning");
 
       cy.log(
         "should not show endpoint and token inputs if scim has never been enabled before",
@@ -187,14 +115,14 @@ describe("scenarios > admin > settings > user provisioning", () => {
 
       cy.log("should be able to disable scim and info stay");
       scimToggle().click();
-      scimToggle().findByText("Disabled");
+      scimSetting().findByLabelText("Disabled").should("exist");
       scimEndpointInput().should("be.visible");
       scimTokenInput().should("be.visible");
       cy.findByRole("button", { name: /Regenerate/ }).should("be.disabled");
 
       cy.log("should be able to re-enable");
       scimToggle().click();
-      scimToggle().findByText("Enabled");
+      scimSetting().findByLabelText("Enabled").should("exist");
     });
 
     it("should warn users that saml user provisioning will be disabled before enabling scim", () => {
@@ -209,9 +137,9 @@ describe("scenarios > admin > settings > user provisioning", () => {
         cy.findByText(samlWarningMessage).should("exist");
 
         cy.log("message should not exist once scim has been enabled");
-        scimToggle().findByText("Disabled");
+        scimSetting().findByText("Disabled");
         scimToggle().click();
-        scimToggle().findByText("Enabled");
+        scimSetting().findByText("Enabled");
       });
 
       H.modal().within(() => {
@@ -231,51 +159,98 @@ describe("scenarios > admin > settings > user provisioning", () => {
     });
 
     it("should properly handle errors", () => {
-      cy.log("should show error when scim token fails to load");
-      cy.intercept("GET", "/api/ee/scim/api_key", { statusCode: 500 });
-      cy.visit("/admin/settings/authentication/user-provisioning");
-      H.main().within(() => {
-        cy.findByText("Error fetching SCIM token");
-      });
-
-      cy.log(
-        "should show error when scim token fails to generate when scim is enabled",
-      );
-      // enable scim and stop mocking get scim api key request
-      cy.intercept("GET", "/api/ee/scim/api_key", (req) => {
-        req.continue();
-      });
-      cy.request("PUT", "api/setting/scim-enabled", { value: true });
-      cy.visit("/admin/settings/authentication/user-provisioning");
-      H.main().within(() => {
-        cy.findByText("Token failed to generate, please regenerate one.");
-      });
-
-      cy.log("should show error when scim token fails to regenerate");
       cy.intercept("POST", "/api/ee/scim/api_key", {
         statusCode: 500,
         body: { message: "An error occurred" },
       });
-      cy.findByRole("button", { name: /Regenerate/ }).click();
 
+      cy.visit("/admin/settings/authentication/user-provisioning");
+
+      // toggling SCIM on triggers the failing token-generation POST
+      scimToggle().click();
+
+      // no modal is opened on failure — error surfaces directly on the form
+      H.modal().should("not.exist");
+
+      H.main().within(() => {
+        cy.findByText("Token failed to generate, Please try again.").should(
+          "exist",
+        );
+        cy.findByRole("button", { name: /Retry/ }).should("exist");
+      });
+    });
+
+    it("should close the regenerate modal and surface an error on the token field when regenerate fails", () => {
+      // generate an initial token via the UI
+      cy.visit("/admin/settings/authentication/user-provisioning");
+      scimToggle().click();
+      H.modal().within(() => {
+        cy.findByRole("button", { name: /Done/ }).click();
+      });
+
+      // now make subsequent regenerate calls fail
+      cy.intercept("POST", "/api/ee/scim/api_key", {
+        statusCode: 500,
+        body: { message: "An error occurred" },
+      });
+
+      cy.findByRole("button", { name: /Regenerate/ }).click();
       H.modal().within(() => {
         cy.findByText("Regenerate token?").should("exist");
         cy.findByRole("button", { name: /Regenerate now/ }).click();
       });
 
+      // the post-confirm modal does not appear; error surfaces on the form
+      H.modal().should("not.exist");
+      H.main().within(() => {
+        cy.findByText("Failed to regenerate token. Please try again.").should(
+          "exist",
+        );
+        cy.findByText("An error occurred").should("not.exist");
+        cy.findByRole("button", { name: /Regenerate/ }).should("exist");
+      });
+    });
+
+    it("should show a warning when SCIM is enabled without a token", () => {
+      // simulate enabling SCIM via config file / env var: enable it server-side, no token generated
+      cy.intercept("GET", "/api/ee/scim/api_key", (req) => {
+        req.continue();
+      });
+      cy.request("PUT", "api/setting/scim-enabled", { value: true });
+      cy.visit("/admin/settings/authentication/user-provisioning");
+
+      H.main().within(() => {
+        cy.findByText(
+          "Generate a SCIM token below to complete the setup.",
+        ).should("exist");
+        cy.findByRole("button", { name: /Generate/ }).should("exist");
+        cy.findByText("Token failed to generate, Please try again.").should(
+          "not.exist",
+        );
+      });
+
+      cy.log("warning is removed once a token has been generated");
+      cy.findByRole("button", { name: /Generate/ }).click();
       H.modal().within(() => {
-        cy.findByText("An error occurred");
+        cy.findByText("Here's what you'll need to set SCIM up").should("exist");
+        cy.findByRole("button", { name: /Done/ }).click();
+      });
+
+      H.main().within(() => {
+        cy.findByText(
+          "Generate a SCIM token below to complete the setup.",
+        ).should("not.exist");
+        cy.findByRole("button", { name: /Regenerate/ }).should("exist");
       });
     });
   });
 });
 
-function authTab(name: string) {
-  return cy.findByRole("tab", { name });
-}
-
 function scimToggle() {
-  return cy.findByTestId("scim-enabled-setting").findByText(/Enabled|Disabled/);
+  return scimSetting().findByLabelText(/Enabled|Disabled/);
+}
+function scimSetting() {
+  return cy.findByTestId("scim-enabled-setting");
 }
 
 function scimEndpointInput() {

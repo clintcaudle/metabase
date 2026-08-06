@@ -1,7 +1,8 @@
-import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
+import dayjs from "dayjs";
+
+import { USER_GROUPS, WRITABLE_DB_ID } from "e2e/support/cypress_data";
 
 const { H } = cy;
-import { USER_GROUPS, WRITABLE_DB_ID } from "e2e/support/cypress_data";
 
 const WRITABLE_TEST_TABLE = "scoreboard_actions";
 const FIRST_SCORE_ROW_ID = 11;
@@ -23,9 +24,7 @@ describe(
     beforeEach(() => {
       cy.intercept("GET", "/api/action?model-id=*").as("getModelActions");
       cy.intercept("POST", "/api/action/*/execute").as("executeAction");
-      cy.intercept("GET", "/api/action/*/execute?parameters=*").as(
-        "prefetchValues",
-      );
+      cy.intercept("POST", "/api/action/*/execute/values").as("prefetchValues");
 
       H.restore("postgres-writable");
       H.resetTestTable({ type: "postgres", table: WRITABLE_TEST_TABLE });
@@ -127,6 +126,16 @@ describe(
                   assertActionsDropdownExists();
                 });
 
+                cy.log(
+                  "does not close object detail modal when pressing Esc while action modal is open",
+                );
+                openUpdateObjectModal();
+                cy.wait("@prefetchValues");
+                actionExecuteModal().should("be.visible");
+                cy.realPress("Escape");
+                actionExecuteModal().should("not.exist");
+                objectDetailModal().should("be.visible");
+
                 cy.log(`As ${name} user: verify update form gets prefilled`);
                 openUpdateObjectModal();
                 actionExecuteModal().within(() => {
@@ -137,8 +146,7 @@ describe(
                       assertScoreFormPrefilled(firstScoreRow);
                     });
                   });
-
-                  cy.icon("close").click();
+                  cy.button("Close").click();
                 });
                 objectDetailModal().icon("close").click();
 
@@ -207,10 +215,8 @@ describe(
 
         cy.wait("@executeAction");
 
-        cy.findByLabelText("Team Name").should("not.exist");
-        cy.findByLabelText(
-          "Team Name: This Team_name value already exists.",
-        ).should("exist");
+        cy.findByLabelText("Team Name").should("exist");
+        cy.findByText("This Team_name value already exists.").should("exist");
 
         cy.findByText("Team_name already exists.").should("exist");
       });
@@ -277,7 +283,7 @@ function assertInputValue(labelText, value) {
 }
 
 function assertDateInputValue(labelText, value) {
-  const expectedValue = moment(value)
+  const expectedValue = dayjs(value)
     .format()
     .replace(/-\d\d:\d\d$/, "");
 
@@ -297,21 +303,21 @@ function assertUpdatedScoreNotInTable() {
 
 function assertSuccessfullUpdateToast() {
   cy.log("it shows a toast informing the update was successful");
-  // eslint-disable-next-line no-unsafe-element-filtering
+  // eslint-disable-next-line metabase/no-unsafe-element-filtering
   H.undoToastList()
     .last()
     .should("be.visible")
-    .should("have.attr", "color", "success")
+    .should("have.attr", "color", "feedback-positive")
     .should("contain.text", "Successfully updated");
 }
 
 function assertSuccessfullDeleteToast() {
   cy.log("it shows a toast informing the delete was successful");
-  // eslint-disable-next-line no-unsafe-element-filtering
+  // eslint-disable-next-line metabase/no-unsafe-element-filtering
   H.undoToastList()
     .last()
     .should("be.visible")
-    .should("have.attr", "color", "success")
+    .should("have.attr", "color", "feedback-positive")
     .should("contain.text", "Successfully deleted");
 }
 

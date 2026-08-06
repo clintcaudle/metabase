@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { t } from "ttag";
 
 import { useListCollectionItemsQuery } from "metabase/api";
+import type { OnFileUpload } from "metabase/common/collections/types";
+import { UploadMode } from "metabase/redux/store/upload";
 import {
   Button,
   Flex,
@@ -12,25 +14,9 @@ import {
   Stack,
   Text,
 } from "metabase/ui";
-import type { CardId, CollectionId, TableId } from "metabase-types/api";
-import { UploadMode } from "metabase-types/store/upload";
-
-import type { OnFileUpload } from "../types";
+import type { CollectionId, TableId } from "metabase-types/api";
 
 import { findLastEditedCollectionItem } from "./utils";
-
-export type CollectionOrTableIdProps =
-  | {
-      uploadMode: UploadMode.create;
-      collectionId: CollectionId;
-      tableId?: never;
-    }
-  | {
-      uploadMode: UploadMode.append | UploadMode.replace;
-      collectionId?: never;
-      tableId: TableId;
-      modelId?: CardId;
-    };
 
 export function ModelUploadModal({
   opened,
@@ -77,6 +63,7 @@ export function ModelUploadModal({
 
       return onUpload({
         tableId: Number(tableId),
+        // Unjustified type cast. FIXME
         modelId: modelForTableId?.id as number,
         uploadMode: uploadMode,
       });
@@ -124,6 +111,7 @@ export function ModelUploadModal({
         </Text>
         <Radio.Group
           value={uploadMode}
+          // Unjustified type cast. FIXME
           onChange={(val) => setUploadMode(val as UploadMode)}
           pl="1px"
         >

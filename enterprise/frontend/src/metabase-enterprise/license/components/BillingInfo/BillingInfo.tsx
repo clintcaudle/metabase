@@ -1,8 +1,11 @@
+import { t } from "ttag";
+
+import { SettingHeader } from "metabase/admin/settings/components/SettingHeader";
+import { ButtonLink } from "metabase/common/components/ExternalLink";
+import { useStoreUrl } from "metabase/common/hooks";
+import { Alert, Anchor, Box, Icon } from "metabase/ui";
 import type { BillingInfo as IBillingInfo } from "metabase-types/api";
 
-import { BillingGoToStore } from "./BillingGoToStore";
-import { BillingInfoError } from "./BillingInfoError";
-import { BillingInfoNotStoreManaged } from "./BillingInfoNotStoreManaged";
 import { BillingInfoTable } from "./BillingInfoTable";
 
 interface BillingInfoProps {
@@ -30,9 +33,69 @@ export function BillingInfo({
     return <BillingInfoNotStoreManaged />;
   }
 
-  if (!billingInfo || !billingInfo.content || !billingInfo.content.length) {
-    return <BillingGoToStore />;
+  if (billingInfo?.content?.length) {
+    return <BillingInfoTable billingInfo={billingInfo} />;
   }
 
-  return <BillingInfoTable billingInfo={billingInfo} />;
+  // Store-managed token but no billing content from Store (e.g. `{ "version": "v1" }`)
+  return <BillingGoToStore />;
 }
+
+const BillingInfoError = () => {
+  return (
+    <>
+      <SettingHeader id="billing" title={t`Billing`} />
+      <Box mt="1rem" data-testid="billing-info-error">
+        <Alert color="error" icon={<Icon name="warning" />}>
+          {t`An error occurred while fetching information about your billing.`}
+          <br />
+          <strong>{t`Need help?`}</strong> {t`You can ask for billing help at `}
+          <strong>
+            {/* eslint-disable-next-line i18next/no-literal-string */}
+            <Anchor href="mailto:billing@metabase.com">
+              billing@metabase.com
+            </Anchor>
+          </strong>
+        </Alert>
+      </Box>
+    </>
+  );
+};
+
+const BillingGoToStore = () => {
+  const url = useStoreUrl();
+
+  return (
+    <>
+      <SettingHeader
+        id="billing"
+        title={t`Billing`}
+        // eslint-disable-next-line metabase/no-literal-metabase-strings -- Metabase settings
+        description={t`Manage your Cloud account, including billing preferences, in your Metabase Store account.`}
+      />
+      <ButtonLink href={url}>
+        {/* eslint-disable-next-line metabase/no-literal-metabase-strings -- Metabase settings */}
+        {t`Go to the Metabase Store`}
+        <Icon name="external" opacity={0.6} ml="sm" />
+      </ButtonLink>
+    </>
+  );
+};
+
+const BillingInfoNotStoreManaged = () => {
+  return (
+    <SettingHeader
+      id="billing"
+      title={t`Billing`}
+      description={
+        <>
+          {t`To manage your billing preferences, please email `}
+          {/* eslint-disable-next-line i18next/no-literal-string */}
+          <Anchor href="mailto:billing@metabase.com">
+            billing@metabase.com
+          </Anchor>
+        </>
+      }
+    />
+  );
+};

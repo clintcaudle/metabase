@@ -11,7 +11,6 @@
        (reduce (fn [m typ] (doto m (gobj/set (name typ) typ)))
                #js {}
                (distinct (mapcat descendants [:type/* :Semantic/* :Relation/*]))))
-
      ;; primary field types used for picking operators, etc
      (def ^:export key-number "JS-friendly access for the number type" ::number)
      (def ^:export key-string "JS-friendly access for the string type" ::string)
@@ -25,12 +24,10 @@
      (def ^:export key-json "JS-friendly access for the JSON type" ::json)
      (def ^:export key-xml "JS-friendly access for the JSON type" ::xml)
      (def ^:export key-structured "JS-friendly access for the structured type" ::structured)
-
      ;; other types used for various purposes
      (def ^:export key-summable "JS-friendly access for the summable type" ::summable)
      (def ^:export key-scope "JS-friendly access for the scope type" ::scope)
      (def ^:export key-category "JS-friendly access for the category type" ::category)
-
      (def ^:export key-unknown "JS-friendly access for the unknown type" ::unknown)))
 
 ;; NOTE: be sure not to create cycles using the "other" types
@@ -38,11 +35,7 @@
   "A front-end specific type hierarchy used by [[metabase.lib.types.isa/field-type?]].
   It is not meant to be used directly."
   {::temporal    {:effective-type [:type/Temporal]}
-   ;; Checks for both effective and semantic types. This hack is required to
-   ;; support numbers stored as strings in MySQL until there is a proper
-   ;; coercion strategy. See #44431.
-   ::number      {:effective-type [:type/Number]
-                  :semantic-type  [:type/Number]}
+   ::number      {:effective-type [:type/Number]}
    ::integer     {:effective-type [:type/Integer]}
    ::string      {:effective-type [:type/Text]}
    ::string_like {:effective-type [:type/TextLike]}

@@ -1,16 +1,14 @@
 import { t } from "ttag";
 
-import {
-  DataPermissionValue,
-  type EntityId,
-} from "metabase/admin/permissions/types";
 import { hasPermissionValueInGraph } from "metabase/admin/permissions/utils/graph";
+import type { PermissionEntityId } from "metabase-types/api";
+import { DataPermissionValue } from "metabase-types/api";
 import type { GroupsPermissions } from "metabase-types/api/permissions";
 
 export function getSandboxedTableWarningModal(
   permissions: GroupsPermissions,
   groupId: number,
-  entityId: EntityId,
+  entityId: PermissionEntityId,
   value: DataPermissionValue,
 ) {
   // if the user is sandboxing the table while there is create-queries permissions set to
@@ -25,7 +23,7 @@ export function getSandboxedTableWarningModal(
     )
   ) {
     return {
-      title: t`Change access to this database to “Sandboxed”?`,
+      title: t`Change access to this database to “Row and column security”?`,
       message: t`This group's native querying permissions will be removed from all tables and schemas in this database.`,
       confirmButtonText: t`Change`,
       cancelButtonText: t`Cancel`,

@@ -3,6 +3,7 @@ import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import type {
   Card,
   ConcreteFieldReference,
+  DashboardId,
   StructuredQuery,
 } from "metabase-types/api";
 
@@ -325,31 +326,31 @@ export function createQ9Query(source: Card): StructuredQuery {
 type CreateQuery = (source: Card) => StructuredQuery;
 
 export function createAndVisitDashboardWithCardMatrix(
-  createQuery: CreateQuery,
+  createQueryFromCard: CreateQuery,
 ) {
   cy.then(function () {
     H.createQuestion({
       type: "question",
-      query: createQuery(this.baseQuestion),
+      query: createQueryFromCard(this.baseQuestion),
       name: "Question-based Question",
     }).then((response) => cy.wrap(response.body).as("qbq"));
 
     H.createQuestion({
       type: "question",
-      query: createQuery(this.baseModel),
+      query: createQueryFromCard(this.baseModel),
       name: "Model-based Question",
     }).then((response) => cy.wrap(response.body).as("mbq"));
 
     H.createQuestion({
       type: "model",
       name: "Question-based Model",
-      query: createQuery(this.baseQuestion),
+      query: createQueryFromCard(this.baseQuestion),
     }).then((response) => cy.wrap(response.body).as("qbm"));
 
     H.createQuestion({
       type: "model",
       name: "Model-based Model",
-      query: createQuery(this.baseModel),
+      query: createQueryFromCard(this.baseModel),
     }).then((response) => cy.wrap(response.body).as("mbm"));
   });
 
@@ -404,7 +405,7 @@ export function setup1stStageExplicitJoinFilter() {
     getPopoverItem("Reviewer", 0).click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 }
 
 export function apply1stStageExplicitJoinFilter() {
@@ -434,7 +435,7 @@ export function setup1stStageImplicitJoinFromSourceFilter() {
     getPopoverItem("Price", 0).click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 
   H.filterWidget().eq(0).click();
   H.popover().within(() => {
@@ -460,7 +461,7 @@ export function setup1stStageImplicitJoinFromJoinFilter() {
     getPopoverItem("Category", 1).click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 
   H.filterWidget().eq(0).click();
   H.popover().within(() => {
@@ -487,7 +488,7 @@ export function setup1stStageCustomColumnFilter() {
     getPopoverItem("Net").click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 
   H.filterWidget().eq(0).click();
   H.popover().within(() => {
@@ -507,17 +508,15 @@ export function setup1stStageAggregationFilter() {
 
   H.getDashboardCard(0).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("Count").click();
+    getPopoverItem("Count").scrollIntoView().click();
   });
 
   H.getDashboardCard(1).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("Count").click();
+    getPopoverItem("Count").scrollIntoView().click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 
   H.filterWidget().eq(0).click();
   H.popover().within(() => {
@@ -535,17 +534,15 @@ export function setup1stStageBreakoutFilter() {
 
   H.getDashboardCard(0).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("Category", 1).click();
+    getPopoverItem("Category", 1).scrollIntoView().click();
   });
 
   H.getDashboardCard(1).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("Category", 1).click();
+    getPopoverItem("Category", 1).scrollIntoView().click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 
   H.filterWidget().eq(0).click();
   H.popover().within(() => {
@@ -570,7 +567,7 @@ export function setup2ndStageExplicitJoinFilter() {
     getPopoverItem("Reviewer", 1).click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 
   H.filterWidget().eq(0).click();
   H.popover()
@@ -591,17 +588,15 @@ export function setup2ndStageCustomColumnFilter() {
 
   H.getDashboardCard(0).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("5 * Count").click();
+    getPopoverItem("5 * Count").scrollIntoView().click();
   });
 
   H.getDashboardCard(1).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("5 * Count").click();
+    getPopoverItem("5 * Count").scrollIntoView().click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 }
 
 export function apply2ndStageCustomColumnFilter() {
@@ -622,14 +617,12 @@ export function setup2ndStageAggregationFilter() {
 
   H.getDashboardCard(0).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("Count", 1).click();
+    getPopoverItem("Count", 1).scrollIntoView().click();
   });
 
   H.getDashboardCard(1).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("Count", 1).click();
+    getPopoverItem("Count", 1).scrollIntoView().click();
   });
 
   H.getDashboardCard(2).findByText("Select…").click();
@@ -642,7 +635,7 @@ export function setup2ndStageAggregationFilter() {
     getPopoverItem("Count").click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
 }
 
 export function apply2ndStageAggregationFilter() {
@@ -661,27 +654,34 @@ export function setup2ndStageBreakoutFilter() {
 
   H.getDashboardCard(0).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("Category", 2).click();
+    getPopoverItem("Product → Category", 1).scrollIntoView().click();
   });
+  closeToasts();
 
   H.getDashboardCard(1).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverList().scrollTo("bottom");
-    getPopoverItem("Category", 2).click();
+    getPopoverItem("Product → Category", 1).scrollIntoView().click();
   });
 
   H.getDashboardCard(2).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverItem("Products Via Product ID Category").click();
+    getPopoverItem("Product → Category").scrollIntoView().click();
   });
+
+  closeToasts();
 
   H.getDashboardCard(3).findByText("Select…").click();
   H.popover().within(() => {
-    getPopoverItem("Products Via Product ID Category").click();
+    getPopoverItem("Product → Category").scrollIntoView().click();
   });
 
-  H.saveDashboard({ waitMs: 250 });
+  H.saveDashboard();
+}
+
+function closeToasts() {
+  H.undoToast().each((toast) => {
+    cy.wrap(toast).icon("close").click();
+  });
 }
 
 export function apply2ndStageBreakoutFilter() {
@@ -712,7 +712,7 @@ export function getPopoverItem(name: string, index = 0) {
    * Without scrollIntoView() the popover may scroll automatically to a different
    * place when clicking the item (unclear why).
    */
-  // eslint-disable-next-line no-unsafe-element-filtering
+  // eslint-disable-next-line metabase/no-unsafe-element-filtering
   return cy.findAllByText(name).eq(index).scrollIntoView();
 }
 
@@ -722,33 +722,19 @@ export function clickAway() {
 
 export function goBackToDashboard() {
   cy.findByLabelText("Back to Test Dashboard").click();
-  cy.wait("@getDashboard");
+  cy.findByTestId("dashboard-grid").should("be.visible");
 }
 
-export function getDashboardId(): Cypress.Chainable<number> {
-  return cy
-    .get("@dashboardId")
-    .then((dashboardId) => dashboardId as unknown as number);
+export function getDashboardId(): Cypress.Chainable<DashboardId> {
+  return cy.get<DashboardId>("@dashboardId").then((dashboardId) => dashboardId);
 }
 
-export function waitForPublicDashboardData() {
-  // tests with public dashboards always have 4 dashcards
-  cy.wait([
-    "@publicDashboardData",
-    "@publicDashboardData",
-    "@publicDashboardData",
-    "@publicDashboardData",
-  ]);
+export function waitForPublicDashboardData(requestCount: number) {
+  cy.wait(Array(requestCount).fill("@publicDashboardData"));
 }
 
-export function waitForEmbeddedDashboardData() {
-  // tests with embedded dashboards always have 4 dashcards
-  cy.wait([
-    "@embeddedDashboardData",
-    "@embeddedDashboardData",
-    "@embeddedDashboardData",
-    "@embeddedDashboardData",
-  ]);
+export function waitForEmbeddedDashboardData(requestCount: number) {
+  cy.wait(Array(requestCount).fill("@embeddedDashboardData"));
 }
 
 export function verifyDashcardMappingOptions(
@@ -765,8 +751,10 @@ export function verifyNoDashcardMappingOptions(dashcardIndex: number) {
     .findByText("No valid fields")
     .should("be.visible");
 
-  H.getDashboardCard(dashcardIndex).findByText("No valid fields").realHover();
-  cy.findByRole("tooltip")
+  H.getDashboardCard(dashcardIndex)
+    .findByText("No valid fields")
+    .trigger("mouseenter");
+  H.tooltip()
     .findByText(
       "This card doesn't have any fields or parameters that can be mapped to this parameter type.",
     )
@@ -787,24 +775,33 @@ export function verifyPopoverMappingOptions(sections: MappingSection[]) {
   H.popover().within(() => {
     getPopoverItems().then(($items) => {
       let index = 0;
+      let offsetForSearch = 0;
+
+      if (index === 0 && $items[index].querySelector("input")) {
+        // Skip search box if it is the first item
+        ++index;
+        offsetForSearch = 1;
+      }
 
       for (const [sectionName, columnNames] of sections) {
         if (sectionName) {
-          const item = cy.wrap($items[index]);
-          item.scrollIntoView(); // the list is virtualized, we need to keep scrolling to see all the items
-          item.should("have.text", sectionName);
+          // the list is virtualized, we need to keep scrolling to see all the items
+          cy.wrap($items[index])
+            .scrollIntoView()
+            .should("have.text", sectionName);
           ++index;
         }
 
         for (const columnName of columnNames) {
-          const item = cy.wrap($items[index]);
-          item.scrollIntoView();
-          item.findByLabelText(columnName).should("be.visible");
+          cy.wrap($items[index])
+            .scrollIntoView()
+            .findByLabelText(columnName)
+            .should("be.visible");
           ++index;
         }
       }
 
-      expect($items.length).to.eq(expectedItemsCount);
+      expect($items.length).to.eq(expectedItemsCount + offsetForSearch);
     });
   });
 }
@@ -838,10 +835,12 @@ export function verifyDashcardCellValues({
   for (let valueIndex = 0; valueIndex < values.length; ++valueIndex) {
     const value = values[valueIndex];
 
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     H.getDashboardCard(dashcardIndex)
-      .findByRole("row")
-      .findAllByRole("gridcell")
+      .findByTestId("table-body")
+      .findAllByRole("row")
+      .first()
+      .findAllByTestId("cell-data")
       .eq(valueIndex)
       .should("have.text", value);
   }
@@ -854,7 +853,10 @@ export function verifyDashcardCellValues({
   for (let valueIndex = 0; valueIndex < values.length; ++valueIndex) {
     const value = values[valueIndex];
 
-    // eslint-disable-next-line no-unsafe-element-filtering
-    cy.findAllByRole("gridcell").eq(valueIndex).should("have.text", value);
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
+    H.tableInteractiveBody()
+      .findAllByTestId("cell-data")
+      .eq(valueIndex)
+      .should("have.text", value);
   }
 }

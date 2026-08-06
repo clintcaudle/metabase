@@ -9,9 +9,9 @@
    [metabase.channel.email.messages :as messages]
    [metabase.channel.settings :as channel.settings]
    [metabase.config.core :as config]
-   [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.premium-features.core :as premium-features]
    [metabase.task.core :as task]
+   [metabase.util.honey-sql-2 :as h2x]
    [metabase.util.log :as log]
    [toucan2.core :as t2])
   (:import
@@ -37,8 +37,8 @@
              :join [[:report_card :rc] [:= :rc.creator_id :u.id]
                     [:report_dashboard :d] [:= :d.creator_id :u.id]]
              :where [:and
-                     [:>= :rc.created_at (sql.qp/add-interval-honeysql-form (mdb/db-type) :%now -2 :month)]
-                     [:>= :d.created_at (sql.qp/add-interval-honeysql-form (mdb/db-type) :%now -2 :month)]
+                     [:>= :rc.created_at (h2x/add-interval-honeysql-form (mdb/db-type) :%now -2 :month)]
+                     [:>= :d.created_at (h2x/add-interval-honeysql-form (mdb/db-type) :%now -2 :month)]
                      [:= :u.is_active true]
                      [:= :u.type "personal"]
                      (when has-whitelabelling? [:= :u.is_superuser true])]
@@ -99,7 +99,7 @@
         (try
           (messages/send-creator-sentiment-email! creator (blob creator))
           (catch Throwable e
-            (log/error e "Problem sending creator sentiment email:")))))))
+            (log/errorf "Problem sending creator sentiment email: %s" (ex-message e))))))))
 
 (task/defjob ^{:doc "Sends out a monthly survey to a portion of the creators."} CreatorSentimentEmail [_]
   (let [current-week (.get (t/local-date) (.weekOfWeekBasedYear (WeekFields/of (Locale/getDefault))))]
@@ -116,6 +116,6 @@
                  (triggers/with-identity (triggers/key creator-sentiment-emails-trigger-key))
                  (triggers/start-now)
                  (triggers/with-schedule
-                   ;; Fire at 2am every saturday
+                  ;; Fire at 2am every saturday
                   (cron/cron-schedule "0 0 2 ? * 7")))]
     (task/schedule-task! job trigger)))

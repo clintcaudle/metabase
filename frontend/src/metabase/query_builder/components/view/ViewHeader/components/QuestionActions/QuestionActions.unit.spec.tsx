@@ -1,5 +1,8 @@
 import userEvent from "@testing-library/user-event";
+import fetchMock from "fetch-mock";
 
+import { setupCardsForTableEndpoint } from "__support__/server-mocks";
+import { setupListNotificationEndpoints } from "__support__/server-mocks/notification";
 import { setupGetUserKeyValueEndpoint } from "__support__/server-mocks/user-key-value";
 import { createMockEntitiesState } from "__support__/store";
 import {
@@ -11,7 +14,11 @@ import {
   within,
 } from "__support__/ui";
 import * as modelActions from "metabase/query_builder/actions/models";
-import { MODAL_TYPES } from "metabase/query_builder/constants";
+import { MODAL_TYPES } from "metabase/querying/constants";
+import {
+  createMockQueryBuilderState,
+  createMockState,
+} from "metabase/redux/store/mocks";
 import { getMetadata } from "metabase/selectors/metadata";
 import type Question from "metabase-lib/v1/Question";
 import type { Card } from "metabase-types/api";
@@ -21,10 +28,6 @@ import {
   createMockTable,
 } from "metabase-types/api/mocks";
 import { createSampleDatabase } from "metabase-types/api/mocks/presets";
-import {
-  createMockQueryBuilderState,
-  createMockState,
-} from "metabase-types/store/mocks";
 
 import { QuestionActions } from "./QuestionActions";
 
@@ -56,18 +59,26 @@ interface SetupOpts {
   card: Card;
   hasDataPermissions?: boolean;
   hasAcknowledgedModelModal?: boolean;
+  cardsBasedOnUploadTable?: Card[];
 }
 
 function setup({
   card,
   hasDataPermissions = true,
   hasAcknowledgedModelModal = false,
+  cardsBasedOnUploadTable = [card],
 }: SetupOpts) {
   setupGetUserKeyValueEndpoint({
     namespace: "user_acknowledgement",
     key: "turn_into_model_modal",
     value: hasAcknowledgedModelModal,
   });
+
+  setupListNotificationEndpoints({ card_id: card.id }, []);
+
+  if (typeof card.based_on_upload === "number") {
+    setupCardsForTableEndpoint(card.based_on_upload, cardsBasedOnUploadTable);
+  }
 
   const state = createMockState({
     entities: createMockEntitiesState({
@@ -81,6 +92,7 @@ function setup({
   });
 
   const metadata = getMetadata(state);
+  // Unjustified type cast. FIXME
   const question = metadata.question(card.id) as Question;
   const onOpenModal = jest.fn();
   const onSetQueryBuilderMode = jest.fn();
@@ -119,7 +131,7 @@ describe("QuestionActions", () => {
     },
   );
 
-  describe("model query & metadata", () => {
+  describe("model query & columns", () => {
     it("should allow to edit the model with write data & collection permissions", async () => {
       const { onSetQueryBuilderMode } = setup({
         card: createMockCard({
@@ -142,7 +154,7 @@ describe("QuestionActions", () => {
       await userEvent.click(screen.getByText("Edit metadata"));
       await waitFor(() => {
         expect(onSetQueryBuilderMode).toHaveBeenCalledWith("dataset", {
-          datasetEditorTab: "metadata",
+          datasetEditorTab: "columns",
         });
       });
     });
@@ -298,6 +310,76 @@ describe("QuestionActions", () => {
     });
   });
 
+  describe("uploading data to an upload-backed model", () => {
+    const UPLOAD_TABLE_ID = 42;
+
+    const uploadModelCard = createMockCard({
+      id: 1,
+      type: "model",
+      can_write: true,
+      based_on_upload: UPLOAD_TABLE_ID,
+    });
+
+    it("should warn before uploading when other models are based on the same uploaded table", async () => {
+      setup({
+        card: uploadModelCard,
+        cardsBasedOnUploadTable: [
+          uploadModelCard,
+          createMockCard({
+            id: 2,
+            name: "Original model",
+            type: "model",
+            based_on_upload: UPLOAD_TABLE_ID,
+          }),
+          createMockCard({
+            id: 3,
+            name: "Another duplicate",
+            type: "model",
+            based_on_upload: UPLOAD_TABLE_ID,
+          }),
+        ],
+      });
+
+      await waitForCardsBasedOnUploadTable();
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Upload data to this model" }),
+      );
+      const appendMenuItem = await screen.findByRole("menuitem", {
+        name: /Append data to this model/,
+      });
+      await waitFor(() => expect(appendMenuItem).toBeEnabled());
+      await userEvent.click(appendMenuItem);
+
+      const modal = await screen.findByRole("dialog", {
+        name: "Upload data to this model?",
+      });
+      expect(
+        within(modal).getByText(/Original model, Another duplicate/),
+      ).toBeInTheDocument();
+    });
+
+    it("should not warn when no other models are based on the same uploaded table", async () => {
+      setup({
+        card: uploadModelCard,
+        cardsBasedOnUploadTable: [uploadModelCard],
+      });
+
+      await waitForCardsBasedOnUploadTable();
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Upload data to this model" }),
+      );
+      const appendMenuItem = await screen.findByRole("menuitem", {
+        name: /Append data to this model/,
+      });
+      await waitFor(() => expect(appendMenuItem).toBeEnabled());
+      await userEvent.click(appendMenuItem);
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
+
   it("should not render the menu when there are no menu items", () => {
     setup({
       card: createMockCard({
@@ -315,4 +397,14 @@ describe("QuestionActions", () => {
 async function openActionsMenu() {
   await userEvent.click(getIcon("ellipsis"));
   expect(await screen.findByRole("menu")).toBeInTheDocument();
+}
+
+async function waitForCardsBasedOnUploadTable() {
+  await waitFor(() => {
+    expect(
+      fetchMock.callHistory.called("path:/api/card", {
+        query: { f: "table" },
+      }),
+    ).toBe(true);
+  });
 }

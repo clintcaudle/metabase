@@ -1,16 +1,18 @@
 import cx from "classnames";
 import { useEffect } from "react";
-import { push } from "react-router-redux";
 import { jt, t } from "ttag";
 
 import { useGetUserQuery } from "metabase/api";
-import { ConfirmModal } from "metabase/components/ConfirmModal";
-import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
-import PasswordReveal from "metabase/components/PasswordReveal";
-import Link from "metabase/core/components/Link";
+import { ConfirmModal } from "metabase/common/components/ConfirmModal";
+import { Link } from "metabase/common/components/Link";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
+import { PasswordReveal } from "metabase/common/components/PasswordReveal";
 import CS from "metabase/css/core/index.css";
-import { useDispatch, useSelector } from "metabase/lib/redux";
-import { getSetting, isSsoEnabled } from "metabase/selectors/settings";
+import { PLUGIN_TENANTS } from "metabase/plugins";
+import { useDispatch, useSelector } from "metabase/redux";
+import { useNavigate } from "metabase/router";
+import { isSsoEnabled } from "metabase/selectors/settings";
+import { getSetting } from "metabase/settings";
 import { Box } from "metabase/ui";
 import type { User } from "metabase-types/api";
 
@@ -18,12 +20,14 @@ import { clearTemporaryPassword } from "../people";
 import { getUserTemporaryPassword } from "../selectors";
 
 interface UserSuccessModalProps {
-  params: { userId: string };
+  params: { userId?: string };
 }
 
 export function UserSuccessModal({ params }: UserSuccessModalProps) {
-  const userId = parseInt(params.userId);
+  const userId = parseInt(params.userId ?? "");
   const { data: user, isLoading, error } = useGetUserQuery(userId);
+
+  const isExternalUser = PLUGIN_TENANTS.isExternalUser(user);
 
   const temporaryPassword = useSelector((state) =>
     getUserTemporaryPassword(state, { userId }),
@@ -33,9 +37,10 @@ export function UserSuccessModal({ params }: UserSuccessModalProps) {
     getSetting(state, "enable-password-login"),
   );
   const dispatch = useDispatch();
+  const navigate = useNavigate();
 
   const handleClose = () => {
-    dispatch(push("/admin/people"));
+    navigate(isExternalUser ? "/admin/people/tenants/people" : "/admin/people");
   };
 
   useEffect(() => {
@@ -43,6 +48,12 @@ export function UserSuccessModal({ params }: UserSuccessModalProps) {
       dispatch(clearTemporaryPassword(userId));
     };
   }, [userId, dispatch]);
+
+  useEffect(() => {
+    if (isExternalUser && !temporaryPassword) {
+      navigate("/admin/people/tenants/people", { replace: true });
+    }
+  }, [isExternalUser, temporaryPassword, navigate]);
 
   if (!user || isLoading || error != null) {
     return <LoadingAndErrorWrapper loading={isLoading} error={error} />;
@@ -56,7 +67,7 @@ export function UserSuccessModal({ params }: UserSuccessModalProps) {
       onClose={handleClose}
       onConfirm={handleClose}
       closeButtonText={null}
-      confirmButtonProps={{ color: "brand" }}
+      confirmButtonProps={{ color: "core-brand" }}
       confirmButtonText={t`Done`}
       message={
         temporaryPassword ? (

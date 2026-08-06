@@ -1,13 +1,18 @@
 import {
+  createMockSettingsState,
+  createMockState,
+} from "metabase/redux/store/mocks";
+import {
   createMockTokenFeatures,
   createMockTokenStatus,
 } from "metabase-types/api/mocks";
-import {
-  createMockSettingsState,
-  createMockState,
-} from "metabase-types/store/mocks";
 
-import { getDocsUrl, getIsPaidPlan, getUpgradeUrl } from "./settings";
+import {
+  getDocsUrl,
+  getIsPaidPlan,
+  getStoreUrl,
+  getUpgradeUrl,
+} from "./settings";
 
 describe("getUpgradeUrl", () => {
   it.each([
@@ -129,6 +134,65 @@ describe("getDocsUrl", () => {
 
     expect(getDocsUrl(state, { page: "foo/bar", anchor: "baz" })).toBe(
       "https://www.metabase.com/docs/v0.41/foo/bar.html#baz",
+    );
+  });
+
+  it("handles docs site search with utm params", () => {
+    const state = createMockState({
+      settings: createMockSettingsState({
+        "token-features": createMockTokenFeatures({ hosting: false }),
+      }),
+    });
+
+    const url = new URL(
+      getDocsUrl(state, {
+        searchQuery: "kitten meow",
+        utm: {
+          utm_medium: "command-palette",
+          utm_campaign: "docs-search",
+        },
+      }),
+    );
+    expect(url.pathname).toBe("/search");
+    expect(url.searchParams.get("query")).toBe("kitten meow");
+    expect(url.searchParams.get("utm_source")).toBe("product");
+    expect(url.searchParams.get("utm_medium")).toBe("command-palette");
+    expect(url.searchParams.get("utm_campaign")).toBe("docs-search");
+    expect(url.searchParams.get("source_plan")).toBe("oss");
+  });
+});
+
+describe("getStoreUrlFromState", () => {
+  it("should return the correct URL", () => {
+    const state = createMockState({
+      settings: createMockSettingsState({
+        "store-url": "https://test-store.metabase.com",
+      }),
+    });
+
+    expect(getStoreUrl(state)).toBe("https://test-store.metabase.com/");
+
+    expect(getStoreUrl(state, "account/manage/plans")).toBe(
+      "https://test-store.metabase.com/account/manage/plans",
+    );
+  });
+
+  it("should return for falsey values", () => {
+    const stateUndefined = createMockState({
+      settings: createMockSettingsState({
+        "store-url": undefined,
+      }),
+    });
+
+    const stateCorruptedString = createMockState({
+      settings: createMockSettingsState({
+        "store-url": "false",
+      }),
+    });
+
+    expect(getStoreUrl(stateUndefined)).toBe("https://store.metabase.com/");
+    expect(getStoreUrl(stateCorruptedString)).toBe(
+      "https://store.metabase.com/",
     );
   });
 });

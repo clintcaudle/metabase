@@ -2,20 +2,20 @@ import { Group } from "@visx/group";
 import { Line, Polygon } from "@visx/shape";
 import { Fragment } from "react";
 
-import type {
-  FunnelDatum,
-  FunnelSettings,
-} from "metabase/static-viz/components/FunnelChart/types";
+import type { FunnelSettings } from "metabase/static-viz/components/FunnelChart/types";
 import {
   calculateFunnelPolygonPoints,
-  calculateFunnelSteps,
-  calculateStepOpacity,
   getFormattedStep,
   groupData,
   reorderData,
 } from "metabase/static-viz/components/FunnelChart/utils/funnel";
 import { Text } from "metabase/static-viz/components/Text";
 import { measureTextHeight } from "metabase/static-viz/lib/text";
+import type { FunnelDatum } from "metabase/visualizations/lib/funnel/types";
+import {
+  calculateFunnelSteps,
+  calculateStepOpacity,
+} from "metabase/visualizations/lib/funnel/utils";
 
 import Watermark from "../../watermark.svg?component";
 
@@ -31,11 +31,11 @@ const layout = {
   nameFontSize: 16,
   stepTextOffset: 8,
   colors: {
-    // eslint-disable-next-line no-color-literals
+    // eslint-disable-next-line metabase/no-color-literals
     textMedium: "#949aab",
-    // eslint-disable-next-line no-color-literals
+    // eslint-disable-next-line metabase/no-color-literals
     brand: "#509ee3",
-    // eslint-disable-next-line no-color-literals
+    // eslint-disable-next-line metabase/no-color-literals
     border: "#f0f0f0",
   },
   paddingLeft: 10,
@@ -186,6 +186,8 @@ const Funnel = ({ data, settings, hasDevWatermark = false }: FunnelProps) => {
           height={layout.height}
           width={layout.width}
           preserveAspectRatio="xMinYMin slice"
+          fill={palette.textMedium}
+          opacity={0.2}
         />
       )}
     </svg>

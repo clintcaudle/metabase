@@ -1,7 +1,7 @@
 (ns build
   (:require
-   [build-drivers :as build-drivers]
    [build.licenses :as license]
+   [build.python :as build.python]
    [build.uberjar :as uberjar]
    [build.version-properties :as version-properties]
    [clojure.edn :as edn]
@@ -28,22 +28,24 @@
                      :oss "oss")]
     (u/step (format "Build frontend with MB_EDITION=%s" mb-edition)
       (when-not (env/env :ci)
-        (u/step "Run 'yarn' to download JavaScript dependencies"
-          (u/sh {:dir u/project-root-directory} "yarn")))
+        (u/step "Run 'bun install' to download JavaScript dependencies"
+          (u/sh {:dir u/project-root-directory} "bun" "install")))
       (u/step "Build frontend"
         (u/sh {:dir u/project-root-directory
                :env {"PATH"       (env/env :path)
                      "HOME"       (env/env :user-home)
                      "WEBPACK_BUNDLE"   "production"
-                     "MB_EDITION" mb-edition}}
-              "yarn" "build-release"))
+                     "MB_EDITION" mb-edition
+                     "EMIT_BUNDLE_STATS" (or (env/env :emit-bundle-stats) "false")
+                     "INSTRUMENT_COVERAGE" (or (env/env :instrument-coverage) "false")}}
+              "bun" "run" "build-release"))
       (u/step "Build static viz"
         (u/sh {:dir u/project-root-directory
                :env {"PATH"       (env/env :path)
                      "HOME"       (env/env :user-home)
                      "WEBPACK_BUNDLE"   "production"
                      "MB_EDITION" mb-edition}}
-              "yarn" "build-release:static-viz"))
+              "bun" "run" "build-release:static-viz"))
       (u/announce "Frontend built successfully."))))
 
 (defn- build-licenses!
@@ -64,15 +66,9 @@
           (run! (comp (partial u/error "Missing License: %s") first)
                 without-license))
         (u/announce "License information generated at %s" output-filename)))
-
-    (u/step "Run `yarn licenses generate-disclaimer`"
-      (let [license-text (str/join \newline
-                                   (u/sh {:dir    u/project-root-directory
-                                          :quiet? true}
-                                         "yarn" "licenses" "generate-disclaimer"))]
-        (spit (u/filename u/project-root-directory
-                          "resources"
-                          "license-frontend-third-party.txt") license-text)))))
+    (u/step "Run `bun run generate-license-disclaimer`"
+      (u/sh {:dir u/project-root-directory}
+            "bun" "run" "generate-license-disclaimer"))))
 
 (defn- build-uberjar! [edition]
   {:pre [(#{:oss :ee} edition)]}
@@ -93,8 +89,10 @@
                    (build-frontend! edition))
    :licenses     (fn [{:keys [edition]}]
                    (build-licenses! edition))
-   :drivers      (fn [{:keys [edition]}]
-                   (build-drivers/build-drivers! edition))
+   #_#_:drivers      (fn [{:keys [edition]}]
+                       (build-drivers/build-drivers! edition))
+   :python       (fn [{:keys [edition]}]
+                   (build.python/build-python-deps! edition))
    :uberjar      (fn [{:keys [edition]}]
                    (build-uberjar! edition))))
 
@@ -108,7 +106,7 @@
             steps   (keys all-steps)}}]
    (let [version (or version
                      (version-properties/current-snapshot-version edition))
-         start-time-ms (System/currentTimeMillis)]
+         timer         (u/start-timer)]
      (u/step (format "Running build steps for %s version %s: %s"
                      (case edition
                        :oss "Community (OSS) Edition"
@@ -121,7 +119,7 @@
                                                       {:step        step-name
                                                        :valid-steps (keys all-steps)})))]]
          (step-fn {:version version, :edition edition})
-         (u/announce "Did %s in %d ms." step-name (- (System/currentTimeMillis) start-time-ms)))
+         (u/announce "Did %s in %d ms." step-name (u/since-ms timer)))
        (u/announce "All build steps finished.")))))
 
 (defn build-cli

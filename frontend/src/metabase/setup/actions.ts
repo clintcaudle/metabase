@@ -1,38 +1,45 @@
 import { createAction } from "@reduxjs/toolkit";
 import { t } from "ttag";
 
-import { createDatabase } from "metabase/admin/databases/database";
+import { refetchCurrentUser, setupApi, userApi } from "metabase/api";
+import { loadLocalization } from "metabase/api/localization";
+import { isEmailAlreadyInUse } from "metabase/api/utils/errors";
+import { runRtkEndpoint } from "metabase/api/utils/run-rtk-endpoint";
+import { trackUserInvited } from "metabase/common/analytics";
+import { createDatabase } from "metabase/redux/databases";
+import type {
+  InviteInfo,
+  Locale,
+  SetupStep,
+  State,
+  UserInfo,
+} from "metabase/redux/store";
+import { createAsyncThunk } from "metabase/redux/utils";
 import {
-  initializeSettings,
-  updateSetting,
-  updateSettings,
-} from "metabase/admin/settings/settings";
-import { loadLocalization } from "metabase/lib/i18n";
-import { createAsyncThunk } from "metabase/lib/redux";
-import MetabaseSettings from "metabase/lib/settings";
-import { getSetting } from "metabase/selectors/settings";
-import { SetupApi } from "metabase/services";
+  getSetting,
+  refetchSiteSettings,
+  settingsApi,
+} from "metabase/settings";
+import MetabaseSettings from "metabase/utils/settings";
 import type { DatabaseData, Settings, UsageReason } from "metabase-types/api";
-import type { InviteInfo, Locale, State, UserInfo } from "metabase-types/store";
 
 import {
   trackAddDataLaterClicked,
+  trackAiProviderConnected,
+  trackAiSetupLaterClicked,
+  trackAiSetupStarted,
   trackDatabaseSelected,
   trackLicenseTokenStepSubmitted,
   trackTrackingChanged,
   trackUsageReasonSelected,
 } from "./analytics";
 import {
-  getAvailableLocales,
-  getInvite,
   getIsEmbeddingUseCase,
   getLocale,
   getNextStep,
-  getSetupToken,
   getUsageReason,
 } from "./selectors";
-import type { SetupStep } from "./types";
-import { getDefaultLocale, getLocales, getUserToken } from "./utils";
+import { getDefaultLocale, getLocales } from "./utils";
 
 interface ThunkConfig {
   state: State;
@@ -41,23 +48,11 @@ interface ThunkConfig {
 export const goToNextStep = createAsyncThunk(
   "metabase/setup/goToNextStep",
   async (_, { getState, dispatch }) => {
-    const state = getState() as State;
+    const state = getState();
     const nextStep = getNextStep(state);
     dispatch(selectStep(nextStep));
     if (nextStep === "completed") {
       dispatch(setEmbeddingHomepageFlags());
-    }
-  },
-);
-
-export const LOAD_USER_DEFAULTS = "metabase/setup/LOAD_USER_DEFAULTS";
-export const loadUserDefaults = createAsyncThunk(
-  LOAD_USER_DEFAULTS,
-  async (): Promise<UserInfo | undefined> => {
-    const token = getUserToken();
-    if (token) {
-      const defaults = await SetupApi.user_defaults({ token });
-      return defaults.user;
     }
   },
 );
@@ -68,7 +63,7 @@ export const loadLocaleDefaults = createAsyncThunk<
   void,
   ThunkConfig
 >(LOAD_LOCALE_DEFAULTS, async (_, { getState }) => {
-  const data = getAvailableLocales(getState());
+  const data = getSetting(getState(), "available-locales");
   const locale = getDefaultLocale(getLocales(data));
   if (locale) {
     await loadLocalization(locale.code);
@@ -80,7 +75,6 @@ export const LOAD_DEFAULTS = "metabase/setup/LOAD_DEFAULTS";
 export const loadDefaults = createAsyncThunk<void, void, ThunkConfig>(
   LOAD_DEFAULTS,
   (_, { dispatch }) => {
-    dispatch(loadUserDefaults());
     dispatch(loadLocaleDefaults());
   },
 );
@@ -96,26 +90,25 @@ export const updateLocale = createAsyncThunk(
   },
 );
 
-export const SUBMIT_LANGUAGE = "metabase/setup/SUBMIT_LANGUAGE";
-export const submitLanguage = createAction(SUBMIT_LANGUAGE);
-
 export const submitUser = createAsyncThunk<void, UserInfo, ThunkConfig>(
   "metabase/setup/SUBMIT_USER_INFO",
   async (user: UserInfo, { dispatch, getState, rejectWithValue }) => {
-    const token = getSetupToken(getState());
-    const invite = getInvite(getState());
+    const token = getSetting(getState(), "setup-token");
     const locale = getLocale(getState());
 
     try {
-      await SetupApi.create({
-        token,
-        user,
-        invite,
-        prefs: {
-          site_name: user.site_name,
-          site_locale: locale?.code,
+      await runRtkEndpoint(
+        {
+          token,
+          user,
+          prefs: {
+            site_name: user.site_name,
+            site_locale: locale?.code,
+          },
         },
-      });
+        dispatch,
+        setupApi.endpoints.createSetup,
+      );
     } catch (error) {
       return rejectWithValue(error);
     }
@@ -123,7 +116,9 @@ export const submitUser = createAsyncThunk<void, UserInfo, ThunkConfig>(
     MetabaseSettings.set("setup-token", null);
     dispatch(goToNextStep());
     //  load the settings after the user is logged, needed later by setEmbeddingHomepageFlags
-    dispatch(initializeSettings());
+    dispatch(refetchSiteSettings());
+    //  the AI config step needs to know the created user is an admin
+    dispatch(refetchCurrentUser());
   },
 );
 
@@ -175,8 +170,59 @@ export const skipDatabase = createAsyncThunk(
 export const SUBMIT_USER_INVITE = "metabase/setup/SUBMIT_USER_INVITE";
 export const submitUserInvite = createAsyncThunk(
   SUBMIT_USER_INVITE,
-  (_: InviteInfo, { dispatch }) => {
-    dispatch(goToNextStep());
+  async (inviteInfo: InviteInfo, { dispatch, rejectWithValue }) => {
+    try {
+      await dispatch(
+        userApi.endpoints.createUser.initiate({
+          email: inviteInfo.email,
+          first_name: inviteInfo.first_name || undefined,
+          last_name: inviteInfo.last_name || undefined,
+          source: "setup",
+        }),
+      ).unwrap();
+      trackUserInvited({
+        triggeredFrom: "setup",
+        targetId: null,
+        result: "success",
+        eventDetail: "new_user",
+      });
+      dispatch(goToNextStep());
+    } catch (error) {
+      trackUserInvited({
+        triggeredFrom: "setup",
+        targetId: null,
+        result: "failure",
+        eventDetail: isEmailAlreadyInUse(error) ? "existing_user" : null,
+      });
+      return rejectWithValue(error);
+    }
+  },
+);
+
+export const START_AI_CONFIG = "metabase/setup/START_AI_CONFIG";
+export const startAiConfig = createAsyncThunk(
+  START_AI_CONFIG,
+  (_: void, { dispatch }) => {
+    trackAiSetupStarted();
+    dispatch(selectStep("ai_config"));
+  },
+);
+
+export const SUBMIT_AI_CONFIG = "metabase/setup/SUBMIT_AI_CONFIG";
+export const submitAiConfig = createAsyncThunk(
+  SUBMIT_AI_CONFIG,
+  (provider: string | undefined, { dispatch }) => {
+    trackAiProviderConnected(provider);
+    dispatch(selectStep("completed"));
+  },
+);
+
+export const SKIP_AI_CONFIG = "metabase/setup/SKIP_AI_CONFIG";
+export const skipAiConfig = createAsyncThunk(
+  SKIP_AI_CONFIG,
+  (_: void, { dispatch }) => {
+    trackAiSetupLaterClicked();
+    dispatch(selectStep("completed"));
   },
 );
 
@@ -186,11 +232,11 @@ export const submitLicenseToken = createAsyncThunk(
     try {
       if (licenseToken) {
         await dispatch(
-          updateSetting({
+          settingsApi.endpoints.updateSetting.initiate({
             key: "premium-embedding-token",
             value: licenseToken,
           }),
-        );
+        ).unwrap();
       }
       trackLicenseTokenStepSubmitted(Boolean(licenseToken));
     } catch (err) {
@@ -209,11 +255,11 @@ export const updateTracking = createAsyncThunk(
   async (isTrackingAllowed: boolean, { dispatch, rejectWithValue }) => {
     try {
       await dispatch(
-        updateSetting({
+        settingsApi.endpoints.updateSetting.initiate({
           key: "anon-tracking-enabled",
           value: isTrackingAllowed,
         }),
-      );
+      ).unwrap();
       trackTrackingChanged(isTrackingAllowed);
       MetabaseSettings.set("anon-tracking-enabled", isTrackingAllowed);
     } catch (error) {
@@ -239,8 +285,12 @@ export const setEmbeddingHomepageFlags = createAsyncThunk(
       settingsToChange["embedding-homepage"] = "visible";
     }
 
+    if (interestedInEmbedding) {
+      settingsToChange["setup-embedding-autoenabled"] = true;
+    }
+
     settingsToChange["setup-license-active-at-setup"] = isLicenseActive;
 
-    dispatch(updateSettings(settingsToChange));
+    dispatch(settingsApi.endpoints.updateSettings.initiate(settingsToChange));
   },
 );

@@ -41,7 +41,7 @@
    [metabase.util.encryption :as encryption]
    [metabase.util.encryption-test :as encryption-test]
    [metabase.util.json :as json]
-   [metabase.warehouses.api-test :as api.database-test]
+   [metabase.warehouses-rest.api-test :as api.database-test]
    [metabase.warehouses.models.database :as database]
    [toucan2.core :as t2])
   (:import
@@ -109,6 +109,10 @@
                             :details       (json/encode {:channel "general"})
                             :schedule_type "daily"
                             :schedule_hour 15})
+      :metabase_table    (with-timestamped
+                           {:name (mt/random-name)
+                            :active true})
+      :permissions_group {:name (mt/random-name)}
       {})))
 
 (defn- new-instance-with-default
@@ -439,14 +443,12 @@
                  :row 0}
                 {:id  tab1-card2-id
                  :row 2}
-
-               ;; tab 2
+                ;; tab 2
                 {:id  tab2-card1-id
                  :row 8}
                 {:id  tab2-card2-id
                  :row 12}
-
-               ;; tab 3
+                ;; tab 3
                 {:id  tab4-card1-id
                  :row 14}
                 {:id  tab4-card2-id
@@ -483,7 +485,6 @@
                                                         :model_id  1
                                                         :user_id   user-id
                                                         :timestamp :%now}))]
-
       (migrate!)
       (testing "forward migration migrate correclty"
         (is (= [{:row 15 :col 0  :size_x 16 :size_y 8}
@@ -526,7 +527,6 @@
                                                         :model_id  1
                                                         :user_id   user-id
                                                         :timestamp :%now}))]
-
       (migrate!)
       (testing "forward migration migrate correclty and ignore failures"
         (is (= [{:id 1 :row 0 :col 0 :size_x 5 :size_y 4}
@@ -591,10 +591,10 @@
                                 acc-row []]
                            (let [size-x  (inc (math/round (* 9 (math/random))))
                                  new-col (+ col size-x)]
-                              ;; we want to ensure we have a card at the end of the row
+                             ;; we want to ensure we have a card at the end of the row
                              (if (>= new-col 18)
                                (cons [col row (- 18 col) size-y] acc-row)
-                                ;; probability of skipping is 5%
+                               ;; probability of skipping is 5%
                                (if (> (math/random) 0.95)
                                  (recur (+ col size-x) acc-row)
                                  (recur (+ col size-x) (cons [col row size-x size-y] acc-row)))))))))))]
@@ -606,17 +606,14 @@
 (deftest ^:mb/old-migrations-test migrated-grid-18-to-24-stretch-test
   (let [migrated-to-18   (map @#'custom-migrations/migrate-dashboard-grid-from-18-to-24 big-random-dashboard-cards)
         rollbacked-to-24 (map @#'custom-migrations/migrate-dashboard-grid-from-24-to-18 migrated-to-18)]
-
     (testing "make sure the initial arry is good to start with"
       (is (true? (no-cards-are-out-of-grid-and-has-size-0? big-random-dashboard-cards 18)))
       (is (true? (no-cards-are-overlap? big-random-dashboard-cards))))
-
     (testing "migrates to 24"
       (testing "shouldn't have any cards out of grid"
         (is (true? (no-cards-are-out-of-grid-and-has-size-0? migrated-to-18 24))))
       (testing "shouldn't have overlapping cards"
         (is (true? (no-cards-are-overlap? migrated-to-18)))))
-
     (testing "rollbacked to 18"
       (testing "shouldn't have any cards out of grid"
         (is (true? (no-cards-are-out-of-grid-and-has-size-0? rollbacked-to-24 18))))
@@ -1067,7 +1064,7 @@
           ;; we're testing here, so let's override it to be a no-op. Other tests add DBs using the table name instead of
           ;; model name, so they don't hit the post-insert hook, but here we're relying on the transformations being
           ;; applied so we can't do that.
-          (with-redefs [database/set-new-database-permissions! (constantly nil)]
+          (mt/with-dynamic-fn-redefs [database/set-new-database-permissions! (constantly nil)]
             (impl/test-migrations ["v48.00-001" "v48.00-002"] [migrate!]
               (let [default-db                {:name       "DB"
                                                :engine     "postgres"
@@ -1112,7 +1109,6 @@
                                   (:settings (t2/query-one {:select [:settings]
                                                             :from [:metabase_database]
                                                             :where [[:= :id success-id]]})))))))
-
                   (testing "the options is merged into settings correctly"
                     (is (= {:persist-models-enabled true
                             :database-enable-actions true}
@@ -1123,24 +1119,21 @@
                     (testing "even when settings is empty"
                       (is (= {:persist-models-enabled true}
                              (t2/select-one-fn :settings :model/Database options-empty-settings-id)))))
-
                   (testing "nil or empty options doesn't break migration"
                     (is (= {:database-enable-actions true}
                            (t2/select-one-fn :settings :model/Database nil-options-id)))
                     (is (= {:database-enable-actions true}
                            (t2/select-one-fn :settings :model/Database empty-options-id)))))
-
                 (testing "rollback migration"
                   (migrate! :down 46)
                   (testing "the persist-models-enabled is assoced back to options"
                     (is (= {:options  "{\"persist-models-enabled\":true}"
                             :settings {:database-enable-actions true}}
-                           (t2/select-one [:model/Database :settings :options] success-id)))
+                           (t2/select-one [:model/Database :settings :options] success-id))))
+                  (testing "if settings doesn't have :persist-models-enabled, then options is empty map"
                     (is (= {:options  nil
                             :settings {:database-enable-actions true}}
-                           (t2/select-one [:model/Database :settings :options] empty-options-id))))
-
-                  (testing "if settings doesn't have :persist-models-enabled, then options is empty map"))))))]
+                           (t2/select-one [:model/Database :settings :options] empty-options-id)))))))))]
     (do-test false)
     (encryption-test/with-secret-key "dont-tell-anyone-about-this"
       (do-test true))))
@@ -1549,14 +1542,12 @@
         sso-expected-mapping  {"group-mapping-a" [(inc admin-group-id)]
                                "group-mapping-b" [(inc admin-group-id) (+ 2 admin-group-id)]}
         ldap-expected-mapping {"dc=metabase,dc=com" [(inc admin-group-id)]}]
-
     (testing "Remove admin from group mapping for LDAP, SAML, JWT if they are enabled"
       (with-ldap-and-sso-configured! ldap-group-mappings sso-group-mappings
         (#'custom-migrations/migrate-remove-admin-from-group-mapping-if-needed)
         (is (= ldap-expected-mapping (get-json-setting :ldap-group-mappings)))
         (is (= sso-expected-mapping (get-json-setting :jwt-group-mappings)))
         (is (= sso-expected-mapping (get-json-setting :saml-group-mappings)))))
-
     (testing "remove admin from group mapping for LDAP, SAML, JWT even if they are disabled"
       (with-ldap-and-sso-configured! ldap-group-mappings sso-group-mappings
         (mt/with-temporary-raw-setting-values
@@ -1567,7 +1558,6 @@
           (is (= ldap-expected-mapping (get-json-setting :ldap-group-mappings)))
           (is (= sso-expected-mapping (get-json-setting :jwt-group-mappings)))
           (is (= sso-expected-mapping (get-json-setting :saml-group-mappings))))))
-
     (testing "Don't remove admin group if `ldap-sync-admin-group` is enabled"
       (with-ldap-and-sso-configured! ldap-group-mappings sso-group-mappings
         (mt/with-temporary-raw-setting-values
@@ -1583,11 +1573,9 @@
       ;; 0 because we removed them and fresh db won't trigger any
       (is (= 0 (t2/count :data_migrations)))
       (migrate!))
-
     (testing "no data_migrations table after v.48.00-024"
       (is (thrown? ExceptionInfo
                    (t2/count :data_migrations))))
-
     (testing "rollback causes all known data_migrations to reappear"
       (migrate! :down 47)
       ;; 34 because there was a total of 34 data migrations (which are filled on rollback)
@@ -1625,19 +1613,16 @@
         (is (true? (set/subset?
                     (set (#'custom-migrations/db-type->to-unified-columns db-type))
                     (table-and-column-of-type datetime-type)))))
-
       (testing "all of our time columns are now converted to timestamp-tz type, only changelog tables are intact"
         (migrate!)
         (is (= #{[:databasechangelog :dateexecuted false] [:databasechangeloglock :lockgranted true]}
                (set (table-and-column-of-type datetime-type)))))
-
       (testing "downgrade should revert all converted columns to its original type"
         (migrate! :down 48)
         (is (true? (set/subset?
                     (set (#'custom-migrations/db-type->to-unified-columns db-type))
                     (table-and-column-of-type datetime-type)))))
-
-        ;; this is a weird behavior on mariadb that I can only find on CI, but it's nice to have this test anw
+      ;; this is a weird behavior on mariadb that I can only find on CI, but it's nice to have this test anw
       (testing "not nullable timestamp column should not have extra on update"
         (let [user-id (t2/insert-returning-pk! :core_user {:first_name  "Howard"
                                                            :last_name   "Hughes"
@@ -1688,14 +1673,12 @@
             (is (not (contains? card-revision-object "type"))))
           (testing "has dataset"
             (is (contains? card-revision-object "dataset")))))
-
       (testing "after migration card revisions should have type"
         (migrate!)
         (let [card-revision-object  (t2/select-one-fn (comp json/decode :object) :revision card-revision-id)
               model-revision-object (t2/select-one-fn (comp json/decode :object) :revision model-revision-id)]
           (is (= "question" (get card-revision-object "type")))
           (is (= "model" (get model-revision-object "type")))))
-
       (testing "rollback should remove type and keep dataset"
         (migrate! :down 48)
         (let [card-revision-object  (t2/select-one-fn (comp json/decode :object) :revision card-revision-id)
@@ -1706,30 +1689,30 @@
           (is (not (contains? model-revision-object "type"))))))))
 
 (deftest ^:mb/old-migrations-test card-revision-add-type-null-character-test
-  (testing "CardRevisionAddType migration works even if there's a null character in revision.object (metabase#40835)")
-  (impl/test-migrations "v49.2024-01-22T11:52:00" [migrate!]
-    (let [user-id          (:id (new-instance-with-default :core_user))
-          db-id            (:id (new-instance-with-default :metabase_database))
-          card             (new-instance-with-default :report_card {:dataset false :creator_id user-id :database_id db-id})
-          viz-settings     "{\"table.pivot_column\":\"\u0000..\\u0000\"}" ; note the escaped and unescaped null characters
-          card-revision-id (:id (new-instance-with-default :revision
-                                                           {:object    (json/encode
-                                                                        (assoc (dissoc card :type)
-                                                                               :visualization_settings viz-settings))
-                                                            :model     "Card"
-                                                            :model_id  (:id card)
-                                                            :user_id   user-id}))]
-      (testing "sanity check revision object"
-        (let [card-revision-object (t2/select-one-fn (comp json/decode :object) :revision card-revision-id)]
-          (testing "doesn't have type"
-            (is (not (contains? card-revision-object "type"))))))
-      (testing "after migration card revisions should have type"
-        (migrate!)
-        (let [card-revision-object  (t2/select-one-fn (comp json/decode :object) :revision card-revision-id)]
-          (is (= "question" (get card-revision-object "type")))
-          (testing "original visualization_settings should be preserved"
-            (is (= viz-settings
-                   (get card-revision-object "visualization_settings")))))))))
+  (testing "CardRevisionAddType migration works even if there's a null character in revision.object (metabase#40835)"
+    (impl/test-migrations "v49.2024-01-22T11:52:00" [migrate!]
+      (let [user-id          (:id (new-instance-with-default :core_user))
+            db-id            (:id (new-instance-with-default :metabase_database))
+            card             (new-instance-with-default :report_card {:dataset false :creator_id user-id :database_id db-id})
+            viz-settings     "{\"table.pivot_column\":\"\u0000..\\u0000\"}" ; note the escaped and unescaped null characters
+            card-revision-id (:id (new-instance-with-default :revision
+                                                             {:object   (json/encode
+                                                                         (assoc (dissoc card :type)
+                                                                                :visualization_settings viz-settings))
+                                                              :model    "Card"
+                                                              :model_id (:id card)
+                                                              :user_id  user-id}))]
+        (testing "sanity check revision object"
+          (let [card-revision-object (t2/select-one-fn (comp json/decode :object) :revision card-revision-id)]
+            (testing "doesn't have type"
+              (is (not (contains? card-revision-object "type"))))))
+        (testing "after migration card revisions should have type"
+          (migrate!)
+          (let [card-revision-object (t2/select-one-fn (comp json/decode :object) :revision card-revision-id)]
+            (is (= "question" (get card-revision-object "type")))
+            (testing "original visualization_settings should be preserved"
+              (is (= viz-settings
+                     (get card-revision-object "visualization_settings"))))))))))
 
 (deftest ^:mb/old-migrations-test delete-scan-field-values-trigger-test
   (testing "We should delete the triggers for DBs that are configured not to scan their field values\n"
@@ -1766,13 +1749,11 @@
                       (testing "sanity check that the schedule exists"
                         (is (= (#'task.sync-databases-test/all-db-sync-triggers-name db)
                                (#'task.sync-databases-test/query-all-db-sync-triggers-name db)))))
-
                     (migrate!)
                     (testing "default options and scan with manual schedules should have scan field values"
                       (doseq [db db-with-scan-fv]
                         (is (= (#'task.sync-databases-test/all-db-sync-triggers-name db)
                                (#'task.sync-databases-test/query-all-db-sync-triggers-name db)))))
-
                     (testing "never scan and on demand should not have scan field values"
                       (doseq [db (t2/select :model/Database :id [:in (map :id db-without-scan-fv)])]
                         (is (= #{(#'api.database-test/sync-and-analyze-trigger-name db)}
@@ -1797,7 +1778,6 @@
                                                  :where  [:= :id db-id]})))]
         (testing "sanity check that db details is encrypted"
           (is (true? (encryption/possibly-encrypted-string? (db-detail)))))
-
         (testing "after migrate up, db details should still be encrypted"
           (migrate!)
           (is (true? (encryption/possibly-encrypted-string? (db-detail)))))
@@ -1837,7 +1817,6 @@
           (testing "migrate down will remove init-send-pulse-triggers job, send-pulse job and send-pulse triggers"
             (migrate! :down 49)
             (is (= #{} (scheduler-job-keys))))
-
           (testing "the init-send-pulse-triggers job should be re-run after migrate up"
             (migrate!)
             ;; we redefine this so quartz triggers that run on different threads use the same db connection as this test
@@ -2045,13 +2024,10 @@
       (t2/insert! :setting [{:key "enable-query-caching", :value (encryption/maybe-encrypt "true")}
                             {:key "query-caching-ttl-ratio", :value (encryption/maybe-encrypt "100")}
                             {:key "query-caching-min-ttl", :value (encryption/maybe-encrypt "123")}]))
-
     (testing "Values were indeed encrypted"
       (is (not= "true" (t2/select-one-fn :value :setting :key "enable-query-caching"))))
-
     (encryption-test/with-secret-key "whateverwhatever"
       (migrate!))
-
     (testing "But not anymore"
       (is (= "true" (t2/select-one-fn :value :setting :key "enable-query-caching")))
       (is (= "100" (t2/select-one-fn :value :setting :key "query-caching-ttl-ratio")))
@@ -2200,7 +2176,7 @@
 ;;; 52 tests
 ;;;
 
-(deftest create-sample-content-test
+(deftest ^:mb/old-migrations-test create-sample-content-test
   (testing "The sample content is created iff *create-sample-content*=true"
     (doseq [create? [true false]]
       (testing (str "*create-sample-content* = " create?)
@@ -2209,7 +2185,6 @@
             (is (false? (sample-content-created?)))
             (migrate!)
             (is (= create? (sample-content-created?))))
-
           (when (true? create?)
             (testing "The Examples collection has permissions set to grant read-write access to all users"
               (let [id (t2/select-one-pk :model/Collection :is_sample true)]
@@ -2219,7 +2194,7 @@
                       :perm_value    :read-and-write}
                      (t2/select-one :model/Permissions :collection_id id)))))))))))
 
-(deftest create-sample-content-test-2
+(deftest ^:mb/old-migrations-test create-sample-content-test-2
   (testing "The sample content isn't created if the sample database existed already in the past (or any database for that matter)"
     (impl/test-migrations "v52.2024-12-03T15:55:22" [migrate!]
       (is (false? (sample-content-created?)))
@@ -2234,7 +2209,7 @@
       (is (empty? (t2/query "SELECT * FROM metabase_database"))
           "No database should have been created"))))
 
-(deftest create-sample-content-test-3
+(deftest ^:mb/old-migrations-test create-sample-content-test-3
   (testing "The sample content isn't created if a user existed already"
     (impl/test-migrations "v52.2024-12-03T15:55:22" [migrate!]
       (is (false? (sample-content-created?)))
@@ -2248,6 +2223,14 @@
         :date_joined   :%now})
       (migrate!)
       (is (false? (sample-content-created?))))))
+
+(deftest ^:mb/old-migrations-test create-sample-content-effective-type-test
+  (testing "Every sample-database field has a non-null effective_type after migration (GHY-3367)"
+    (impl/test-migrations "v52.2024-12-03T15:55:22" [migrate!]
+      (migrate!)
+      (let [fields (t2/query "SELECT name, base_type, effective_type FROM metabase_field")]
+        (is (seq fields))
+        (is (empty? (filter #(nil? (:effective_type %)) fields)))))))
 
 (defn- insert-returning-pk!
   [table record]
@@ -2341,7 +2324,7 @@
      :multi-stage-question-id  multi-stage-question-id
      :multi-stage-model-id     multi-stage-model-id}))
 
-(deftest set-stage-number-in-parameter-mappings-test
+(deftest ^:mb/old-migrations-test set-stage-number-in-parameter-mappings-test
   (testing "v52.2024-10-26T18:42:42"
     (impl/test-migrations ["v52.2024-10-26T18:42:42"] [migrate!]
       (let [{:keys [dashboard-id
@@ -2366,15 +2349,17 @@
             create-dashcard (fn create-dashcard
                               ([card-id] (create-dashcard card-id (parameter-mappings-without-stage-numbers card-id)))
                               ([card-id pmappings]
-                               (insert-returning-pk! :model/DashboardCard
-                                                     {:dashboard_id dashboard-id
-                                                      :parameter_mappings pmappings
+                               (insert-returning-pk! (t2/table-name :model/DashboardCard)
+                                                     {:dashboard_id           dashboard-id
+                                                      :parameter_mappings     (json/encode pmappings)
+                                                      :created_at             :%now
+                                                      :updated_at             :%now
                                                       :visualization_settings "{}"
-                                                      :card_id card-id
-                                                      :size_x  4
-                                                      :size_y  4
-                                                      :col     1
-                                                      :row     1})))
+                                                      :card_id                card-id
+                                                      :size_x                 4
+                                                      :size_y                 4
+                                                      :col                    1
+                                                      :row                    1})))
             single-stage-dashcard-id      (create-dashcard single-stage-question-id)
             native-dashcard-id            (create-dashcard native-question-id)
             multi-stage-dashcard1-id      (create-dashcard multi-stage-question-id)
@@ -2441,7 +2426,7 @@
                    (no-stage-pattern multi-stage-model-id)]
                   (query-parameter-mappings))))))))
 
-(deftest set-stage-number-in-viz-settings-parameter-mappings-test
+(deftest ^:mb/old-migrations-test set-stage-number-in-viz-settings-parameter-mappings-test
   (testing "v52.2024-11-12T15:13:18"
     (impl/test-migrations ["v52.2024-11-12T15:13:18"] [migrate!]
       (let [{:keys [dashboard-id
@@ -2509,19 +2494,21 @@
 
             create-dashcard (fn create-dashcard
                               [card-id targets-or-viz-settings]
-                              (insert-returning-pk! :model/DashboardCard
-                                                    {:dashboard_id dashboard-id
-                                                     :parameter_mappings []
-                                                     :visualization_settings
-                                                     (if (map? targets-or-viz-settings)
-                                                       targets-or-viz-settings
-                                                       (viz-settings-without-stage-numbers
-                                                        targets-or-viz-settings))
-                                                     :card_id card-id
-                                                     :size_x  4
-                                                     :size_y  4
-                                                     :col     1
-                                                     :row     1}))
+                              (insert-returning-pk! (t2/table-name :model/DashboardCard)
+                                                    {:dashboard_id           dashboard-id
+                                                     :created_at             :%now
+                                                     :updated_at             :%now
+                                                     :parameter_mappings     "[]"
+                                                     :visualization_settings (json/encode
+                                                                              (if (map? targets-or-viz-settings)
+                                                                                targets-or-viz-settings
+                                                                                (viz-settings-without-stage-numbers
+                                                                                 targets-or-viz-settings)))
+                                                     :card_id                card-id
+                                                     :size_x                 4
+                                                     :size_y                 4
+                                                     :col                    1
+                                                     :row                    1}))
             single-stage-dashcard-id (create-dashcard single-stage-question-id
                                                       [single-stage-question-id dashboard-id native-question-id])
             multi-stage-dashcard-id  (create-dashcard single-stage-question-id
@@ -2551,7 +2538,7 @@
                  (query-viz-settings))))))))
 
 ;; see [[custom-migrations/MigrateAlertToNotification]] for info about how this migration works
-(deftest migrate-alert-to-notification-test
+(deftest ^:mb/old-migrations-test migrate-alert-to-notification-test
   (testing "v53.2024-12-12T08:06:00: migrate alerts from pulse to notification"
     (impl/test-migrations ["v53.2024-12-12T08:05:00"] [migrate!]
       (binding [custom-migrations.util/*allow-temp-scheduling* true]
@@ -2580,7 +2567,6 @@
                                                                  :channel_type "email"
                                                                  :details      (json/encode {:emails ["test@test.com"]})
                                                                  :enabled      true})))]
-
           (testing "after migration"
             (migrate!)
             (testing "pulse is migrated to notification"
@@ -2593,16 +2579,13 @@
                         :active       true
                         :creator_id   user-id}
                        (select-keys notification [:payload_type :active :creator_id])))
-
                 (is (= {:card_id        card-id
                         :send_once      false
                         :send_condition "has_result"}
                        (select-keys notification-card [:card_id :send_once :send_condition])))
-
                 (is (= {:type          "notification-subscription/cron"
                         :cron_schedule "0 0 18 * * ? *"}
                        (select-keys subscription [:type :cron_schedule])))
-
                 (is (= {:channel_type "channel/email"}
                        (select-keys handler [:channel_type])))
                 (is (= {:type    "notification-recipient/raw-value"
@@ -2611,7 +2594,375 @@
                 (is (= {:type    "notification-recipient/raw-value"
                         :details "{\"value\":\"test@test.com\"}"}
                        (select-keys recipient [:type :details]))))))
-
           (testing "after downgrade"
             (migrate! :down 52)
             (is (zero? (t2/count :notification :payload_type "notification/card")))))))))
+
+(deftest migrate-clickhouse-details-to-multi-db-test
+  (testing "v57.2025-08-23T16:00:00: migrate clickhouse db details to use `enable-multiple-db` with db filters"
+    (encryption-test/with-secret-key "dont-tell-anyone-about-this"
+      (impl/test-migrations
+       ["v57.2025-08-23T16:00:00"] [migrate!]
+        (letfn [(insert-clickhouse-db [name details]
+                  (let [details (merge {:host "localhost"
+                                        :port 8123
+                                        :user "default"
+                                        :password nil
+                                        :ssl false
+                                        :tunnel-enabled false
+                                        :advanced-options false
+                                        :destination-database false}
+                                       details)]
+                    (t2/insert! :metabase_database
+                                {:name name
+                                 :engine "clickhouse"
+                                 :created_at :%now
+                                 :updated_at :%now
+                                 :details (mi/encrypted-json-in details)})))
+                (assert-pre-conditions []
+                  (let [clickhouse-dbs (t2/select :metabase_database :engine "clickhouse")
+                        details-list (map #(mi/encrypted-json-out (:details %)) clickhouse-dbs)]
+                    (is (= 4 (count clickhouse-dbs)))
+                    (is (every? #(contains? % :scan-all-databases) details-list))
+                    (is (every? #(contains? % :dbname) details-list))
+                    (is (every? #(not (contains? % :enable-multiple-db)) details-list))
+                    (is (every? #(not (contains? % :db-filters-type)) details-list))
+                    (is (every? #(not (contains? % :db-filters-patterns)) details-list))
+                    (is (= 2 (count (filter :scan-all-databases details-list))))
+                    (is (= 2 (count (filter #(nil? (:dbname %)) details-list))))
+                    (is (= 2 (count (filter #(= "db_1 db_2 db_3" (:dbname %)) details-list))))))]
+          ;; load data
+          (insert-clickhouse-db "clickhouse no scan no dbs" {:scan-all-databases false :dbname nil})
+          (insert-clickhouse-db "clickhouse no scan with dbs" {:scan-all-databases false :dbname "db_1 db_2 db_3"})
+          (insert-clickhouse-db "clickhouse scan all no dbs" {:scan-all-databases true :dbname nil})
+          (insert-clickhouse-db "clickhouse scan all with db" {:scan-all-databases true :dbname "db_1 db_2 db_3"})
+          ;; assert pre conditions
+          (assert-pre-conditions)
+          ;; run migration
+          (migrate!)
+          ;; assert post conditions
+          (let [clickhouse-dbs (t2/select :metabase_database :engine "clickhouse")]
+            (is (= 4 (count clickhouse-dbs)))
+            (doseq [db clickhouse-dbs]
+              (let [details (mi/encrypted-json-out (:details db))]
+                (is (true? (:enable-multiple-db details)))
+                (is (contains? details :db-filters-type))
+                (cond
+                  (and (false? (:scan-all-databases details)) (nil? (:dbname details)))
+                  (do
+                    (is (= "inclusion" (:db-filters-type details)))
+                    (is (= "default" (:db-filters-patterns details))))
+
+                  (and (false? (:scan-all-databases details)) (= "db_1 db_2 db_3" (:dbname details)))
+                  (do
+                    (is (= "inclusion" (:db-filters-type details)))
+                    (is (= "db_1, db_2, db_3" (:db-filters-patterns details))))
+
+                  (and (true? (:scan-all-databases details)) (nil? (:dbname details)))
+                  (do
+                    (is (= "all" (:db-filters-type details)))
+                    (is (not (contains? details :db-filters-patterns))))
+
+                  (and (true? (:scan-all-databases details)) (= "db_1 db_2 db_3" (:dbname details)))
+                  (do
+                    (is (= "all" (:db-filters-type details)))
+                    (is (not (contains? details :db-filters-patterns))))
+
+                  :else
+                  (throw (ex-info "Unexpected database configuration" {:details details}))))))
+          ;; rollback
+          (migrate! :down 56)
+          ;; assert pre conditions
+          (testing "everything back to normal after downgrade"
+            (assert-pre-conditions)))))))
+
+(deftest escape-existing-at-symbol-user-attributes-test
+  (testing "v58.2025-11-18T12:31:49 : rename any existing `@.+` user attrs to add a preceding underscore"
+    (impl/test-migrations ["v58.2025-11-18T12:31:49"] [migrate!]
+      (let [user-id (:id (new-instance-with-default :core_user {:login_attributes "{\"@foo\": \"bar\"}"}))
+            other-user-id (:id (new-instance-with-default :core_user {:login_attributes "{\"@foo\": \"bang\"}"}))
+            database-id (:id (new-instance-with-default :metabase_database))
+            table-id (:id (new-instance-with-default :metabase_table {:db_id database-id}))
+            group-id (:id (new-instance-with-default :permissions_group))
+            sandbox-id (:id (new-instance-with-default :sandboxes {:attribute_remappings "{\"@foo\": \"bar\"}"
+                                                                   :table_id table-id
+                                                                   :group_id group-id}))
+            impersonation-id (:id (new-instance-with-default :connection_impersonations {:attribute "@foo"
+                                                                                         :db_id database-id
+                                                                                         :group_id group-id}))
+            db-router-id (:id (new-instance-with-default :db_router {:user_attribute "@foo" :database_id database-id}))]
+        (migrate!)
+        (is (= {"_@foo" "bar"}
+               (json/decode (:attribute_remappings (t2/select-one :sandboxes :id sandbox-id)))))
+        (is (= "_@foo" (:attribute (t2/select-one :connection_impersonations impersonation-id))))
+        (is (= "_@foo" (:user_attribute (t2/select-one :db_router db-router-id))))
+        (is (= {"_@foo" "bar"}
+               (json/decode (t2/select-one-fn :login_attributes :core_user :id user-id))))
+        (is (= {"_@foo" "bang"}
+               (json/decode (t2/select-one-fn :login_attributes :core_user :id other-user-id))))))))
+
+(deftest backfill-transform-target-db-id-test
+  (testing "v59.2026-01-31T12:01:23 : backfill target_db_id from target and source JSON"
+    (impl/test-migrations ["v59.2026-01-31T12:01:23"] [migrate!]
+      (let [db-id         (:id (new-instance-with-default :metabase_database))
+            deleted-db-id (+ db-id 9999)
+            query-source  (fn [id] (json/encode {:type "query" :query {:database id}}))
+            ;; Python transforms were meant to support 0-N source databases, but the table now has a single source id.
+            python-db-id  db-id
+            python-source (json/encode {:type "python" :script "x = 1", :source-database python-db-id})
+            target        (fn [& {:keys [database]}]
+                            (json/encode (cond-> {:schema "public" :table "out" :type "append"}
+                                           database (assoc :database database))))
+            insert!       (fn [source-type source target]
+                            (t2/insert-returning-pk!
+                             :transform
+                             {:name               "t"
+                              :source             source
+                              :target             target
+                              :source_type        source-type
+                              :source_database_id db-id
+                              :created_at         :%now
+                              :updated_at         :%now}))
+            ;; source.query.database takes precedence over target.database
+            both-id       (insert! "mbql" (query-source db-id) (target :database db-id))
+            ;; source.query.database used when target has no database
+            source-id     (insert! "mbql" (query-source db-id) (target))
+            ;; target.database used as fallback for python transforms
+            target-id     (insert! "python" python-source (target :database db-id))
+            ;; no database anywhere — stays nil
+            none-id       (insert! "python" python-source (target))
+            ;; deleted database reference — stays nil
+            deleted-id    (insert! "mbql" (query-source deleted-db-id) (target :database deleted-db-id))
+            id->target    #(t2/select-one-fn :target_db_id :transform :id %)]
+        (testing "Before backfill, the field is uniformly empty"
+          ;; Haven't turned this into a loop, as it would obscure which case failed.
+          (is (nil? (id->target both-id)))
+          (is (nil? (id->target source-id)))
+          (is (nil? (id->target target-id)))
+          (is (nil? (id->target none-id)))
+          (is (nil? (id->target deleted-id))))
+        (migrate!)
+        (testing "Valid database ids are backfilled"
+          ;; Ditto, since the IDs are opaque in CI, give each case its own line for transparent failures.
+          (is (= db-id (id->target both-id)))
+          (is (= db-id (id->target source-id)))
+          (is (= db-id (id->target target-id)))
+          (is (nil? (id->target none-id)))
+          (is (nil? (id->target deleted-id))))))))
+
+(deftest fix-clickhouse-upload-db-schema-names-test
+  (testing "FixClickHouseUploadDBSchemaNames, v59.2026-03-04T00:00:00: fix clickhouse upload db schema names"
+    (encryption-test/with-secret-key "fake-secret-key"
+      ;; Test when the upload db doesn't have an upload_schema_name set (both upload db and upload
+      ;; tables are in a bad state) and when it does have an upload_schema_name set (upload db and
+      ;; new upload tables are in a good state, but existing upload tables are in a bad state)
+      (doseq [uploads-schema-name [nil "db_foo"]]
+        (impl/test-migrations
+         ["v59.2026-03-04T00:00:00"] [migrate!]
+          (let [db-id (t2/insert-returning-pk! :metabase_database
+                                               {:name "clickhouse cloud upload db"
+                                                :engine "clickhouse"
+                                                :created_at :%now
+                                                :updated_at :%now
+                                                :uploads_enabled true
+                                                :uploads_schema_name uploads-schema-name
+                                                :uploads_table_prefix "uploads_"
+                                                :details (mi/encrypted-json-in {:dbname "db_foo"})})
+                insert-table! (fn [db-id name schema active is-upload display-name]
+                                (t2/insert-returning-pk! :metabase_table
+                                                         {:db_id db-id
+                                                          :name name
+                                                          :schema schema
+                                                          :active active
+                                                          :is_upload is-upload
+                                                          :display_name display-name
+                                                          :created_at :%now
+                                                          :updated_at :%now}))
+                ;; An uploads table in a good state, created before uploads_schema_name was set to null
+                uploaded-0 (insert-table! db-id "uploads_test_table_0" "db_foo" true true "Test Table 0")
+                ;; Two upload tables in a bad state, created after uploads_schema_name was set to null
+                uploaded-1 (insert-table! db-id "uploads_test_table_1" nil false true "Test Table 1")
+                uploaded-2 (insert-table! db-id "uploads_test_table_2" nil false true "Test Table 2")
+                ;; The two non-upload versions of the above tables, created by the sync process
+                synced-1 (insert-table! db-id "uploads_test_table_1" "db_foo" true false "Uploads Test Table 1")
+                synced-2 (insert-table! db-id "uploads_test_table_2" "db_foo" true false "Uploads Test Table 2")
+                ;; An unrelated non-upload table in the same schema that should be left alone
+                unrelated (insert-table! db-id "unrelated_table" "db_foo" true false "Unrelated Table")]
+            (migrate!)
+            ;; The uploads db has the correct uploads_schema_name from the details
+            (is (= "db_foo" (:uploads_schema_name (t2/select-one :metabase_database :id db-id))))
+            (are [exp table-id] (= exp
+                                   (t2/select-one [:metabase_table :name :schema :active :is_upload] :id table-id))
+              ;; The upload table that was already in a good state remains unchanged
+              {:name "uploads_test_table_0"
+               :schema "db_foo"
+               :active true
+               :is_upload true} uploaded-0
+              ;; The two upload tables in a bad state are updated to be active and have the correct schema
+              {:name "uploads_test_table_1"
+               :schema "db_foo"
+               :active true
+               :is_upload true} uploaded-1
+              {:name "uploads_test_table_2"
+               :schema "db_foo"
+               :active true
+               :is_upload true} uploaded-2
+              ;; The two non-upload tables created by the sync have been renamed and set as inactive
+              {:name "uploads_test_table_1_retired_69667"
+               :schema "db_foo"
+               :active false
+               :is_upload false} synced-1
+              {:name "uploads_test_table_2_retired_69667"
+               :schema "db_foo"
+               :active false
+               :is_upload false} synced-2
+              ;; The unrelated table remains unchanged
+              {:name "unrelated_table"
+               :schema "db_foo"
+               :active true
+               :is_upload false} unrelated)))))))
+
+(deftest remove-legacy-incremental-strategies-test
+  (testing "v59.2026-03-13T00:00:00: migrate legacy checkpoint-filter to checkpoint-filter-field-id"
+    (impl/test-migrations ["v59.2026-03-13T00:00:00"] [migrate!]
+      (let [db-id    (:id (new-instance-with-default :metabase_database))
+            table-id (:id (new-instance-with-default :metabase_table {:db_id db-id}))
+            field-id (t2/insert-returning-pk! :metabase_field
+                                              {:name          "updated_at"
+                                               :table_id      table-id
+                                               :base_type     "type/DateTimeWithLocalTZ"
+                                               :database_type "timestamptz"
+                                               :active        true
+                                               :created_at    :%now
+                                               :updated_at    :%now})
+            target   (json/encode {:type "table" :schema "public" :name "out"})
+            insert-transform!
+            (fn [source]
+              (t2/insert-returning-pk!
+               :transform {:name               (mt/random-name)
+                           :source             source
+                           :target             target
+                           :source_type        "mbql"
+                           :source_database_id db-id
+                           :created_at         :%now
+                           :updated_at         :%now}))
+            ;; Transform with resolvable legacy checkpoint strategy
+            resolvable-source
+            (json/encode {:type  "query"
+                          :query {:stages [{:source-table table-id}]}
+                          :source-incremental-strategy
+                          {:type                        "checkpoint"
+                           :checkpoint-filter-unique-key "column-unique-key-v1$updated_at"
+                           :checkpoint-filter           {:some "filter"}}})
+            resolvable-id (insert-transform! resolvable-source)
+            ;; Transform with unresolvable legacy checkpoint strategy (no matching field)
+            unresolvable-source
+            (json/encode {:type  "query"
+                          :query {:stages [{:source-table table-id}]}
+                          :source-incremental-strategy
+                          {:type                        "checkpoint"
+                           :checkpoint-filter-unique-key "column-unique-key-v1$nonexistent_column"
+                           :checkpoint-filter           {:some "filter"}}})
+            unresolvable-id (insert-transform! unresolvable-source)
+            ;; Transform without any incremental strategy — should be untouched
+            no-strategy-source
+            (json/encode {:type  "query"
+                          :query {:stages [{:source-table table-id}]}})
+            no-strategy-id (insert-transform! no-strategy-source)
+            ;; Python transform with resolvable checkpoint strategy
+            python-resolvable-source
+            (json/encode {:type          "python"
+                          :body          "x=1"
+                          :source-tables [{"alias" "t" "table_id" table-id}]
+                          :source-incremental-strategy
+                          {:type                        "checkpoint"
+                           :checkpoint-filter-unique-key "column-unique-key-v1$updated_at"
+                           :checkpoint-filter           {:some "filter"}}})
+            python-resolvable-id (insert-transform! python-resolvable-source)
+            ;; Native transform — can't resolve source table, strategy stripped
+            native-source
+            (json/encode {:type "native"
+                          :source-incremental-strategy
+                          {:type                        "checkpoint"
+                           :checkpoint-filter-unique-key "column-unique-key-v1$updated_at"
+                           :checkpoint-filter           {:some "filter"}}})
+            native-id (insert-transform! native-source)
+            get-source (fn [id]
+                         (json/decode
+                          (t2/select-one-fn :source :transform :id id)
+                          keyword))]
+        (migrate!)
+        (testing "Resolvable legacy strategy is migrated to checkpoint-filter-field-id"
+          (let [strategy (:source-incremental-strategy (get-source resolvable-id))]
+            (is (= field-id (:checkpoint-filter-field-id strategy)))
+            (is (not (contains? strategy :checkpoint-filter-unique-key)))
+            (is (not (contains? strategy :checkpoint-filter)))))
+        (testing "Unresolvable legacy strategy is stripped entirely"
+          (is (not (contains? (get-source unresolvable-id) :source-incremental-strategy))))
+        (testing "Transform without strategy is untouched"
+          (is (not (contains? (get-source no-strategy-id) :source-incremental-strategy))))
+        (testing "Python transform with single source-table resolves correctly"
+          (let [strategy (:source-incremental-strategy (get-source python-resolvable-id))]
+            (is (= field-id (:checkpoint-filter-field-id strategy)))
+            (is (not (contains? strategy :checkpoint-filter-unique-key)))
+            (is (not (contains? strategy :checkpoint-filter)))))
+        (testing "Native transform strategy is stripped (can't resolve source table)"
+          (is (not (contains? (get-source native-id) :source-incremental-strategy))))))))
+
+(deftest backfill-mfa-confirmed-at-test
+  (testing "v59.2026-07-10T22:29:17: confirmed_at is lifted out of the credentials JSON into the column"
+    (encryption-test/with-secret-key "backfill-mfa-test-key-1234"
+      (impl/test-migrations ["v59.2026-07-10T22:29:17"] [migrate!]
+        (let [confirmed-at "2026-07-01T12:00:00Z"
+              insert-identity!
+              (fn [user-id credentials-str]
+                (t2/insert-returning-pk! :auth_identity {:user_id     user-id
+                                                         :provider    "totp"
+                                                         :credentials credentials-str
+                                                         :created_at  :%now
+                                                         :updated_at  :%now}))
+              enc-confirmed   (insert-identity! (:id (new-instance-with-default :core_user))
+                                                (encryption/maybe-encrypt
+                                                 (json/encode {:secret "s1" :confirmed_at confirmed-at})))
+              plain-confirmed (insert-identity! (:id (new-instance-with-default :core_user))
+                                                (json/encode {:secret "s2" :confirmed_at confirmed-at}))
+              pending         (insert-identity! (:id (new-instance-with-default :core_user))
+                                                (encryption/maybe-encrypt
+                                                 (json/encode {:secret "s3"})))]
+          (migrate!)
+          (testing "encrypted confirmed row gets the column"
+            (is (some? (t2/select-one-fn :confirmed_at :auth_identity :id enc-confirmed))))
+          (testing "legacy plaintext confirmed row gets the column"
+            (is (some? (t2/select-one-fn :confirmed_at :auth_identity :id plain-confirmed))))
+          (testing "pending (unconfirmed) enrollment stays null"
+            (is (nil? (t2/select-one-fn :confirmed_at :auth_identity :id pending)))))))))
+
+(deftest backfill-transform-target-tables-test
+  (testing "v60.2026-03-07T00:00:04 : backfill transform target tables"
+    (impl/test-migrations ["v60.2026-03-07T00:00:04"] [migrate!]
+      (let [db-id     (:id (new-instance-with-default :metabase_database))
+            source    (json/encode {:type "query" :query {:database db-id}})
+            ;; -- Transform with a target that has no existing metabase_table → should create provisional row --
+            _         (t2/insert-returning-pk!
+                       :transform {:name               "create-output"
+                                   :source             source
+                                   :target             (json/encode {:type "table" :schema "public" :name "new_target_table"})
+                                   :source_type        "mbql"
+                                   :source_database_id db-id
+                                   :target_db_id       db-id
+                                   :created_at         :%now
+                                   :updated_at         :%now})]
+        (migrate!)
+        (testing "Provisional metabase_table created for transform target"
+          (let [provisional (first (t2/query {:select [:active :transform_target :data_source :data_authority :display_name]
+                                              :from   [:metabase_table]
+                                              :where  [:and
+                                                       [:= :db_id db-id]
+                                                       [:= :name "new_target_table"]
+                                                       [:= :schema "public"]]}))]
+            (is (some? provisional))
+            (is (false? (:active provisional)))
+            (is (true? (:transform_target provisional)))
+            (is (= "metabase-transform" (:data_source provisional)))
+            (is (= "computed" (:data_authority provisional)))
+            (is (= "New Target Table" (:display_name provisional)))))))))

@@ -9,8 +9,16 @@ import undoable, { combineFilters, includeAction } from "redux-undo";
 import _ from "underscore";
 
 import { cardApi } from "metabase/api";
-import { createAsyncThunk, createThunkAction } from "metabase/lib/redux";
-import { copy } from "metabase/lib/utils";
+import type { Dispatch, GetState } from "metabase/redux/store";
+import type {
+  DraggedColumn,
+  DraggedItem,
+  VisualizerState,
+  VisualizerVizDefinitionWithColumns,
+  VisualizerVizDefinitionWithColumnsAndPreloadedDatasets,
+} from "metabase/redux/store/visualizer";
+import { createAsyncThunk, createThunkAction } from "metabase/redux/utils";
+import { clone } from "metabase/utils/clone";
 import { isCartesianChart } from "metabase/visualizations";
 import type { ComputedVisualizationSettings } from "metabase/visualizations/types";
 import type {
@@ -23,12 +31,6 @@ import type {
   VisualizerDataSource,
   VisualizerDataSourceId,
 } from "metabase-types/api";
-import type { Dispatch, GetState } from "metabase-types/store";
-import type {
-  DraggedItem,
-  VisualizerState,
-  VisualizerVizDefinitionWithColumns,
-} from "metabase-types/store/visualizer";
 
 import {
   getCurrentVisualizerState,
@@ -48,6 +50,7 @@ import {
 import { getUpdatedSettingsForDisplay } from "./utils/get-updated-settings-for-display";
 import {
   addColumnToCartesianChart,
+  attachRemappedDisplayColumn,
   cartesianDropHandler,
   combineWithCartesianChart,
   maybeImportDimensionsFromOtherDataSources,
@@ -88,12 +91,13 @@ function getInitialState(): VisualizerState {
     loadingDatasets: {},
     error: null,
     draggedItem: null,
+    hoveredItems: null,
   };
 }
 
 type InitVisualizerPayload =
   | {
-      state?: Partial<VisualizerVizDefinitionWithColumns>;
+      state?: Partial<VisualizerVizDefinitionWithColumnsAndPreloadedDatasets>;
     }
   | { cardId: CardId };
 
@@ -117,7 +121,7 @@ const initializeFromState = async (
   {
     state: initialState = {},
   }: {
-    state?: Partial<VisualizerVizDefinitionWithColumns>;
+    state?: Partial<VisualizerVizDefinitionWithColumnsAndPreloadedDatasets>;
   },
   dispatch: Dispatch,
 ) => {
@@ -133,22 +137,27 @@ const initializeFromState = async (
         const [, cardId] = sourceId.split(":");
         return [
           dispatch(fetchCard(Number(cardId))),
-          dispatch(fetchCardQuery(Number(cardId))),
+          dispatch(
+            fetchCardQuery({
+              cardId: Number(cardId),
+              preloadedDatasets: initialState.preloadedDatasets,
+            }),
+          ),
         ];
       })
       .flat(),
   );
-  return copy(initialState);
+  return clone(initialState);
 };
 
-const initializeFromCard = async (
+export const initializeFromCard = async (
   cardId: number,
   dispatch: Dispatch,
   getState: GetState,
 ) => {
   await Promise.all([
     dispatch(fetchCard(cardId)),
-    dispatch(fetchCardQuery(cardId)),
+    dispatch(fetchCardQuery({ cardId })),
   ]);
   const { cards, datasets } = getState().visualizer.present;
   const card = cards.find((card) => card.id === cardId);
@@ -168,14 +177,20 @@ export const addDataSource = createAsyncThunk(
 
     let dataSource: VisualizerDataSource | null = null;
     let dataset: Dataset | null = null;
+    let vizSettings: VisualizationSettings | null = null;
 
     if (type === "card") {
       // TODO handle rejected requests
       const cardAction = await dispatch(fetchCard(sourceId));
-      const cardQueryAction = await dispatch(fetchCardQuery(sourceId));
+      const cardQueryAction = await dispatch(
+        fetchCardQuery({ cardId: sourceId }),
+      );
 
+      // Unjustified type cast. FIXME
       const card = cardAction.payload as Card;
+      // Unjustified type cast. FIXME
       dataset = cardQueryAction.payload as Dataset;
+      vizSettings = card.visualization_settings || null;
 
       if (
         !state.display ||
@@ -210,13 +225,13 @@ export const addDataSource = createAsyncThunk(
 
     return maybeCombineDataset(
       {
-        ...copy(state),
+        ...clone(state),
         settings,
       },
       settings,
-      state.datasets,
       dataSource,
       dataset,
+      vizSettings,
     );
   },
 );
@@ -264,9 +279,19 @@ const fetchCard = createAsyncThunk<Card, CardId>(
   },
 );
 
-const fetchCardQuery = createAsyncThunk<Dataset, CardId>(
+const fetchCardQuery = createAsyncThunk<
+  Dataset,
+  {
+    cardId: CardId;
+    preloadedDatasets?: Record<CardId, Dataset | null | undefined>;
+  }
+>(
   "visualizer/fetchCardQuery",
-  async (cardId, { dispatch }) => {
+  async ({ cardId, preloadedDatasets }, { dispatch }) => {
+    const dataset = preloadedDatasets?.[cardId];
+    if (dataset) {
+      return dataset;
+    }
     const result = await dispatch(
       cardApi.endpoints.getCardQuery.initiate({ cardId, parameters: [] }),
     );
@@ -366,7 +391,6 @@ const visualizerSlice = createSlice({
         addColumnToFunnel(
           state,
           settings,
-          state.datasets as Record<string, Dataset>,
           column,
           columnRef,
           // Prevents "Type instantiation is excessively deep" error
@@ -380,8 +404,6 @@ const visualizerSlice = createSlice({
         addColumnToCartesianChart(
           state,
           settings,
-          state.datasets as Record<string, Dataset>,
-          dataset.data.cols,
           column,
           columnRef,
           dataSource,
@@ -390,7 +412,20 @@ const visualizerSlice = createSlice({
         const dimension = state.settings["graph.dimensions"] ?? [];
         const isDimension = dimension.includes(column.name);
 
+        if (isDimension) {
+          // Re-attach display column so remapping survives remove + re-add.
+          attachRemappedDisplayColumn(
+            state,
+            columnRef,
+            originalColumn,
+            // Unjustified type cast. FIXME
+            dataset as Dataset,
+            dataSource,
+          );
+        }
+
         if (isDimension && column.id) {
+          // Unjustified type cast. FIXME
           const datasetMap = _.omit(state.datasets, dataSource.id) as Record<
             string,
             Dataset
@@ -407,7 +442,6 @@ const visualizerSlice = createSlice({
         addColumnToPieChart(
           state,
           settings,
-          state.datasets as Record<string, Dataset>,
           dataset.data.cols,
           column,
           columnRef,
@@ -537,6 +571,9 @@ const visualizerSlice = createSlice({
     setDraggedItem: (state, action: PayloadAction<DraggedItem | null>) => {
       state.draggedItem = action.payload;
     },
+    setHoveredItems: (state, action: PayloadAction<DraggedColumn[] | null>) => {
+      state.hoveredItems = action.payload;
+    },
     _resetVisualizer: (state) => {
       Object.assign(state, getInitialState());
     },
@@ -557,9 +594,9 @@ const visualizerSlice = createSlice({
         const nextState = action.payload;
         if (nextState) {
           state.display = nextState.display;
-          state.columns = copy(nextState.columns);
-          state.columnValuesMapping = copy(nextState.columnValuesMapping);
-          state.settings = copy(nextState.settings);
+          state.columns = clone(nextState.columns);
+          state.columnValuesMapping = clone(nextState.columnValuesMapping);
+          state.settings = clone(nextState.settings);
         }
       })
       .addCase(fetchCard.pending, (state, action) => {
@@ -573,8 +610,10 @@ const visualizerSlice = createSlice({
 
         // `any` prevents the "Type instantiation is excessively deep" error
         if (index !== -1) {
+          // Unjustified type cast. FIXME
           state.cards[index] = card as any;
         } else {
+          // Unjustified type cast. FIXME
           state.cards.push(card as any);
         }
 
@@ -588,14 +627,17 @@ const visualizerSlice = createSlice({
         state.error = action.error.message || "Failed to fetch card";
       })
       .addCase(fetchCardQuery.pending, (state, action) => {
-        const cardId = action.meta.arg;
+        const { cardId } = action.meta.arg;
         state.loadingDatasets[`card:${cardId}`] = true;
         state.error = null;
       })
       .addCase(
         fetchCardQuery.fulfilled,
-        (state, action: { payload: Dataset; meta: { arg: CardId } }) => {
-          const cardId = action.meta.arg;
+        (
+          state,
+          action: { payload: Dataset; meta: { arg: { cardId: CardId } } },
+        ) => {
+          const { cardId } = action.meta.arg;
           const dataset = action.payload;
 
           // `any` prevents the "Type instantiation is excessively deep" error
@@ -605,7 +647,7 @@ const visualizerSlice = createSlice({
         },
       )
       .addCase(fetchCardQuery.rejected, (state, action) => {
-        const cardId = action.meta.arg;
+        const { cardId } = action.meta.arg;
         if (cardId) {
           state.loadingDatasets[`card:${cardId}`] = false;
         }
@@ -617,20 +659,26 @@ const visualizerSlice = createSlice({
 function maybeCombineDataset(
   state: VisualizerVizDefinitionWithColumns,
   settings: ComputedVisualizationSettings,
-  datasets: Record<string, Dataset>,
   dataSource: VisualizerDataSource,
   dataset: Dataset,
+  vizSettings: VisualizationSettings | null,
 ) {
   if (!state.display) {
     return;
   }
 
   if (isCartesianChart(state.display)) {
-    combineWithCartesianChart(state, settings, datasets, dataset, dataSource);
+    combineWithCartesianChart(
+      state,
+      settings,
+      dataset,
+      dataSource,
+      vizSettings,
+    );
   }
 
   if (state.display === "pie") {
-    combineWithPieChart(state, settings, datasets, dataset, dataSource);
+    combineWithPieChart(state, settings, dataset, dataSource);
   }
 
   if (state.display === "funnel") {
@@ -649,6 +697,7 @@ export const {
   removeDataSource,
   setDisplay,
   setDraggedItem,
+  setHoveredItems,
 } = visualizerSlice.actions;
 
 export const reducer = undoable(visualizerSlice.reducer, {
@@ -665,14 +714,24 @@ export const reducer = undoable(visualizerSlice.reducer, {
       addDataSource.fulfilled.type,
     ]),
     (action, nextState, { present }) => {
-      if (action.payload.forget === true) {
+      const payload = action.payload;
+      if (
+        payload != null &&
+        typeof payload === "object" &&
+        "forget" in payload &&
+        payload.forget === true
+      ) {
         return false;
       }
       if (action.type !== _handleDrop.type) {
         return true;
       }
       // Prevents history items from being added when dropping an item has no effect on the rest of the visualizer state
-      const keysToIgnore: (keyof VisualizerState)[] = ["draggedItem"];
+      // or when hovered items change — because we don't want to add history items when hovering over items
+      const keysToIgnore: (keyof VisualizerState)[] = [
+        "draggedItem",
+        "hoveredItems",
+      ];
       return !shallowEqual(
         _.omit(nextState, keysToIgnore),
         _.omit(present, keysToIgnore),

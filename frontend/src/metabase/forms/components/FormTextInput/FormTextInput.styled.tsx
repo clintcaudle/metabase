@@ -1,7 +1,7 @@
 // eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import { CopyButton } from "metabase/components/CopyButton";
+import { CopyButton } from "metabase/common/components/CopyButton";
 
 export const CopyWidgetButton = styled(CopyButton)`
   position: absolute;
@@ -11,14 +11,14 @@ export const CopyWidgetButton = styled(CopyButton)`
   display: flex;
   align-items: center;
   padding: 0.5rem;
-  border-left: 1px solid var(--mb-color-border);
+  border-left: 1px solid var(--mb-color-border-neutral);
   border-top-right-radius: 4px;
   border-bottom-right-radius: 4px;
-  color: var(--mb-color-brand);
+  color: var(--mb-color-core-brand);
   outline: none;
 
   &:hover {
-    color: var(--mb-color-text-white);
-    background-color: var(--mb-color-brand);
+    color: var(--mb-color-text-primary-inverse);
+    background-color: var(--mb-color-core-brand);
   }
 `;

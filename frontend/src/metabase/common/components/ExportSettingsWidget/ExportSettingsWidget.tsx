@@ -1,11 +1,11 @@
 import { match } from "ts-pattern";
 import { c, t } from "ttag";
 
-import { useSetting } from "metabase/common/hooks";
 import type { ExportFormat } from "metabase/common/types/export";
-import { useSelector } from "metabase/lib/redux";
-import { getIsEmbeddingSdk } from "metabase/selectors/embed";
+import { isEmbeddingSdk } from "metabase/embedding-sdk/config";
+import { useSelector } from "metabase/redux";
 import { getApplicationName } from "metabase/selectors/whitelabel";
+import { useSetting } from "metabase/settings";
 import { Checkbox, SegmentedControl, Stack } from "metabase/ui";
 
 interface ExportSettingsWidgetProps {
@@ -26,9 +26,8 @@ const useFormattingLabel = ({
   isFormattingEnabled: boolean;
 }) => {
   const applicationName = useSelector(getApplicationName);
-  const isEmbeddingSdk = useSelector(getIsEmbeddingSdk);
 
-  return match({ isFormattingEnabled, isEmbeddingSdk })
+  return match({ isFormattingEnabled, isEmbeddingSdk: isEmbeddingSdk() })
     .with(
       { isEmbeddingSdk: true, isFormattingEnabled: true },
       () =>
@@ -47,7 +46,7 @@ const useFormattingLabel = ({
       { isEmbeddingSdk: false, isFormattingEnabled: true },
       () =>
         c(
-          // eslint-disable-next-line no-literal-metabase-strings -- used for translation context
+          // eslint-disable-next-line metabase/no-literal-metabase-strings -- used for translation context
           "Refers to formatting for a piece of data, like long or short form dates, or currency. {0} is the name of the application, typically Metabase.",
         ).t`E.g. September 6, 2024 or $187.50, like in ${applicationName}`,
     )
@@ -87,6 +86,11 @@ export const ExportSettingsWidget = ({
         data={formatOptions}
         value={selectedFormat}
         onChange={onChangeFormat}
+        styles={{
+          root: {
+            backgroundColor: "var(--mb-color-background_page-secondary)",
+          },
+        }}
       />
 
       {canConfigureFormatting ? (
@@ -96,7 +100,15 @@ export const ExportSettingsWidget = ({
           checked={isFormattingEnabled}
           onChange={() => onToggleFormatting()}
           description={formattingLabel}
-          styles={{ inner: { alignSelf: "flex-start" } }}
+          styles={{
+            inner: { alignSelf: "flex-start" },
+            label: {
+              color: "var(--mb-color-text-primary)",
+            },
+            description: {
+              color: "var(--mb-color-text-secondary)",
+            },
+          }}
         />
       ) : null}
       {arePivotedExportsEnabled && canConfigurePivoting ? (
@@ -105,6 +117,11 @@ export const ExportSettingsWidget = ({
           label={t`Keep the data pivoted`}
           checked={isPivotingEnabled}
           onChange={() => onTogglePivoting()}
+          styles={{
+            label: {
+              color: "var(--mb-color-text-primary)",
+            },
+          }}
         />
       ) : null}
     </Stack>

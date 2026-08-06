@@ -14,13 +14,12 @@
 
   You can see what commands are available by running the command `help`. This command uses the docstrings and arglists
   associated with each command's entrypoint function to generate descriptions for each command."
-  (:refer-clojure :exclude [load import])
+  (:refer-clojure :exclude [import])
   (:require
    [clojure.string :as str]
    [clojure.tools.cli :as cli]
    [metabase.classloader.core :as classloader]
    [metabase.config.core :as config]
-   [metabase.legacy-mbql.util :as mbql.u]
    [metabase.util :as u]
    [metabase.util.encryption :as encryption]
    [metabase.util.i18n :refer [trs]]
@@ -91,7 +90,7 @@
       (println "Dump complete")
       (system-exit! 0))
     (catch Throwable e
-      (log/error e "Failed to dump application database to H2 file")
+      (log/errorf "Failed to dump application database to H2 file: %s" (ex-message e))
       (system-exit! 1))))
 
 (defn ^:command reset-password
@@ -140,11 +139,16 @@
   (println "File encoding:"   (System/getProperty "file.encoding")))
 
 (defn ^:command api-documentation
-  "Generate a markdown file containing documentation for all API endpoints. This is written to a file called
-  `docs/api-documentation.md`."
+  "Generate an HTML file and a JSON file for Scalar docs for the Metabase API."
   []
   (classloader/require 'metabase.cmd.endpoint-dox)
   ((resolve 'metabase.cmd.endpoint-dox/generate-dox!)))
+
+(defn ^:command generate-openapi-spec
+  "Generate OpenAPI specification file from Malli schema definitions. This is written to `resources/openapi/openapi.json`."
+  []
+  (classloader/require 'metabase.api-routes.cmd)
+  ((resolve 'metabase.api-routes.cmd/generate-openapi-spec!)))
 
 (defn ^:command environment-variables-documentation
   "Generates a markdown file containing documentation for environment variables relevant to configuring Metabase.
@@ -161,6 +165,13 @@
   (classloader/require 'metabase.cmd.config-file-gen)
   ((resolve 'metabase.cmd.config-file-gen/generate-config-file-doc!)))
 
+(defn ^:command command-documentation
+  "Generates a markdown file containing documentation for all CLI commands. This is written to a file called
+  `docs/installation-and-operation/commands.md`."
+  []
+  (classloader/require 'metabase.cmd.command-dox)
+  ((resolve 'metabase.cmd.command-dox/generate-dox!)))
+
 (defn ^:command driver-methods
   "Print a list of all multimethods available for a driver to implement, optionally with their docstrings."
   ([]
@@ -170,43 +181,12 @@
    (classloader/require 'metabase.cmd.driver-methods)
    ((resolve 'metabase.cmd.driver-methods/print-available-multimethods) true)))
 
-(defn ^:command load
-  {:doc "Note: this command is deprecated. Use `import` instead.
-         Load serialized Metabase instance as created by [[dump]] command from directory `path`."
-   :arg-spec [["-m" "--mode (skip|update)" "Update or skip on conflicts."
-               :default      :skip
-               :default-desc "skip"
-               :parse-fn     mbql.u/normalize-token
-               :validate     [#{:skip :update} "Must be 'skip' or 'update'"]]
-              ["-e" "--on-error (continue|abort)"  "Abort or continue on error."
-               :default      :continue
-               :default-desc "continue"
-               :parse-fn     mbql.u/normalize-token
-               :validate     [#{:continue :abort} "Must be 'continue' or 'abort'"]]]}
-  [path & options]
-  (log/warn (u/colorize :red "'load' is deprecated and will be removed in a future release. Please migrate to 'import'."))
-  (call-enterprise 'metabase-enterprise.serialization.cmd/v1-load! path (get-parsed-options #'load options)))
-
 (defn ^:command ^:requires-init import
   {:doc "Load serialized Metabase instance as created by the [[export]] command from directory `path`."
    :arg-spec [["-e" "--continue-on-error" "Do not break execution on errors."]
               [""   "--full-stacktrace"   "Output full stacktraces on errors."]]}
   [path & options]
   (call-enterprise 'metabase-enterprise.serialization.cmd/v2-load! path (get-parsed-options #'import options)))
-
-(defn ^:command dump
-  {:doc "Note: this command is deprecated. Use `export` instead.
-         Serializes Metabase instance into directory `path`."
-   :arg-spec [["-u" "--user EMAIL"         "Export collections owned by the specified user"]
-              ["-s" "--state (active|all)" "When set to `active`, do not dump archived entities. Default behavior is `all`."
-               :default      :all
-               :default-desc "all"
-               :parse-fn     mbql.u/normalize-token
-               :validate     [#{:active :all} "Must be 'active' or 'all'"]]
-              [nil "--include-entity-id"   "Include entity_id property in all dumped entities. Default: false."]]}
-  [path & options]
-  (log/warn (u/colorize :red "'dump' is deprecated and will be removed in a future release. Please migrate to 'export'."))
-  (call-enterprise 'metabase-enterprise.serialization.cmd/v1-dump! path (get-parsed-options #'dump options)))
 
 (defn ^:command export
   {:doc      "Serialize Metabase instance into directory at `path`."
@@ -228,19 +208,6 @@
   [path & options]
   (call-enterprise 'metabase-enterprise.serialization.cmd/v2-dump! path (get-parsed-options #'export options)))
 
-(defn ^:command seed-entity-ids
-  "Add entity IDs for instances of serializable models that don't already have them."
-  []
-  (when-not (call-enterprise 'metabase-enterprise.serialization.cmd/seed-entity-ids!)
-    (throw (Exception. "Error encountered while seeding entity IDs"))))
-
-(defn ^:command drop-entity-ids
-  "Drop entity IDs for instances of serializable models. Useful for migrating from v1 serialization (x.46 and earlier)
-  to v2 (x.47+)."
-  []
-  (when-not (call-enterprise 'metabase-enterprise.serialization.cmd/drop-entity-ids!)
-    (throw (Exception. "Error encountered while dropping entity IDs"))))
-
 (defn ^:command rotate-encryption-key
   "Rotate the encryption key of a metabase database. The MB_ENCRYPTION_SECRET_KEY environment variable has to be set to
   the current key, and the parameter `new-key` has to be the new key. `new-key` has to be at least 16 chars."
@@ -251,7 +218,7 @@
     (log/info "Encryption key rotation OK.")
     (system-exit! 0)
     (catch Throwable e
-      (log/error e "ERROR ROTATING KEY.")
+      (log/errorf "ERROR ROTATING KEY: %s" (ex-message e))
       (system-exit! 1))))
 
 (defn ^:command remove-encryption
@@ -267,7 +234,7 @@
     (log/info "Encryption removed OK.")
     (system-exit! 0)
     (catch Throwable e
-      (log/error e "ERROR REMOVING ENCRYPTION.")
+      (log/errorf "ERROR REMOVING ENCRYPTION: %s" (ex-message e))
       (system-exit! 1))))
 
 ;;; ------------------------------------------------ Validate Commands ----------------------------------------------

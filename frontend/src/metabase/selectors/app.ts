@@ -1,195 +1,22 @@
 import type { Selector } from "@reduxjs/toolkit";
 import { createSelector } from "@reduxjs/toolkit";
-import type { Location } from "history";
 
-import {
-  getDashboard,
-  getDashboardId,
-  getIsEditing as getIsEditingDashboard,
-} from "metabase/dashboard/selectors";
-import {
-  getIsSavedQuestionChanged,
-  getQuestion,
-} from "metabase/query_builder/selectors";
-import {
-  getEmbedOptions,
-  getIsEmbeddingIframe,
-} from "metabase/selectors/embed";
+import { getEmbedOptions } from "metabase/embedding/interactive-embedding";
+import type { State } from "metabase/redux/store";
+import type { Location } from "metabase/router";
 import { getUser } from "metabase/selectors/user";
-import type { State } from "metabase-types/store";
-
-import { getSetting } from "./settings";
+import { selectIsWithinIframe } from "metabase/utils/iframe";
 
 export interface RouterProps {
   location: Location;
 }
 
-const PATHS_WITHOUT_NAVBAR = [
-  /^\/setup/,
-  /^\/auth/,
-  /\/model\/.*\/query/,
-  /\/model\/.*\/metadata/,
-  /\/model\/query/,
-  /\/model\/metadata/,
-  /\/metric\/.*\/query/,
-  /\/metric\/.*\/metadata/,
-  /\/metric\/query/,
-  /\/metric\/metadata/,
-];
-
-const PATHS_WITH_COLLECTION_BREADCRUMBS = [
-  /\/question\//,
-  /\/model\//,
-  /\/metric\//,
-  /\/dashboard\//,
-];
-const PATHS_WITH_QUESTION_LINEAGE = [/\/question/, /\/model/];
-
-export const getRouterPath = (state: State, props: RouterProps) => {
-  return props?.location?.pathname ?? window.location.pathname;
-};
-
-export const getRouterHash = (state: State, props: RouterProps) => {
-  return props?.location?.hash ?? window.location.hash;
-};
-
-export const getIsAdminApp = createSelector([getRouterPath], (path) => {
-  return path.startsWith("/admin/");
-});
-
-export const getIsCollectionPathVisible = createSelector(
-  [
-    getQuestion,
-    getDashboard,
-    getRouterPath,
-    getIsEmbeddingIframe,
-    getEmbedOptions,
-  ],
-  (question, dashboard, path, isEmbedded, embedOptions) => {
-    if (isEmbedded && !embedOptions.breadcrumbs) {
-      return false;
-    }
-
-    return (
-      ((question != null && question.isSaved()) || dashboard != null) &&
-      PATHS_WITH_COLLECTION_BREADCRUMBS.some((pattern) => pattern.test(path))
-    );
-  },
-);
-
-export const getIsQuestionLineageVisible = createSelector(
-  [getIsSavedQuestionChanged, getRouterPath],
-  (isSavedQuestionChanged, path) =>
-    isSavedQuestionChanged &&
-    PATHS_WITH_QUESTION_LINEAGE.some((pattern) => pattern.test(path)),
-);
-
-export const getIsNavBarEnabled = createSelector(
-  [
-    getUser,
-    getRouterPath,
-    getIsEditingDashboard,
-    getIsEmbeddingIframe,
-    getEmbedOptions,
-  ],
-  (currentUser, path, isEditingDashboard, isEmbedded, embedOptions) => {
-    if (!currentUser || isEditingDashboard) {
-      return false;
-    }
-    if (isEmbedded && !embedOptions.side_nav) {
-      return false;
-    }
-
-    return !PATHS_WITHOUT_NAVBAR.some((pattern) => pattern.test(path));
-  },
-);
-
-const getIsEmbeddedAppBarVisible = createSelector(
-  [
-    getEmbedOptions,
-    getIsQuestionLineageVisible,
-    getIsCollectionPathVisible,
-    getIsNavBarEnabled,
-  ],
-  (
-    embedOptions,
-    isQuestionLineageVisible,
-    isCollectionPathVisible,
-    isNavBarEnabled,
-  ) => {
-    const anyEmbeddedAppBarElementVisible =
-      isNavBarEnabled ||
-      embedOptions.search ||
-      embedOptions.new_button ||
-      embedOptions.logo ||
-      isQuestionLineageVisible ||
-      isCollectionPathVisible;
-    return embedOptions.top_nav && anyEmbeddedAppBarElementVisible;
-  },
-);
-
-export const getIsAppBarVisible = createSelector(
-  [
-    getUser,
-    getRouterPath,
-    getRouterHash,
-    getIsAdminApp,
-    getIsEditingDashboard,
-    getIsEmbeddingIframe,
-    getIsEmbeddedAppBarVisible,
-  ],
-  (
-    currentUser,
-    path,
-    hash,
-    isAdminApp,
-    isEditingDashboard,
-    isEmbedded,
-    isEmbeddedAppBarVisible,
-  ) => {
-    const isFullscreen = hash.includes("fullscreen");
-
-    if (
-      !currentUser ||
-      (isEmbedded && !isEmbeddedAppBarVisible) ||
-      isAdminApp ||
-      isEditingDashboard ||
-      isFullscreen
-    ) {
-      return false;
-    }
-    return !PATHS_WITHOUT_NAVBAR.some((pattern) => pattern.test(path));
-  },
-);
-
-export const getIsLogoVisible = createSelector(
-  [getIsEmbeddingIframe, getEmbedOptions],
-  (isEmbeddingIframe, embedOptions) => {
-    return !isEmbeddingIframe || embedOptions.logo;
-  },
-);
-
-export const getIsSearchVisible = createSelector(
-  [getIsEmbeddingIframe, getEmbedOptions],
-  (isEmbeddingIframe, embedOptions) => {
-    return !isEmbeddingIframe || embedOptions.search;
-  },
-);
-
-export const getIsNewButtonVisible = createSelector(
-  [getIsEmbeddingIframe, getEmbedOptions],
-  (isEmbeddingIframe, embedOptions) => {
-    return !isEmbeddingIframe || embedOptions.new_button;
-  },
-);
-
-export const getIsProfileLinkVisible = createSelector(
-  [getIsEmbeddingIframe],
-  (isEmbeddingIframe) => !isEmbeddingIframe,
-);
-
 export const getErrorPage = (state: State) => {
   return state.app.errorPage;
+};
+
+export const getDetailViewState = (state: State) => {
+  return state.app.detailView;
 };
 
 export const getErrorMessage = (state: State) => {
@@ -197,26 +24,25 @@ export const getErrorMessage = (state: State) => {
   return errorPage?.data?.message || errorPage?.data;
 };
 
-export const getCollectionId = createSelector(
-  [getQuestion, getDashboard, getDashboardId],
-  (question, dashboard, dashboardId) =>
-    dashboardId ? dashboard?.collection_id : question?.collectionId(),
-);
-
 export const getIsNavbarOpen: Selector<State, boolean> = createSelector(
   [
-    getIsEmbeddingIframe,
+    selectIsWithinIframe,
     getEmbedOptions,
-    getIsAppBarVisible,
+    (_state: State) => window.location.hash,
     (state: State) => state.app.isNavbarOpen,
   ],
-  (isEmbeddingIframe, embedOptions, isAppBarVisible, isNavbarOpen) => {
-    // in an embedded instance, when the app bar is hidden, but the nav bar is not
-    // we need to force the sidebar to be open or else it will be totally inaccessible
+  (isEmbeddingIframe, embedOptions, locationHash, isNavbarOpen) => {
+    // In an embedded instance, when the app bar is hidden but the side nav is
+    // enabled, force the sidebar open or it would be totally inaccessible.
+    //
+    // The app bar is hidden exactly when `top_nav` is off or we're in
+    // fullscreen. The other factors in the app-tier getIsAppBarVisible only
+    // matter when the nav bar isn't rendered anyway.
+    const isFullscreen = locationHash.includes("fullscreen");
     if (
       isEmbeddingIframe &&
       embedOptions.side_nav === true &&
-      !isAppBarVisible
+      (!embedOptions.top_nav || isFullscreen)
     ) {
       return true;
     }
@@ -233,10 +59,6 @@ export const getCustomHomePageDashboardId = createSelector(
   [getUser],
   (user) => user?.custom_homepage?.dashboard_id || null,
 );
-
-export const getHasDismissedCustomHomePageToast = (state: State) => {
-  return getSetting(state, "dismissed-custom-dashboard-toast");
-};
 
 export const getIsErrorDiagnosticModalOpen = (state: State) =>
   state.app.isErrorDiagnosticsOpen;

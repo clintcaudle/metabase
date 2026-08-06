@@ -23,7 +23,7 @@
           user-id   (mt/user->id test-user)]
       ;; QueryExecution is an unbounded mega table and query it could result in a full table scan :( (See: #29103)
       ;; Run the test in an empty database to make querying less intense.
-      (mt/with-empty-h2-app-db
+      (mt/with-empty-h2-app-db!
         (mt/with-temp [:model/QueryExecution qe-a (merge query-execution-defaults {}
                                                          {:executor_id user-id
                                                           :started_at  (t/minus now (t/days 2))})
@@ -41,7 +41,6 @@
                           (filter #(#{user-id} (:executor_id %)))
                           (filter #((set (map :id [qe-a qe-b])) (:id %)))
                           (map #(select-keys % [:started_at :id]))))))))))
-
     (testing "permission tests"
       (testing "require admins"
         (mt/with-premium-features #{:audit-app}

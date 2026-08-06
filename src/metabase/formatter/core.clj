@@ -14,8 +14,10 @@
   coerce-bignum-to-int
   create-formatter
   format-geographic-coordinates
-  format-number
+  format-scalar-number
+  get-formatter
   graphing-column-row-fns
+  make-formatters
   make-temporal-str-formatter
   map->NumericWrapper
   map->TextWrapper

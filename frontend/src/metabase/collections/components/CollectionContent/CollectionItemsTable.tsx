@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 
+import { skipToken, useListCollectionItemsQuery } from "metabase/api";
 import {
   ALL_MODELS,
   COLLECTION_PAGE_SIZE,
@@ -17,16 +18,14 @@ import CollectionEmptyState from "metabase/collections/components/CollectionEmpt
 import type {
   CreateBookmark,
   DeleteBookmark,
-} from "metabase/collections/types";
-import { isRootTrashCollection } from "metabase/collections/utils";
-import { ItemsTable } from "metabase/components/ItemsTable";
-import { getVisibleColumnsMap } from "metabase/components/ItemsTable/utils";
-import { PaginationControls } from "metabase/components/PaginationControls";
+} from "metabase/common/collections/types";
+import { isRootTrashCollection } from "metabase/common/collections/utils";
+import { ItemsTable } from "metabase/common/components/ItemsTable";
+import { getVisibleColumnsMap } from "metabase/common/components/ItemsTable/utils";
+import { PaginationControls } from "metabase/common/components/PaginationControls";
+import { usePagination } from "metabase/common/hooks/use-pagination";
 import CS from "metabase/css/core/index.css";
-import Search from "metabase/entities/search";
-import { usePagination } from "metabase/hooks/use-pagination";
-import { useSelector } from "metabase/lib/redux";
-import { getIsEmbeddingSdk } from "metabase/selectors/embed";
+import { isEmbeddingSdk } from "metabase/embedding-sdk/config";
 import type Database from "metabase-lib/v1/metadata/Database";
 import type {
   Bookmark,
@@ -36,9 +35,8 @@ import type {
   CollectionItemModel,
   ListCollectionItemsRequest,
   ListCollectionItemsSortColumn,
+  SortingOptions,
 } from "metabase-types/api";
-import { SortDirection, type SortingOptions } from "metabase-types/api/sorting";
-import type { State } from "metabase-types/store";
 
 import {
   CollectionEmptyContent,
@@ -51,16 +49,16 @@ const getDefaultSortingOptions = (
   return isRootTrashCollection(collection)
     ? {
         sort_column: "last_edited_at",
-        sort_direction: SortDirection.Desc,
+        sort_direction: "desc",
       }
     : {
         sort_column: "name",
-        sort_direction: SortDirection.Asc,
+        sort_direction: "asc",
       };
 };
 
 export type CollectionItemsTableProps = {
-  collectionId: CollectionId;
+  collectionId?: CollectionId;
 } & Partial<{
   bookmarks: Bookmark[];
   clear: () => void;
@@ -78,6 +76,7 @@ export type CollectionItemsTableProps = {
   loadingPinnedItems: boolean;
   models: CollectionItemModel[];
   pageSize: number;
+  showDashboardQuestions: boolean;
   selected: CollectionItem[];
   selectOnlyTheseItems: (items: CollectionItem[]) => void;
   toggleItem: (item: CollectionItem) => void;
@@ -113,19 +112,16 @@ export const CollectionItemsTable = ({
   loadingPinnedItems,
   models = ALL_MODELS,
   pageSize = COLLECTION_PAGE_SIZE,
+  showDashboardQuestions = true,
   selected,
   selectOnlyTheseItems,
   toggleItem,
   visibleColumns = DEFAULT_VISIBLE_COLUMNS_LIST,
   onClick,
 }: CollectionItemsTableProps) => {
-  const isEmbeddingSdk = useSelector(getIsEmbeddingSdk);
-
   const [unpinnedItemsSorting, setUnpinnedItemsSorting] = useState<
     SortingOptions<ListCollectionItemsSortColumn>
   >(() => getDefaultSortingOptions(collection));
-
-  const [total, setTotal] = useState<number>();
 
   const { handleNextPage, handlePreviousPage, setPage, page, resetPage } =
     usePagination();
@@ -133,7 +129,6 @@ export const CollectionItemsTable = ({
   useEffect(() => {
     if (collectionId) {
       resetPage();
-      setTotal(undefined);
     }
   }, [collectionId, resetPage]);
 
@@ -145,13 +140,14 @@ export const CollectionItemsTable = ({
     [setPage],
   );
 
-  const showAllItems = isEmbeddingSdk || isRootTrashCollection(collection);
+  const showAllItems = isEmbeddingSdk() || isRootTrashCollection(collection);
 
   return (
     <CollectionItemsTableContent
       bookmarks={bookmarks}
       clear={clear}
       collection={collection}
+      collectionId={collectionId}
       createBookmark={createBookmark}
       databases={databases}
       deleteBookmark={deleteBookmark}
@@ -162,21 +158,25 @@ export const CollectionItemsTable = ({
       hasPinnedItems={hasPinnedItems}
       loadingPinnedItems={loadingPinnedItems}
       page={page}
+      pageSize={pageSize}
       selected={selected}
       selectOnlyTheseItems={selectOnlyTheseItems}
       toggleItem={toggleItem}
-      total={total}
       unpinnedItemsSorting={unpinnedItemsSorting}
-      unpinnedQuery={{
-        collection: collectionId,
-        models,
-        limit: pageSize,
-        offset: pageSize * page,
-        ...(showAllItems
-          ? { show_dashboard_questions: true }
-          : { pinned_state: "is_not_pinned" }),
-        ...unpinnedItemsSorting,
-      }}
+      unpinnedQuery={
+        collectionId === undefined
+          ? skipToken
+          : {
+              id: collectionId,
+              models,
+              limit: pageSize,
+              offset: pageSize * page,
+              ...(showAllItems
+                ? { show_dashboard_questions: showDashboardQuestions }
+                : { pinned_state: "is_not_pinned" }),
+              ...unpinnedItemsSorting,
+            }
+      }
       visibleColumns={visibleColumns}
       onClick={onClick}
       onNextPage={handleNextPage}
@@ -187,20 +187,18 @@ export const CollectionItemsTable = ({
 };
 
 type CollectionItemsTableContentProps = CollectionItemsTableProps & {
-  list: CollectionItem[] | undefined;
-  loading: boolean;
   page: number;
-  total: number | undefined;
   unpinnedItemsSorting: SortingOptions<ListCollectionItemsSortColumn>;
-  unpinnedQuery: ListCollectionItemsRequest;
+  unpinnedQuery: ListCollectionItemsRequest | typeof skipToken;
   onNextPage: () => void;
   onPreviousPage: () => void;
   onUnpinnedItemsSortingChange: (
     unpinnedItemsSorting: SortingOptions<ListCollectionItemsSortColumn>,
   ) => void;
+  visibleColumns: CollectionContentTableColumn[];
 };
 
-const CollectionItemsTableContentInner = ({
+const CollectionItemsTableContent = ({
   bookmarks,
   clear,
   collection,
@@ -212,22 +210,25 @@ const CollectionItemsTableContentInner = ({
   handleCopy,
   handleMove,
   hasPinnedItems,
-  list: unpinnedItems = [],
-  loading: loadingUnpinnedItems,
   loadingPinnedItems,
   page,
   pageSize = COLLECTION_PAGE_SIZE,
   selected,
   selectOnlyTheseItems,
   toggleItem,
-  total,
   unpinnedItemsSorting,
-  visibleColumns = DEFAULT_VISIBLE_COLUMNS_LIST,
+  unpinnedQuery,
+  visibleColumns,
   onClick,
   onNextPage,
   onPreviousPage,
   onUnpinnedItemsSortingChange,
 }: CollectionItemsTableContentProps) => {
+  const { data, isLoading: loadingUnpinnedItems } =
+    useListCollectionItemsQuery(unpinnedQuery);
+
+  const unpinnedItems = data?.data ?? [];
+  const total = data?.total;
   const visibleColumnsMap = useMemo(
     () => getVisibleColumnsMap(visibleColumns),
     [visibleColumns],
@@ -274,7 +275,14 @@ const CollectionItemsTableContentInner = ({
         onClick={onClick}
         visibleColumnsMap={visibleColumnsMap}
       />
-      <div className={cx(CS.flex, CS.justifyEnd, CS.my3)}>
+      <div
+        className={cx(
+          CS.flex,
+          CS.justifyEnd,
+          CS.my3,
+          CS.syncStatusAwarePagination,
+        )}
+      >
         {hasPagination && (
           <PaginationControls
             showTotal
@@ -290,11 +298,3 @@ const CollectionItemsTableContentInner = ({
     </CollectionTable>
   );
 };
-
-const CollectionItemsTableContent = Search.loadList({
-  query: (_state: State, props: CollectionItemsTableContentProps) => {
-    return props.unpinnedQuery;
-  },
-  loadingAndErrorWrapper: false,
-  wrapped: true,
-})(CollectionItemsTableContentInner);

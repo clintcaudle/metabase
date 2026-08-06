@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import type { IconProps } from "metabase/ui";
 import type { OnChangeCardAndRun } from "metabase/visualizations/types";
 import type {
+  RawSeries,
   Series,
   TransformedSeries,
   VisualizationSettings,
@@ -21,10 +22,12 @@ interface ChartCaptionProps {
   getHref?: () => string | undefined;
   titleMenuItems?: React.ReactNode;
   onChangeCardAndRun?: OnChangeCardAndRun | null;
+  visualizerRawSeries?: RawSeries;
 }
 
 const ChartCaption = ({
   series,
+  visualizerRawSeries,
   settings,
   icon,
   actionButtons,
@@ -34,15 +37,23 @@ const ChartCaption = ({
   width,
   titleMenuItems,
 }: ChartCaptionProps) => {
-  const title = settings["card.title"] ?? series?.[0].card.name ?? "";
+  const title =
+    settings["card.title"] ??
+    series?.[0].card.visualization_settings["card.title"] ??
+    series?.[0].card.name ??
+    "";
   const description = settings["card.description"];
-  const data = (series as TransformedSeries)._raw || series;
-  const card = data[0].card;
-  const cardIds = new Set(data.map((s) => s.card.id));
+  const data =
+    // Unjustified type cast. FIXME
+    visualizerRawSeries ?? (series as TransformedSeries)._raw ?? series;
+  const card = data?.[0].card;
+  const cardIds = new Set(data?.map((s) => s.card.id) ?? []);
   const canSelectTitle = cardIds.size === 1 && onChangeCardAndRun;
 
   const handleSelectTitle = useCallback(() => {
-    onChangeCardAndRun?.({ nextCard: card });
+    if (card) {
+      onChangeCardAndRun?.({ nextCard: card });
+    }
   }, [card, onChangeCardAndRun]);
 
   return (

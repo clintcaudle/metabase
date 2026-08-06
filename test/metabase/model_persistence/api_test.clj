@@ -103,6 +103,8 @@
                                        (.setProperty "org.quartz.threadPool.threadCount" "6")
                                        (.setProperty "org.quartz.threadPool.class" "org.quartz.simpl.SimpleThreadPool"))))]
     ;; a binding won't work since we need to cross thread boundaries
+    ;; [kondo-keep] suppresses a warning :redundant-ignore can't see; --audit rechecks
+    #_{:clj-kondo/ignore [:metabase/prefer-with-dynamic-fn-redefs]}
     (with-redefs [task/scheduler (constantly sched)]
       (try
         (qs/standby sched)
@@ -206,7 +208,7 @@
 
 (deftest persist-database-test
   (mt/test-drivers (mt/normal-drivers-with-feature :persist-models)
-    (let [db-id (:id (mt/db))]
+    (let [db-id (mt/id)]
       (mt/with-temp
         [:model/Card card {:database_id db-id
                            :type        :model}]
@@ -214,12 +216,10 @@
           (testing "requires persist setting to be enabled"
             (is (= "Persisting models is not enabled."
                    (mt/user-http-request :crowberto :post 400 (str "persist/database/" db-id "/persist"))))))
-
         (mt/with-temporary-setting-values [persisted-models-enabled true]
           (testing "only users with permissions can persist a database"
             (is (= "You don't have permissions to do that."
                    (mt/user-http-request :rasta :post 403 (str "persist/database/" db-id "/persist")))))
-
           (testing "should be able to persit an database"
             (mt/user-http-request :crowberto :post 204 (str "persist/database/" db-id "/persist"))
             (is (= "creating" (t2/select-one-fn :state 'PersistedInfo
@@ -236,7 +236,7 @@
 
 (deftest unpersist-database-test
   (mt/test-drivers (mt/normal-drivers-with-feature :persist-models)
-    (let [db-id (:id (mt/db))]
+    (let [db-id (mt/id)]
       (mt/with-temp
         [:model/Card _ {:database_id db-id
                         :type        :model}]

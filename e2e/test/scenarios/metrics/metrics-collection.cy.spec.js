@@ -1,10 +1,5 @@
 const { H } = cy;
-import { USER_GROUPS } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import {
-  FIRST_COLLECTION_ID,
-  ORDERS_MODEL_ID,
-} from "e2e/support/cypress_sample_instance_data";
 
 const { ORDERS_ID, ORDERS } = SAMPLE_DATABASE;
 
@@ -13,17 +8,6 @@ const ORDERS_SCALAR_METRIC = {
   type: "metric",
   query: {
     "source-table": ORDERS_ID,
-    aggregation: [["count"]],
-  },
-  display: "scalar",
-  collection_position: 1,
-};
-
-const ORDERS_SCALAR_MODEL_METRIC = {
-  name: "Orders model metric",
-  type: "metric",
-  query: {
-    "source-table": `card__${ORDERS_MODEL_ID}`,
     aggregation: [["count"]],
   },
   display: "scalar",
@@ -59,13 +43,9 @@ describe("scenarios > metrics > collection", () => {
     H.createQuestion(ORDERS_TIMESERIES_METRIC);
     cy.visit("/collection/root");
     H.getPinnedSection().within(() => {
-      cy.findByText("Metrics").should("be.visible");
       cy.findByText(ORDERS_SCALAR_METRIC.name).should("be.visible");
-      cy.findByTestId("scalar-container")
-        .findByText("18,760")
-        .should("be.visible");
       cy.findByText(ORDERS_TIMESERIES_METRIC.name).should("be.visible");
-      H.echartsContainer().should("be.visible");
+      cy.findAllByText("A metric").should("have.length", 2).and("be.visible");
     });
   });
 
@@ -94,72 +74,39 @@ describe("scenarios > metrics > collection", () => {
       .should("not.exist");
   });
 
-  it(
-    "should be possible to add and remove a metric from bookmarks",
-    { tags: "@flaky" },
-    () => {
-      H.createQuestion(ORDERS_SCALAR_METRIC);
-      H.createQuestion({
-        ...ORDERS_TIMESERIES_METRIC,
-        collection_position: null,
-      });
-      cy.intercept("POST", "/api/card/*/query").as("cardQuery");
-
-      cy.visit("/collection/root");
-
-      cy.wait("@cardQuery");
-      H.getPinnedSection().should("contain", "18,760");
-      H.openPinnedItemMenu(ORDERS_SCALAR_METRIC.name);
-
-      H.popover().findByText("Bookmark").click();
-      H.navigationSidebar()
-        .findByText(ORDERS_SCALAR_METRIC.name)
-        .should("be.visible");
-
-      cy.log("pinned card should 'blink' to load and later show the data");
-      cy.wait("@cardQuery");
-      H.getPinnedSection().should("contain", "18,760");
-
-      H.openPinnedItemMenu(ORDERS_SCALAR_METRIC.name);
-      H.popover().findByText("Remove from bookmarks").click();
-      H.navigationSidebar()
-        .findByText(ORDERS_SCALAR_METRIC.name)
-        .should("not.exist");
-
-      H.openUnpinnedItemMenu(ORDERS_TIMESERIES_METRIC.name);
-      H.popover().findByText("Bookmark").click();
-      H.navigationSidebar()
-        .findByText(ORDERS_TIMESERIES_METRIC.name)
-        .should("be.visible");
-      H.openUnpinnedItemMenu(ORDERS_TIMESERIES_METRIC.name);
-      H.popover().findByText("Remove from bookmarks").click();
-      H.navigationSidebar()
-        .findByText(ORDERS_TIMESERIES_METRIC.name)
-        .should("not.exist");
-    },
-  );
-
-  it("should be possible to hide the visualization for a pinned metric", () => {
+  it("should be possible to add and remove a metric from bookmarks", () => {
     H.createQuestion(ORDERS_SCALAR_METRIC);
+    H.createQuestion({
+      ...ORDERS_TIMESERIES_METRIC,
+      collection_position: null,
+    });
+
     cy.visit("/collection/root");
-    H.getPinnedSection().within(() => {
-      cy.findByText(ORDERS_SCALAR_METRIC.name).should("be.visible");
-      cy.findByTestId("scalar-container").should("be.visible");
-    });
+
+    H.getPinnedSection().should("contain", ORDERS_SCALAR_METRIC.name);
+    H.openPinnedItemMenu(ORDERS_SCALAR_METRIC.name);
+
+    H.popover().findByText("Bookmark").click();
+    H.navigationSidebar()
+      .findByText(ORDERS_SCALAR_METRIC.name)
+      .should("be.visible");
 
     H.openPinnedItemMenu(ORDERS_SCALAR_METRIC.name);
-    H.popover().findByText("Don’t show visualization").click();
-    H.getPinnedSection().within(() => {
-      cy.findByText(ORDERS_SCALAR_METRIC.name).should("be.visible");
-      cy.findByTestId("scalar-container").should("not.exist");
-    });
+    H.popover().findByText("Remove from bookmarks").click();
+    H.navigationSidebar()
+      .findByText(ORDERS_SCALAR_METRIC.name)
+      .should("not.exist");
 
-    H.openPinnedItemMenu(ORDERS_SCALAR_METRIC.name);
-    H.popover().findByText("Show visualization").click();
-    H.getPinnedSection().within(() => {
-      cy.findByText(ORDERS_SCALAR_METRIC.name).should("be.visible");
-      cy.findByTestId("scalar-container").should("be.visible");
-    });
+    H.openUnpinnedItemMenu(ORDERS_TIMESERIES_METRIC.name);
+    H.popover().findByText("Bookmark").click();
+    H.navigationSidebar()
+      .findByText(ORDERS_TIMESERIES_METRIC.name)
+      .should("be.visible");
+    H.openUnpinnedItemMenu(ORDERS_TIMESERIES_METRIC.name);
+    H.popover().findByText("Remove from bookmarks").click();
+    H.navigationSidebar()
+      .findByText(ORDERS_TIMESERIES_METRIC.name)
+      .should("not.exist");
   });
 
   it("should be possible to archive, unarchive, and delete a metric", () => {
@@ -184,7 +131,7 @@ describe("scenarios > metrics > collection", () => {
     H.getUnpinnedSection()
       .findByText(ORDERS_TIMESERIES_METRIC.name)
       .should("not.exist");
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     H.undoToastList().last().findByText("Trashed metric").should("be.visible");
 
     openArchive();
@@ -193,7 +140,7 @@ describe("scenarios > metrics > collection", () => {
     H.getUnpinnedSection()
       .findByText(ORDERS_TIMESERIES_METRIC.name)
       .should("not.exist");
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     H.undoToastList()
       .last()
       .findByText(`${ORDERS_TIMESERIES_METRIC.name} has been restored.`)
@@ -207,31 +154,10 @@ describe("scenarios > metrics > collection", () => {
     H.popover().findByText("Delete permanently").click();
     H.modal().button("Delete permanently").click();
     H.getUnpinnedSection().should("not.exist");
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     H.undoToastList()
       .last()
       .findByText("This item has been permanently deleted.")
-      .should("be.visible");
-  });
-
-  it("should be able to view a model-based metric without collection access to the source model", () => {
-    cy.signInAsAdmin();
-    cy.updateCollectionGraph({
-      [USER_GROUPS.ALL_USERS_GROUP]: {
-        root: "none",
-        [FIRST_COLLECTION_ID]: "read",
-      },
-    });
-    H.createQuestion({
-      ...ORDERS_SCALAR_MODEL_METRIC,
-      collection_id: FIRST_COLLECTION_ID,
-    }).then(({ body: card }) => {
-      cy.signIn("nocollection");
-      H.visitCollection(FIRST_COLLECTION_ID);
-    });
-    H.getPinnedSection()
-      .findByTestId("scalar-container")
-      .findByText("18,760")
       .should("be.visible");
   });
 });

@@ -1,32 +1,44 @@
 import userEvent from "@testing-library/user-event";
-import type { Location } from "history";
-import { type InjectedRouter, Link, Route, withRouter } from "react-router";
 
-import { renderWithProviders, screen } from "__support__/ui";
-import { INPUT_WRAPPER_TEST_ID } from "metabase/core/components/TabButton";
+import { renderWithProviders, screen, within } from "__support__/ui";
+import { Link } from "metabase/common/components/Link";
+import { INPUT_WRAPPER_TEST_ID } from "metabase/common/components/TabButton";
 import { getDefaultTab, resetTempTabId } from "metabase/dashboard/actions";
+import { MockDashboardContext } from "metabase/dashboard/context/mock-context";
 import { useDashboardUrlQuery } from "metabase/dashboard/hooks/use-dashboard-url-query";
 import { getSelectedTabId } from "metabase/dashboard/selectors";
 import { createTabSlug } from "metabase/dashboard/utils";
-import { useSelector } from "metabase/lib/redux";
+import { useSelector } from "metabase/redux";
+import type { DashboardState } from "metabase/redux/store";
+import { Route, useLocation } from "metabase/router";
 import type { DashboardTab } from "metabase-types/api";
-import type { DashboardState, State } from "metabase-types/store";
+import { createMockCard } from "metabase-types/api/mocks";
+import { createMockDashboardCard } from "metabase-types/api/mocks/dashboard";
 
 import { DashboardTabs } from "./DashboardTabs";
 import { TEST_DASHBOARD_STATE } from "./test-utils";
 import { useDashboardTabs } from "./use-dashboard-tabs";
 
+const TEST_CARD = createMockCard({
+  id: 1,
+  name: "Test card",
+  type: "model",
+});
+
 function setup({
   tabs,
   slug = undefined,
   isEditing = true,
+  dashcards,
 }: {
   tabs?: DashboardTab[];
   slug?: string | undefined;
   isEditing?: boolean;
+  dashcards?: DashboardState["dashcards"];
 } = {}) {
   const dashboard: DashboardState = {
     ...TEST_DASHBOARD_STATE,
+    dashcards: dashcards ?? TEST_DASHBOARD_STATE.dashcards,
     dashboards: {
       1: {
         ...TEST_DASHBOARD_STATE.dashboards[1],
@@ -35,21 +47,20 @@ function setup({
     },
   };
 
-  const RoutedDashboardComponent = withRouter(
-    ({ location }: { location: Location }) => {
-      const { selectedTabId } = useDashboardTabs({ dashboardId: 1 });
-      useDashboardUrlQuery(createMockRouter(), location);
-      return (
-        <>
-          <DashboardTabs dashboardId={1} isEditing={isEditing} />
-          <span>Selected tab id is {selectedTabId}</span>
-          <br />
-          <span>Path is {location.pathname + location.search}</span>
-          <Link to="/someotherpath">Navigate away</Link>
-        </>
-      );
-    },
-  );
+  const RoutedDashboardComponent = () => {
+    const location = useLocation();
+    const { selectedTabId } = useDashboardTabs();
+    useDashboardUrlQuery(location);
+    return (
+      <>
+        <DashboardTabs />
+        <span>Selected tab id is {selectedTabId}</span>
+        <br />
+        <span>Path is {location.pathname + location.search}</span>
+        <Link to="/someotherpath">Navigate away</Link>
+      </>
+    );
+  };
 
   const OtherComponent = () => {
     const selectedTabId = useSelector(getSelectedTabId);
@@ -63,13 +74,31 @@ function setup({
     );
   };
 
+  const DashboardRoute = () => {
+    return (
+      <MockDashboardContext
+        dashboardId={1}
+        dashboard={{
+          ...TEST_DASHBOARD_STATE.dashboards[1],
+          dashcards: dashcards
+            ? Object.values(dashcards)
+            : TEST_DASHBOARD_STATE.dashboards[1].dashcards.map(
+                (dcId) => TEST_DASHBOARD_STATE.dashcards[dcId],
+              ),
+          tabs: tabs ?? TEST_DASHBOARD_STATE.dashboards[1].tabs,
+        }}
+        navigateToNewCardFromDashboard={null}
+        isEditing={isEditing}
+      >
+        <RoutedDashboardComponent />
+      </MockDashboardContext>
+    );
+  };
+
   const { store } = renderWithProviders(
     <>
-      <Route
-        path="dashboard/:slug(/:tabSlug)"
-        component={RoutedDashboardComponent}
-      />
-      <Route path="someotherpath" component={OtherComponent} />
+      <Route path="dashboard/:slug" element={<DashboardRoute />} />
+      <Route path="someotherpath" element={<OtherComponent />} />
     </>,
     {
       storeInitialState: { dashboard },
@@ -78,8 +107,7 @@ function setup({
     },
   );
   return {
-    getDashcards: () =>
-      Object.values((store.getState() as unknown as State).dashboard.dashcards),
+    getDashcards: () => Object.values(store.getState().dashboard.dashcards),
   };
 }
 
@@ -89,6 +117,7 @@ function queryTab(numOrName: number | string) {
 }
 
 async function selectTab(num: number) {
+  // Unjustified type cast. FIXME
   const selectedTab = queryTab(num) as HTMLElement;
   await userEvent.click(selectedTab);
   return selectedTab;
@@ -144,22 +173,6 @@ async function findSlug({ tabId, name }: { tabId: number; name: string }) {
   return screen.findByText(new RegExp(createTabSlug({ id: tabId, name })));
 }
 
-function createMockRouter(): InjectedRouter {
-  return {
-    push: jest.fn(),
-    replace: jest.fn(),
-    go: jest.fn(),
-    goBack: jest.fn(),
-    goForward: jest.fn(),
-    setRouteLeaveHook: jest.fn(),
-    createPath: jest.fn(),
-    createHref: jest.fn(),
-    isActive: jest.fn(),
-    // @ts-expect-error missing type definition
-    listen: jest.fn().mockReturnValue(jest.fn()),
-  };
-}
-
 describe("DashboardTabs", () => {
   beforeEach(() => {
     resetTempTabId();
@@ -171,6 +184,26 @@ describe("DashboardTabs", () => {
 
       expect(queryTab(1)).toBeVisible();
       expect(queryTab(2)).toBeVisible();
+    });
+
+    it("should use role=tab on tab items and role=tablist on the container (#70546)", () => {
+      setup({
+        isEditing: false,
+        tabs: [
+          getDefaultTab({ tabId: 1, dashId: 1, name: "Tab 1" }),
+          getDefaultTab({ tabId: 2, dashId: 1, name: "Tab 2" }),
+        ],
+      });
+
+      const tablist = screen.getByRole("tablist");
+      expect(tablist).toBeInTheDocument();
+
+      expect(
+        within(tablist).getByRole("tab", { name: "Tab 1" }),
+      ).toBeInTheDocument();
+      expect(
+        within(tablist).getByRole("tab", { name: "Tab 2" }),
+      ).toBeInTheDocument();
     });
 
     it("should not display tabs when there is one", () => {
@@ -367,6 +400,87 @@ describe("DashboardTabs", () => {
         await deleteTab(2);
 
         expect(screen.getByText("Selected tab id is -1")).toBeInTheDocument();
+      });
+
+      it("should show confirmation modal when deleting a tab with all dashboard questions", async () => {
+        setup({
+          dashcards: {
+            1: createMockDashboardCard({
+              id: 1,
+              dashboard_id: 1,
+              dashboard_tab_id: 2,
+              card: {
+                ...TEST_CARD,
+                id: 1,
+                dashboard_id: 1, // Dashboard question
+              },
+            }),
+            2: createMockDashboardCard({
+              id: 2,
+              dashboard_id: 1,
+              dashboard_tab_id: 2,
+              card: {
+                ...TEST_CARD,
+                id: 2,
+                dashboard_id: 1, // Dashboard question
+              },
+            }),
+          },
+        });
+        await deleteTab(2);
+
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+        expect(
+          screen.getByText("Delete this tab and its charts?"),
+        ).toBeInTheDocument();
+
+        await userEvent.click(
+          screen.getByRole("button", { name: "Delete tab" }),
+        );
+
+        expect(queryTab(2)).not.toBeInTheDocument();
+      });
+
+      it("should show confirmation modal with a list of the affected questions when deleting a tab with a mix of saved and dashboard questions", async () => {
+        setup({
+          dashcards: {
+            1: createMockDashboardCard({
+              id: 1,
+              dashboard_id: 1,
+              dashboard_tab_id: 2,
+              card: {
+                ...TEST_CARD,
+                id: 1,
+                name: "Dashboard question",
+                dashboard_id: 1,
+              },
+            }),
+            2: createMockDashboardCard({
+              id: 2,
+              dashboard_id: 1,
+              dashboard_tab_id: 2,
+              card: {
+                ...TEST_CARD,
+                id: 2,
+                name: "Saved question",
+                dashboard_id: null,
+              },
+            }),
+          },
+        });
+
+        await deleteTab(2);
+
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+        expect(screen.getByText("Dashboard question")).toBeInTheDocument();
+        expect(screen.queryByText("Saved question")).not.toBeInTheDocument();
+        expect(screen.getByText("Delete this tab?")).toBeInTheDocument();
+
+        await userEvent.click(
+          screen.getByRole("button", { name: "Delete tab" }),
+        );
+
+        expect(queryTab(2)).not.toBeInTheDocument();
       });
     });
 

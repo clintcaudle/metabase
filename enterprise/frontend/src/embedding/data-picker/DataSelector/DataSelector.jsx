@@ -1,28 +1,33 @@
 /* eslint-disable react/prop-types */
 import cx from "classnames";
-import PropTypes from "prop-types";
-import { Component } from "react";
+import { Component, useCallback } from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
-import EmptyState from "metabase/components/EmptyState";
-import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
+import {
+  cardApi,
+  databaseApi,
+  useLazyListDatabaseSchemaTablesQuery,
+  useLazyListDatabaseSchemasQuery,
+  useListDatabasesQuery,
+  useSearchQuery,
+} from "metabase/api";
+import { runRtkEndpoint } from "metabase/api/utils/run-rtk-endpoint";
+import { EmptyState } from "metabase/common/components/EmptyState";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import CS from "metabase/css/core/index.css";
-import Databases from "metabase/entities/databases";
-import Questions from "metabase/entities/questions";
-import Schemas from "metabase/entities/schemas";
-import Search from "metabase/entities/search";
-import Tables from "metabase/entities/tables";
-import { connect } from "metabase/lib/redux";
-import { getHasDataAccess } from "metabase/selectors/data";
+import { connect } from "metabase/redux";
+import { fetchTableMetadata } from "metabase/redux/tables";
 import { getMetadata } from "metabase/selectors/metadata";
-import { getSetting } from "metabase/selectors/settings";
+import { canUserCreateQueries } from "metabase/selectors/user";
+import { getSetting } from "metabase/settings";
 import { Box, Popover } from "metabase/ui";
 import {
   SAVED_QUESTIONS_VIRTUAL_DB_ID,
   getQuestionIdFromVirtualTableId,
   isVirtualCardId,
 } from "metabase-lib/v1/metadata/utils/saved-questions";
+import { parseSchemaId } from "metabase-lib/v1/metadata/utils/schema";
 
 import DataBucketPicker from "../DataSelectorDataBucketPicker";
 import DatabasePicker from "../DataSelectorDatabasePicker";
@@ -31,7 +36,7 @@ import SchemaPicker from "../DataSelectorSchemaPicker";
 import TablePicker from "../DataSelectorTablePicker";
 import { TableTrigger, Trigger } from "../TriggerComponents";
 import { CONTAINER_WIDTH, DATA_BUCKET } from "../constants";
-import SavedEntityPicker from "../saved-entity-picker/SavedEntityPicker";
+import { SavedEntityPicker } from "../saved-entity-picker/SavedEntityPicker";
 import { getDataTypes } from "../utils";
 
 // chooses a data source bucket (datasets / raw data (tables) / saved questions)
@@ -82,55 +87,14 @@ export class UnconnectedDataSelector extends Component {
     };
   }
 
-  static propTypes = {
-    selectedDataBucketId: PropTypes.string,
-    selectedDatabaseId: PropTypes.number,
-    selectedSchemaId: PropTypes.string,
-    selectedTableId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-    databases: PropTypes.array.isRequired,
-    setDatabaseFn: PropTypes.func,
-    setFieldFn: PropTypes.func,
-    setSourceTableFn: PropTypes.func,
-    hideSingleSchema: PropTypes.bool,
-    hideSingleDatabase: PropTypes.bool,
-    useOnlyAvailableDatabase: PropTypes.bool,
-    useOnlyAvailableSchema: PropTypes.bool,
-    isInitiallyOpen: PropTypes.bool,
-    isQuerySourceModel: PropTypes.bool,
-    tableFilter: PropTypes.func,
-    canChangeDatabase: PropTypes.bool,
-    containerClassName: PropTypes.string,
-    canSelectModel: PropTypes.bool,
-    canSelectTable: PropTypes.bool,
-
-    // from search entity list loader
-    allError: PropTypes.bool,
-    allFetched: PropTypes.bool,
-    allLoaded: PropTypes.bool,
-    allLoading: PropTypes.bool,
-    loaded: PropTypes.bool,
-    loading: PropTypes.bool,
-    fetched: PropTypes.bool,
-    fetch: PropTypes.func,
-    create: PropTypes.func,
-    update: PropTypes.func,
-    delete: PropTypes.func,
-    reload: PropTypes.func,
-    list: PropTypes.arrayOf(PropTypes.object),
-  };
-
   static defaultProps = {
     isInitiallyOpen: false,
-    useOnlyAvailableDatabase: true,
-    useOnlyAvailableSchema: true,
     hideSingleSchema: true,
     hideSingleDatabase: false,
     canChangeDatabase: true,
     hasTriggerExpandControl: true,
     isPopover: true,
     isMantine: false,
-    canSelectModel: true,
-    canSelectTable: true,
   };
 
   isPopoverOpen() {
@@ -260,16 +224,11 @@ export class UnconnectedDataSelector extends Component {
     const {
       fetchFields,
       fetchQuestion,
-      selectedDataBucketId,
       selectedTableId: sourceId,
     } = this.props;
 
     if (!this.isSearchLoading() && !activeStep) {
       await this.hydrateActiveStep();
-    }
-
-    if (selectedDataBucketId === DATA_BUCKET.MODELS) {
-      this.showSavedEntityPicker({ entityType: "model" });
     }
 
     if (sourceId) {
@@ -329,9 +288,20 @@ export class UnconnectedDataSelector extends Component {
   }
 
   isSearchLoading = () => {
-    // indicates status of API request triggered by Search.loadList
     return this.props.loading;
   };
+
+  getCardType() {
+    const { selectedDataBucketId, savedEntityType } = this.state;
+    if (
+      selectedDataBucketId === DATA_BUCKET.MODELS ||
+      savedEntityType === "model"
+    ) {
+      return "model";
+    } else {
+      return "question";
+    }
+  }
 
   hasModels = () => {
     const { availableModels, canSelectModel, loaded } = this.props;
@@ -341,6 +311,14 @@ export class UnconnectedDataSelector extends Component {
   hasUsableModels = () => {
     // As models are actually saved questions, nested queries must be enabled
     return this.hasModels() && this.props.hasNestedQueriesEnabled;
+  };
+
+  hasSavedQuestions = () => {
+    const { canSelectQuestion } = this.props;
+    return (
+      this.state.databases.some((database) => database.is_saved_questions) &&
+      canSelectQuestion
+    );
   };
 
   isJoinStep() {
@@ -363,7 +341,8 @@ export class UnconnectedDataSelector extends Component {
   async hydrateActiveStep() {
     if (
       this.isSavedEntitySelected() ||
-      this.state.selectedDataBucketId === DATA_BUCKET.MODELS
+      this.state.selectedDataBucketId === DATA_BUCKET.MODELS ||
+      this.state.selectedDataBucketId === DATA_BUCKET.SAVED_QUESTIONS
     ) {
       await this.switchToStep(DATABASE_STEP);
     } else if (
@@ -374,13 +353,20 @@ export class UnconnectedDataSelector extends Component {
     ) {
       await this.switchToStep(TABLE_STEP);
     } else if (this.isJoinStep()) {
-      const isQuerySourceModel = this.props.isQuerySourceModel;
-
-      if (isQuerySourceModel) {
+      const querySourceType = this.props.querySourceType;
+      if (querySourceType === "model") {
         await this.switchToStep(
           DATABASE_STEP,
           {
-            selectedDataBucketId: "models",
+            selectedDataBucketId: DATA_BUCKET.MODELS,
+          },
+          false,
+        );
+      } else if (querySourceType === "question") {
+        await this.switchToStep(
+          DATABASE_STEP,
+          {
+            selectedDataBucketId: DATA_BUCKET.SAVED_QUESTIONS,
           },
           false,
         );
@@ -388,7 +374,7 @@ export class UnconnectedDataSelector extends Component {
         // query source is a table
         await this.switchToStep(SCHEMA_STEP);
       }
-    } else if (!this.hasUsableModels()) {
+    } else if (!this.hasUsableModels() && !this.hasSavedQuestions()) {
       await this.switchToStep(DATABASE_STEP);
     } else {
       await this.switchToStep(DATA_BUCKET_STEP);
@@ -396,7 +382,6 @@ export class UnconnectedDataSelector extends Component {
   }
 
   // for steps where there's a single option sometimes we want to automatically select it
-  // if `useOnlyAvailable*` prop is provided
   skipSteps() {
     const { readOnly } = this.props;
     const { activeStep } = this.state;
@@ -405,24 +390,27 @@ export class UnconnectedDataSelector extends Component {
       return;
     }
 
-    if (
-      activeStep === DATABASE_STEP &&
-      this.props.useOnlyAvailableDatabase &&
-      this.props.selectedDatabaseId == null
-    ) {
+    if (activeStep === DATABASE_STEP && this.props.selectedDatabaseId == null) {
       const databases = this.getDatabases();
       if (databases && databases.length === 1) {
         this.onChangeDatabase(databases[0]);
       }
     }
-    if (
-      activeStep === SCHEMA_STEP &&
-      this.props.useOnlyAvailableSchema &&
-      this.props.selectedSchemaId == null
-    ) {
+    if (activeStep === SCHEMA_STEP && this.props.selectedSchemaId == null) {
       const { schemas } = this.state;
       if (schemas && schemas.length === 1) {
         this.onChangeSchema(schemas[0]);
+      }
+    }
+    if (activeStep === DATA_BUCKET_STEP) {
+      const dataTypes = getDataTypes({
+        hasModels: this.hasModels(),
+        hasTables: this.props.canSelectTable,
+        hasSavedQuestions: this.hasSavedQuestions(),
+        hasNestedQueriesEnabled: this.props.hasNestedQueriesEnabled,
+      });
+      if (dataTypes.length === 1) {
+        this.onChangeDataBucket(dataTypes[0].id);
       }
     }
   }
@@ -450,16 +438,16 @@ export class UnconnectedDataSelector extends Component {
     index -= 1;
 
     // possibly skip another step backwards
-    if (
-      steps[index] === SCHEMA_STEP &&
-      this.props.useOnlyAvailableSchema &&
-      this.state.schemas.length === 1
-    ) {
+    if (steps[index] === SCHEMA_STEP && this.state.schemas.length === 1) {
       index -= 1;
     }
 
-    // data bucket step doesn't make a lot of sense when there're no models
-    if (steps[index] === DATA_BUCKET_STEP && !this.hasUsableModels()) {
+    // data bucket step doesn't make a lot of sense when there're no models or saved questions
+    if (
+      steps[index] === DATA_BUCKET_STEP &&
+      !this.hasUsableModels() &&
+      !this.hasSavedQuestions()
+    ) {
       return null;
     }
 
@@ -581,7 +569,7 @@ export class UnconnectedDataSelector extends Component {
     }
   }
 
-  switchToStep = async (stepName, stateChange = {}, skipSteps = true) => {
+  switchToStep = async (stepName, stateChange = {}, shouldSkipSteps = true) => {
     await this.setStateWithComputedState({
       ...stateChange,
       activeStep: stepName,
@@ -589,8 +577,8 @@ export class UnconnectedDataSelector extends Component {
     if (!this.hasPreloadedStepData(stepName)) {
       await this.loadStepData(stepName);
     }
-    if (skipSteps) {
-      await this.skipSteps();
+    if (shouldSkipSteps) {
+      this.skipSteps();
     }
   };
 
@@ -695,6 +683,12 @@ export class UnconnectedDataSelector extends Component {
     if (selectedDataBucketId === DATA_BUCKET.MODELS || this.hasUsableModels()) {
       this.previousStep();
     }
+    if (
+      selectedDataBucketId === DATA_BUCKET.SAVED_QUESTION ||
+      this.hasSavedQuestions()
+    ) {
+      this.previousStep();
+    }
     this.setState({ isSavedEntityPickerShown: false, savedEntityType: null });
   };
 
@@ -706,7 +700,7 @@ export class UnconnectedDataSelector extends Component {
     const hasBackButton =
       hasPreviousStep &&
       steps.includes(DATA_BUCKET_STEP) &&
-      this.hasUsableModels();
+      (this.hasUsableModels() || this.hasSavedQuestions());
 
     const props = {
       ...this.state,
@@ -733,6 +727,7 @@ export class UnconnectedDataSelector extends Component {
               dataTypes={getDataTypes({
                 hasModels: this.hasModels(),
                 hasTables: this.props.canSelectTable,
+                hasSavedQuestions: this.hasSavedQuestions(),
                 hasNestedQueriesEnabled,
               })}
               {...props}
@@ -798,7 +793,10 @@ export class UnconnectedDataSelector extends Component {
     const currentDatabaseId = canChangeDatabase ? null : selectedDatabaseId;
 
     const isPickerOpen =
-      isSavedEntityPickerShown || selectedDataBucketId === DATA_BUCKET.MODELS;
+      isSavedEntityPickerShown ||
+      [DATA_BUCKET.MODELS, DATA_BUCKET.SAVED_QUESTIONS].includes(
+        selectedDataBucketId,
+      );
 
     if (this.isSearchLoading()) {
       return <LoadingAndErrorWrapper loading />;
@@ -809,6 +807,7 @@ export class UnconnectedDataSelector extends Component {
         return (
           <SavedEntityPicker
             collectionId={selectedCollectionId}
+            type={this.getCardType()}
             tableId={selectedTable?.id}
             databaseId={currentDatabaseId}
             onSelect={this.handleSavedEntitySelect}
@@ -855,7 +854,9 @@ export class UnconnectedDataSelector extends Component {
             </Box>
           </Popover.Target>
 
-          <Popover.Dropdown>{this.renderContent()}</Popover.Dropdown>
+          <Popover.Dropdown aria-label={this.props.popoverAriaLabel}>
+            {this.renderContent()}
+          </Popover.Dropdown>
         </Popover>
       );
     }
@@ -864,52 +865,130 @@ export class UnconnectedDataSelector extends Component {
   }
 }
 
-const DataSelector = _.compose(
-  Databases.loadList({
-    loadingAndErrorWrapper: false,
-    listName: "databases",
-    query: { saved: true },
-  }),
-  // If there is at least one model,
-  // we want to display a slightly different data picker view
-  // (see DATA_BUCKET step)
-  Search.loadList({
-    query: {
+// Exposes `fetchSchemas` / `fetchSchemaTables` as props backed by RTK's lazy
+// query triggers. The triggers' subscriptions are tied to this wrapper's
+// lifecycle, so the cache is released when the DataSelector unmounts.
+function withSchemaFetchers(WrappedComponent) {
+  return function DataSelectorWithSchemaFetchers(props) {
+    const [triggerListSchemas] = useLazyListDatabaseSchemasQuery();
+    const [triggerListSchemaTables] = useLazyListDatabaseSchemaTablesQuery();
+
+    const fetchSchemas = useCallback(
+      (databaseId) => triggerListSchemas({ id: databaseId }).unwrap(),
+      [triggerListSchemas],
+    );
+
+    const fetchSchemaTables = useCallback(
+      (schemaId) => {
+        const [dbId, schema] = parseSchemaId(schemaId);
+        return triggerListSchemaTables({ id: dbId, schema }).unwrap();
+      },
+      [triggerListSchemaTables],
+    );
+
+    return (
+      <WrappedComponent
+        {...props}
+        fetchSchemas={fetchSchemas}
+        fetchSchemaTables={fetchSchemaTables}
+      />
+    );
+  };
+}
+
+// If there is at least one model, we want to display a slightly different
+// data picker view (see DATA_BUCKET step). Pre-fetches available models via
+// search and exposes them as `metadata`/`loading`/`loaded` props.
+function withAvailableModels(WrappedComponent) {
+  return function DataSelectorWithAvailableModels(props) {
+    const { data: response, isLoading } = useSearchQuery({
       calculate_available_models: true,
       limit: 0,
       models: ["dataset"],
-    },
-    loadingAndErrorWrapper: false,
-  }),
+      context: "data-picker",
+    });
+    const { data: _data, ...metadata } = response ?? {};
+    return (
+      <WrappedComponent
+        {...props}
+        metadata={metadata}
+        loading={isLoading}
+        loaded={!isLoading && response != null}
+        allLoading={isLoading || (props.allLoading ?? false)}
+      />
+    );
+  };
+}
+
+// Prefetches the saved-databases list and forwards its loading state as
+// `allLoading` so the picker waits for the databases (not just the models
+// search) before hydrating its initial step. Without this the picker would
+// briefly show only models and stream the databases in afterwards.
+function withSavedDatabasesPrefetch(WrappedComponent) {
+  return function DataSelectorWithSavedDatabasesPrefetch(props) {
+    const { isLoading } = useListDatabasesQuery({ saved: true });
+    return (
+      <WrappedComponent
+        {...props}
+        allLoading={isLoading || (props.allLoading ?? false)}
+      />
+    );
+  };
+}
+
+const isListDatabasesQuerySuccess = (state, query) =>
+  databaseApi.endpoints.listDatabases.select(query)(state).isSuccess;
+
+const DataSelector = _.compose(
+  withSavedDatabasesPrefetch,
+  withAvailableModels,
+  withSchemaFetchers,
   connect(
-    (state, ownProps) => ({
-      availableModels: ownProps.metadata?.available_models ?? [],
-      metadata: getMetadata(state),
-      hasLoadedDatabasesWithTablesSaved: Databases.selectors.getLoaded(state, {
-        entityQuery: { include: "tables", saved: true },
-      }),
-      hasLoadedDatabasesWithSaved: Databases.selectors.getLoaded(state, {
-        entityQuery: { saved: true },
-      }),
-      hasLoadedDatabasesWithTables: Databases.selectors.getLoaded(state, {
-        entityQuery: { include: "tables" },
-      }),
-      hasDataAccess: getHasDataAccess(ownProps.databases ?? []),
-      hasNestedQueriesEnabled: getSetting(state, "enable-nested-queries"),
-      selectedQuestion: Questions.selectors.getObject(state, {
-        entityId: getQuestionIdFromVirtualTableId(ownProps.selectedTableId),
-      }),
-    }),
-    {
-      fetchDatabases: () => Databases.actions.fetchList({ saved: true }),
-      fetchSchemas: (databaseId) =>
-        Schemas.actions.fetchList({ dbId: databaseId }),
-      fetchSchemaTables: (schemaId) => Schemas.actions.fetch({ id: schemaId }),
-      fetchFields: (tableId) => Tables.actions.fetchMetadata({ id: tableId }),
-      fetchQuestion: (id) =>
-        Questions.actions.fetch({
-          id: getQuestionIdFromVirtualTableId(id),
+    (state, ownProps) => {
+      const response = databaseApi.endpoints.listDatabases.select({
+        saved: true,
+      })(state).data;
+      const metadata = getMetadata(state);
+      return {
+        // `metadata` exposes the search response (available_models, etc.). Not to
+        // be confused with Query Builder's metadata.
+        availableModels: ownProps.metadata?.available_models ?? [],
+        metadata,
+        databases: (response?.data ?? [])
+          .map(({ id }) => metadata.database(id))
+          .filter((database) => database != null),
+        hasLoadedDatabasesWithTablesSaved: isListDatabasesQuerySuccess(state, {
+          include: "tables",
+          saved: true,
         }),
+        hasLoadedDatabasesWithSaved: isListDatabasesQuerySuccess(state, {
+          saved: true,
+        }),
+        hasLoadedDatabasesWithTables: isListDatabasesQuerySuccess(state, {
+          include: "tables",
+        }),
+        hasDataAccess: canUserCreateQueries(state),
+        hasNestedQueriesEnabled: getSetting(state, "enable-nested-queries"),
+        selectedQuestion: getMetadata(state).question(
+          getQuestionIdFromVirtualTableId(ownProps.selectedTableId),
+        ),
+      };
     },
+    (dispatch) => ({
+      fetchDatabases: () =>
+        runRtkEndpoint(
+          { saved: true },
+          dispatch,
+          databaseApi.endpoints.listDatabases,
+          { forceRefetch: false },
+        ),
+      fetchFields: (tableId) => dispatch(fetchTableMetadata({ id: tableId })),
+      fetchQuestion: (id) =>
+        runRtkEndpoint(
+          { id: getQuestionIdFromVirtualTableId(id) },
+          dispatch,
+          cardApi.endpoints.getCard,
+        ),
+    }),
   ),
 )(UnconnectedDataSelector);

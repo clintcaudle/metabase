@@ -1,43 +1,56 @@
 // @ts-check
+/** eslint-disable-next-line import/no-commonjs */
+const esmPackages = require("./jest.esm-packages.js");
 
-const esmPackages = [
-  "ccount",
-  "character-entities-html4",
-  "comma-separated-tokens",
-  "d3-*",
-  "d3",
-  "devlop",
-  "echarts",
-  "hast.*",
-  "html-void-elements",
-  "is-absolute-url",
-  "jose",
-  "property-information",
-  "rehype-external-links",
-  "screenfull",
-  "space-separated-tokens",
-  "stringify-entities",
-  "unist-util-visit-parents",
-  "unist-util-visit",
-  "vfile-location",
-  "vfile-message",
-  "vfile",
-  "web-namespaces",
-  "zrender",
-  "zwitch",
+const swcJestTransform = [
+  "@swc/jest",
+  {
+    jsc: {
+      // Jest runs on Node so we can target a modern engine and skip a bunch
+      // of polyfills/transforms that `env.targets: ["defaults"]` would emit.
+      target: "es2022",
+      loose: true,
+      parser: {
+        syntax: "typescript",
+        tsx: true,
+      },
+      transform: {
+        react: {
+          runtime: "automatic",
+        },
+      },
+      experimental: {
+        plugins: [
+          ["@swc-contrib/mut-cjs-exports", {}],
+          ["@swc/plugin-emotion", { sourceMap: false }],
+        ],
+      },
+    },
+    module: {
+      type: "commonjs",
+    },
+    sourceMaps: "inline",
+    minify: false,
+  },
 ];
 
 const baseConfig = {
+  transform: {
+    "^.+\\.m?[jt]sx?$": swcJestTransform,
+  },
   moduleNameMapper: {
+    // Force jose to use Node.js runtime instead of browser runtime in jsdom environment.
+    // The browser runtime expects CryptoKey to be globally available, which jsdom doesn't provide.
+    "^jose$": "<rootDir>/node_modules/jose/dist/node/cjs/index.js",
+    // remend only declares an `import` export condition, so jest's CJS resolver can't find it.
+    "^remend$": "<rootDir>/node_modules/remend/dist/index.js",
+    "^build-configs/(.*)$": "<rootDir>/frontend/build/$1",
     "\\.(css|less)$": "<rootDir>/frontend/test/__mocks__/styleMock.js",
     "\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$":
       "<rootDir>/frontend/test/__mocks__/fileMock.js",
     "^cljs/(.*)$": "<rootDir>/target/cljs_dev/$1",
-    "^d3-(.*)$": "<rootDir>/node_modules/d3-$1/dist/d3-$1",
-    "react-markdown":
-      "<rootDir>/node_modules/react-markdown/react-markdown.min.js",
     "\\.svg\\?(component|source)":
-      "<rootDir>/frontend/test/__mocks__/svgMock.jsx",
+      "<rootDir>/frontend/test/__mocks__/svgMock.tsx",
     "csv-parse/browser/esm/sync":
       "<rootDir>/node_modules/csv-parse/dist/cjs/sync",
     "csv-stringify/browser/esm/sync":
@@ -47,22 +60,35 @@ const baseConfig = {
      * This isn't a problem in the core app because we seem to not import to entry file directly
      * for any component under tests.
      */
-    "sdk-ee-plugins": "<rootDir>/frontend/src/metabase/lib/noop.js",
+    "sdk-ee-plugins": "<rootDir>/frontend/src/metabase/plugins/noop.ts",
     /**
      * SDK iframe embedding imports the embedding sdk and its components.
      * We want to exclude the SDK from the main app's bundle to reduce the bundle size.
      */
     "sdk-iframe-embedding-ee-plugins":
-      "<rootDir>/frontend/src/metabase/lib/noop.js",
-    "ee-plugins": "<rootDir>/frontend/src/metabase/lib/noop.js",
+      "<rootDir>/frontend/src/metabase/utils/noop.ts",
+    "ee-plugins": "<rootDir>/frontend/src/metabase/utils/noop.ts",
+    "ee-overrides": "<rootDir>/frontend/src/metabase/utils/noop.ts",
     /**
      * Imports which are only applicable to the embedding sdk.
      * As we use SDK components in new iframe embedding, we need to import them here.
      **/
-    "sdk-specific-imports": "<rootDir>/frontend/src/metabase/lib/noop.js",
+    "sdk-specific-imports": "<rootDir>/frontend/src/metabase/utils/noop.ts",
+    /**
+     * Docs snippets are loaded as raw text (asset/source) in rspack.
+     * In Jest, mock them as plain strings.
+     */
+    "^docs/embedding/sdk/snippets/(.*)$":
+      "<rootDir>/frontend/test/__mocks__/fileMock.js",
+    "docs/(.*)$": "<rootDir>/docs/$1",
   },
   transformIgnorePatterns: [
-    `<rootDir>/node_modules/(?!(${esmPackages.join("|")})/)`,
+    // Combined pattern for both flat and bun isolated node_modules structures
+    // - Flat: node_modules/<pkg>/ where <pkg> is NOT in esmPackages
+    // - Bun:  node_modules/.bun/<pkg>@<ver>/ where <pkg> is NOT in esmPackages
+    `<rootDir>/node_modules/(?:\\.bun/(?!(${esmPackages.join("|")})@)|(?!\\.bun)(?!(${esmPackages.join("|")})/))`,
+    // CLJS files are already compiled CJS — skip transform entirely
+    "<rootDir>/target/cljs_dev/",
   ],
   testPathIgnorePatterns: [
     "<rootDir>/frontend/.*/.*.tz.unit.spec.{js,jsx,ts,tsx}",
@@ -79,8 +105,10 @@ const baseConfig = {
   ],
   modulePathIgnorePatterns: [
     "<rootDir>/target/cljs_release/.*",
+    "<rootDir>/target/classes/.*",
     "<rootDir>/resources/frontend_client",
     "<rootDir>/.*/__mocks__",
+    "<rootDir>/enterprise/frontend/src/custom-viz",
   ],
   setupFiles: [
     "<rootDir>/frontend/test/jest-setup.js",
@@ -112,7 +140,10 @@ const baseConfig = {
 
 /** @type {import('jest').Config} */
 const config = {
-  reporters: ["default", "jest-junit"],
+  // `addFileAttribute` makes jest-junit emit the source path as a `file`
+  // attribute on each <testcase>, which lets the ci-conductor reporter resolve a
+  // real source file. Output dir/name come from the JEST_JUNIT_OUTPUT_* env vars.
+  reporters: ["default", ["jest-junit", { addFileAttribute: "true" }]],
   coverageReporters: ["html", "lcov"],
   watchPlugins: [
     "jest-watch-typeahead/filename",
@@ -125,24 +156,47 @@ const config = {
       displayName: "sdk",
 
       testMatch: [
-        "<rootDir>/enterprise/frontend/src/embedding-sdk/**/*.unit.spec.{js,jsx,ts,tsx}",
+        "<rootDir>/frontend/src/embedding-sdk-{bundle,shared}/**/*.unit.spec.{js,jsx,ts,tsx}",
+        "<rootDir>/enterprise/frontend/src/embedding-sdk-package/**/*.unit.spec.{js,jsx,ts,tsx}",
+        "<rootDir>/enterprise/frontend/src/embedding-sdk-ee/**/*.unit.spec.{js,jsx,ts,tsx}",
+      ],
+
+      setupFiles: [
+        ...baseConfig.setupFiles,
+        "<rootDir>/frontend/src/embedding-sdk-shared/jest/setup-env.ts",
       ],
 
       setupFilesAfterEnv: [
         ...baseConfig.setupFilesAfterEnv,
-        "<rootDir>/enterprise/frontend/src/embedding-sdk/jest-console-restrictions.js",
+        "<rootDir>/frontend/src/embedding-sdk-shared/jest/setup-after-env.ts",
+        "<rootDir>/frontend/src/embedding-sdk-shared/jest/console-restrictions.ts",
       ],
     },
     {
       ...baseConfig,
       displayName: "core",
+      setupFilesAfterEnv: [
+        ...baseConfig.setupFilesAfterEnv,
+        "<rootDir>/frontend/test/jest-setup-env-core.js",
+      ],
       testPathIgnorePatterns: [
         ...(baseConfig.testPathIgnorePatterns || []),
-        "<rootDir>/enterprise/frontend/src/embedding-sdk/",
+        "<rootDir>/frontend/src/embedding-sdk-bundle",
+        "<rootDir>/frontend/src/embedding-sdk-shared",
+        "<rootDir>/enterprise/frontend/src/embedding-sdk-package",
+        "<rootDir>/enterprise/frontend/src/embedding-sdk-ee",
+        "<rootDir>/enterprise/frontend/src/custom-viz",
+        "<rootDir>/frontend/lint/tests",
       ],
+    },
+    {
+      displayName: "lint-rules",
+      testMatch: ["<rootDir>/frontend/lint/tests/**/*.unit.spec.js"],
+      testEnvironment: "node",
+      transform: baseConfig.transform,
+      transformIgnorePatterns: baseConfig.transformIgnorePatterns,
     },
   ],
 };
 
-// eslint-disable-next-line import/no-commonjs
 module.exports = config;

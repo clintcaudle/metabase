@@ -1,13 +1,20 @@
 import type {
+  ListTaskRunEntitiesRequest,
+  ListTaskRunsRequest,
+  ListTaskRunsResponse,
   ListTasksRequest,
   ListTasksResponse,
+  RunEntity,
   Task,
   TaskInfo,
+  TaskRunExtended,
 } from "metabase-types/api";
 
 import { Api } from "./api";
 import {
   provideTaskListTags,
+  provideTaskRunListTags,
+  provideTaskRunTags,
   provideTaskTags,
   provideUniqueTasksListTags,
 } from "./tags";
@@ -44,12 +51,46 @@ export const taskApi = Api.injectEndpoints({
         url: "/api/task/info",
       }),
     }),
+    listTaskRuns: builder.query<
+      ListTaskRunsResponse,
+      ListTaskRunsRequest | void
+    >({
+      query: (params) => ({
+        method: "GET",
+        url: "/api/task/runs",
+        params,
+      }),
+      providesTags: (response) =>
+        response ? provideTaskRunListTags(response.data) : [],
+    }),
+    getTaskRun: builder.query<TaskRunExtended, number>({
+      query: (id) => ({
+        method: "GET",
+        url: `/api/task/runs/${id}`,
+      }),
+      providesTags: (taskRun) => (taskRun ? provideTaskRunTags(taskRun) : []),
+    }),
+    listTaskRunEntities: builder.query<RunEntity[], ListTaskRunEntitiesRequest>(
+      {
+        query: (params) => ({
+          method: "GET",
+          url: "/api/task/runs/entities",
+          params,
+        }),
+      },
+    ),
   }),
 });
 
 export const {
   useListTasksQuery,
+  useLazyListTasksQuery,
   useListUniqueTasksQuery,
   useGetTaskQuery,
   useGetTasksInfoQuery,
+  useListTaskRunsQuery,
+  useLazyListTaskRunsQuery,
+  useGetTaskRunQuery,
+  useListTaskRunEntitiesQuery,
+  useLazyListTaskRunEntitiesQuery,
 } = taskApi;

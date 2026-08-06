@@ -133,7 +133,7 @@ describe("scenarios > filters > bulk filtering", () => {
     H.assertQueryBuilderRowCount(21);
   });
 
-  it("should add a filter for linked tables", { tags: "@flaky" }, () => {
+  it("should add a filter for linked tables", () => {
     H.visitQuestionAdhoc(rawQuestionDetails);
     H.filter();
     H.popover().within(() => {
@@ -254,7 +254,6 @@ describe("scenarios > filters > bulk filtering", () => {
       H.createSegment({
         name: SEGMENT_1_NAME,
         description: "All orders with a total under $100.",
-        table_id: ORDERS_ID,
         definition: {
           "source-table": ORDERS_ID,
           aggregation: [["count"]],
@@ -265,7 +264,6 @@ describe("scenarios > filters > bulk filtering", () => {
       H.createSegment({
         name: SEGMENT_2_NAME,
         description: "All orders with a discount",
-        table_id: ORDERS_ID,
         definition: {
           "source-table": ORDERS_ID,
           aggregation: [["count"]],

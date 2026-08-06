@@ -4,6 +4,7 @@ import {
   ORDERS_DASHBOARD_ID,
   ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
+import { adminAppLinkText } from "e2e/support/helpers";
 
 const { ORDERS_ID } = SAMPLE_DATABASE;
 
@@ -17,7 +18,8 @@ describe("scenarios > admin > permissions > application", () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
-    H.setTokenFeatures("all");
+    // H.activateToken("pro-self-hosted");
+    H.activateToken("pro-self-hosted");
   });
 
   it("shows permissions help", () => {
@@ -67,7 +69,8 @@ describe("scenarios > admin > permissions > application", () => {
 
         H.visitQuestion(ORDERS_QUESTION_ID);
         H.tableInteractive().should("be.visible");
-        H.sharingMenuButton().should("be.disabled");
+        // No public link: the share button only copies the app link, no menu.
+        H.sharingMenuButton().should("have.attr", "aria-label", "Copy link");
 
         cy.visit("/account/notifications");
         cy.findByTestId("notifications-list").within(() => {
@@ -83,12 +86,13 @@ describe("scenarios > admin > permissions > application", () => {
 
         cy.log("Set up a dashboard subscription");
         H.visitDashboard(ORDERS_DASHBOARD_ID);
-        H.openSharingMenu(/subscriptions/i);
+        H.toggleDashboardSubscriptionsSidebar();
         H.sidebar().findByText("Email this dashboard").should("exist");
 
         cy.log("Create a question alert");
         H.visitQuestion(ORDERS_QUESTION_ID);
-        H.openSharingMenu(/alert/i);
+        cy.findByLabelText("Move, trash, and more…").click();
+        H.popover().findByText("Create an alert").click();
         H.modal().findByText("New alert").should("be.visible");
       });
     });
@@ -120,46 +124,36 @@ describe("scenarios > admin > permissions > application", () => {
         cy.signInAsNormalUser();
       });
 
-      it("allows accessing tools and troubleshooting for non-admins", () => {
+      it("allows accessing tools for non-admins", () => {
         cy.visit("/");
-        cy.icon("gear").click();
+        H.getProfileLink().click();
+        H.popover().findByText("Monitor").click();
 
-        H.popover().findByText("Admin settings").click();
-
-        cy.log("Tools smoke test");
-        cy.location("pathname").should("eq", "/admin/tools/errors");
+        cy.log("Monitor tools smoke test");
+        cy.location("pathname").should("contain", "/monitor/tasks");
         cy.findByRole("heading", {
-          name: "Questions that errored when last run",
+          name: "Background tasks",
         });
-        cy.findAllByRole("cell").should("contain", "broken_question");
 
-        cy.log("Troubleshooting smoke test");
-        cy.findByRole("navigation")
-          .findByRole("link", { name: "Troubleshooting" })
-          .click();
-        cy.location("pathname").should("eq", "/admin/troubleshooting/help");
-        cy.get("main")
-          .should("contain", "Help")
-          .and("contain", "Diagnostic Info");
+        cy.findByTestId("monitor-nav").findByText("Erroring questions").click();
+        cy.location("pathname").should("eq", "/monitor/errors");
+        cy.findByTestId("monitor-main").findByText("Erroring questions");
       });
     });
 
     describe("revoked", () => {
-      it("does not allow accessing tools, and troubleshooting for non-admins", () => {
+      it("does not allow accessing admin tools for non-admins", () => {
         cy.signInAsNormalUser();
         cy.visit("/");
-        cy.icon("gear").click();
+        H.getProfileLink().click();
 
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Admin settings").should("not.exist");
+        H.popover().findByText(adminAppLinkText).should("not.exist");
 
-        cy.visit("/admin/tools/errors");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Sorry, you don’t have permission to see that.");
+        cy.visit("/monitor/errors");
+        H.main().findByText("Sorry, you don’t have permission to see that.");
 
-        cy.visit("/admin/troubleshooting/help");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Sorry, you don’t have permission to see that.");
+        cy.visit("/monitor");
+        H.main().findByText("Sorry, you don’t have permission to see that.");
       });
     });
   });
@@ -189,7 +183,7 @@ describe("scenarios > admin > permissions > application", () => {
         cy.findByTestId("admin-layout-content").within(() => {
           cy.findByText("License and Billing").should("not.exist");
           cy.findByLabelText("Updates").should("not.exist");
-          cy.findByLabelText("Site Name")
+          cy.findByLabelText("Site name")
             .should("be.visible")
             .clear()
             .type("NewName")

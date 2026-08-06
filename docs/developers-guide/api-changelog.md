@@ -4,6 +4,50 @@ title: API changelog
 
 # Breaking changes to the API interface
 
+## Metabase 0.64.0
+
+- Self-hosted environments must now explicitly enable transforms before beginning to use them via the API. Admins can enable transforms in Data Studio or by setting the MB_TRANSFORMS_ENABLED environment variable to true.
+
+- The endpoints that fetch prefill values for action forms have been converted from GET to POST so that parameter values are sent in the JSON request body instead of the URL query string. `parameters` is now a JSON object in the request body rather than a JSON-encoded query-string parameter:
+
+  - `GET /api/action/:action-id/execute` has been replaced by `POST /api/action/:action-id/execute/values`.
+  - `GET /api/dashboard/:dashboard-id/dashcard/:dashcard-id/execute` has been replaced by
+    `POST /api/dashboard/:dashboard-id/dashcard/:dashcard-id/execute/values`.
+  - `GET /api/public/dashboard/:uuid/dashcard/:dashcard-id/execute` has been replaced by
+    `POST /api/public/dashboard/:uuid/dashcard/:dashcard-id/execute/values`.
+
+  The GET variants have been removed without a deprecation period.
+
+## Metabase 0.61.0
+
+- `POST /api/metabot/describe/card` and `POST /api/metabot/describe/dashboard/:id` have been removed. These endpoints
+  provided LLM-powered autodescription of cards and dashboards using the legacy OpenAI client. This functionality has
+  been superseded by the Metabot agent.
+
+## Metabase 0.57.0
+
+- MBQL queries (in Cards and elsewhere) are now serialized as MBQL 5 as opposed to MBQL 4 (aka legacy MBQL) in the
+  application database and in REST API responses. While we do not officially support editing or introspection of MBQL
+  via the REST API (please treat it as an opaque object), to support existing usages the `GET /api/card/:id` endpoint
+  can return the Card `dataset_query` as MBQL 4 if you include the query parameter `?legacy-mbql=true`.
+
+## Metabase 0.56.13
+
+- `/api/collection/graph` endpoints now no longer return 'none' permissions in the returned graph. Missing fields in
+  between group ids and collection id indicate that the group provides no permissions for the collection. For
+  example, what was returned in versions before 0.56.13:
+  ```json
+  {
+    "revision": 2,
+    "groups": { "1": { "root": "write", "1": "read", "2": "none" } }
+  }
+  ```
+  becomes:
+  ```json
+  { "revision": 2, "groups": { "1": { "root": "write", "1": "read" } } }
+  ```
+  in versions 0.56.13 and up.
+
 ## Metabase 0.55.0
 
 - `POST /api/card/from-csv` has been renamed to `POST /api/upload/csv`.
@@ -24,13 +68,14 @@ title: API changelog
   thing.
 
 - `GET /api/util/diagnostic_info/connection_pool_info` has been renamed to `GET
-  /api/bug-reporting/connection-pool-details`.
+/api/bug-reporting/connection-pool-details`.
 
 ## Metabase 0.54.0
 
 - The alert system has been migrated from the legacy pulse infrastructure to the new notification system. This migration includes the following changes:
 
   - The majority of `/api/alert` endpoints have been removed in favor of the new `/api/notification` endpoints. For backward compatibility, these endpoints will remain available until the next release:
+
     - `GET /api/alert`
     - `GET /api/alert/:id`
     - `DELETE /api/alert/:id/subscription`
@@ -57,7 +102,7 @@ title: API changelog
 - `POST /api/user/:id/send_invite` has been removed.
 - `GET /:id/fields` now includes the Table ID.
 
-- APIs under `/api/pulse` and `/api/alert` will be removed in a future version as we're tranitioning to a new architecture.
+- APIs under `/api/pulse` and `/api/alert` will be removed in a future version as we're transitioning to a new architecture.
 
 ## Metabase 0.51.0
 
@@ -90,7 +135,7 @@ title: API changelog
   When setting `archived` to `false`, you may optionally also provide a `collection_id` (for Dashboards or Cards) or a
   `parent_id` (for Collections). In this case, the entity will be re-parented to the specified Collection when it is
   moved from the Trash. If a new `collection_id` or `parent_id` is not provided, the entity will be moved back to its
-  original location if possible. If this is not possible (for example, the original location is also in the Trash) an
+  original location if possible. If this is impossible (for example, the original location is also in the Trash) an
   error will occur.
 
 - `/api/metric`
@@ -122,7 +167,7 @@ NOTE: These endpoint changes were added in 0.49.3, and a bug in `GET /api/embed/
 
   The above endpoints now accept the `format_rows` query parameter. It is an optional boolean parameter that will default to `true` if not included in the request.
   When `format_rows` is `true`, the export will have formatting applied such that the values match what they appear as in the app.
-  When `format_rows` is `false`, formatting is not applied and exports will behave as they did prior to 0.49.0.
+  When `format_rows` is `false`, formatting is not applied and exports will behave as they did before 0.49.0.
 
   The value of `format_rows` has no effect when exporting xlsx files.
 

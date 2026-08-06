@@ -6,11 +6,12 @@ import {
   UploadInput,
   UploadLabel,
   UploadTooltip,
-} from "metabase/components/upload";
+} from "metabase/common/components/upload";
+import { ActionIcon, Icon } from "metabase/ui";
 import type { Collection } from "metabase-types/api";
 
-import { CollectionHeaderButton } from "./CollectionHeader.styled";
 import { UploadInfoModal } from "./CollectionUploadInfoModal";
+import { trackCSVFileUploadClicked } from "./analytics";
 
 export function CollectionUpload({
   collection,
@@ -30,12 +31,14 @@ export function CollectionUpload({
     return (
       <>
         <UploadTooltip collection={collection}>
-          <CollectionHeaderButton
+          <ActionIcon
+            variant="viewHeader"
+            size="2rem"
             aria-label={t`Upload data`}
-            icon="upload"
-            iconSize={20}
             onClick={() => setShowInfoModal(true)}
-          />
+          >
+            <Icon name="upload" />
+          </ActionIcon>
         </UploadTooltip>
 
         {showInfoModal && (
@@ -49,6 +52,7 @@ export function CollectionUpload({
   }
 
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    trackCSVFileUploadClicked();
     const file = event.target.files?.[0];
     if (file !== undefined) {
       saveFile(file);
@@ -63,13 +67,14 @@ export function CollectionUpload({
   return (
     <UploadTooltip collection={collection}>
       <UploadLabel>
-        <CollectionHeaderButton
-          as="span"
-          to=""
-          icon="upload"
-          iconSize={20}
+        <ActionIcon
+          variant="viewHeader"
+          size="2rem"
+          component="span"
           aria-label={t`Upload data`}
-        />
+        >
+          <Icon name="upload" />
+        </ActionIcon>
       </UploadLabel>
       <UploadInput ref={uploadInputRef} onChange={handleFileUpload} />
     </UploadTooltip>

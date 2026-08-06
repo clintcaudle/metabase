@@ -1,97 +1,125 @@
 import "@mantine/core/styles.css";
 import "@mantine/dates/styles.css";
-
-import "regenerator-runtime/runtime";
+import "@xyflow/react/dist/style.css";
 
 // This is conditionally aliased in the webpack config.
 // If EE isn't enabled, it loads an empty file.
 // Should be imported before any other metabase import
 import "ee-overrides";
 
-import "metabase/lib/dayjs";
-
-// If enabled this monkeypatches `t` and `jt` to return blacked out
-// strings/elements to assist in finding untranslated strings.
-import "metabase/lib/i18n-debug";
+import "metabase/utils/dayjs";
 
 // set the locale before loading anything else
-import "metabase/lib/i18n";
+import "metabase/utils/i18n";
 
 // NOTE: why do we need to load this here?
-import "metabase/lib/colors";
+import "metabase/ui/colors";
 
 // NOTE: this loads all builtin plugins
 import "metabase/plugins/builtin";
 
 // This is conditionally aliased in the webpack config.
 // If EE isn't enabled, it loads an empty file.
-import "ee-plugins";
+// Set CSP nonce for dynamic style injection (e.g. CodeMirror)
+import "metabase/utils/csp";
 
-// Set nonce for mantine v6 deps
-import "metabase/lib/csp";
-
-import { createHistory } from "history";
 import { DragDropContextProvider } from "react-dnd";
-import HTML5Backend from "react-dnd-html5-backend";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { Router, useRouterHistory } from "react-router";
-import { syncHistoryWithStore } from "react-router-redux";
 
-import { createTracker } from "metabase/lib/analytics";
-import api from "metabase/lib/api";
-import { initializeEmbedding } from "metabase/lib/embed";
-import { captureConsoleErrors } from "metabase/lib/errors";
-import { MetabaseReduxProvider } from "metabase/lib/redux/custom-context";
-import MetabaseSettings from "metabase/lib/settings";
-import { PLUGIN_APP_INIT_FUNCTIONS, PLUGIN_METABOT } from "metabase/plugins";
-import { refreshSiteSettings } from "metabase/redux/settings";
-import { EmotionCacheProvider } from "metabase/styled-components/components/EmotionCacheProvider";
+import { initializePlugins } from "ee-plugins";
+import { AppThemeProvider } from "metabase/AppThemeProvider";
+import { createSnowplowTracker } from "metabase/analytics";
+import { ModifiedBackend } from "metabase/common/components/dnd/ModifiedBackend";
+import { registerDashboardVisualizations } from "metabase/dashboard/visualizations/register";
+import { initializeInteractiveEmbedding } from "metabase/embedding/interactive-embedding";
+import { MetabotProvider } from "metabase/metabot/context";
+import { PLUGIN_APP_INIT_FUNCTIONS } from "metabase/plugins";
+import { MetabaseReduxProvider } from "metabase/redux";
+import { LOCATION_CHANGE } from "metabase/router";
+import { getUserId } from "metabase/selectors/user";
+import { refetchSiteSettings } from "metabase/settings";
 import { GlobalStyles } from "metabase/styled-components/containers/GlobalStyles";
-import { ThemeProvider } from "metabase/ui";
-import registerVisualizations from "metabase/visualizations/register";
+import { PortalContainer } from "metabase/ui";
+import { EmotionCacheProvider } from "metabase/ui/components/theme/EmotionCacheProvider";
+import { setBasename } from "metabase/utils/basename";
+import { captureConsoleErrors } from "metabase/utils/errors";
+import { initMetaplow } from "metabase/utils/metaplow";
+import { initTracing, rotateTraceId } from "metabase/utils/otel";
+import MetabaseSettings from "metabase/utils/settings";
+import { registerVisualizations } from "metabase/visualizations/register";
 
+import { RouterProvider, createLocationMirror } from "./router";
 import { getStore } from "./store";
+import { OverlayStackProvider } from "./ui/components/overlays/overlay-stack";
 
-// remove trailing slash
-const BASENAME = window.MetabaseRoot.replace(/\/+$/, "");
+setBasename(window.MetabaseRoot);
 
-api.basename = BASENAME;
-
-// eslint-disable-next-line react-hooks/rules-of-hooks
-const browserHistory = useRouterHistory(createHistory)({
-  basename: BASENAME,
-});
+initializePlugins();
 
 function _init(reducers, getRoutes, callback) {
-  const store = getStore(reducers, browserHistory);
+  // Initialize distributed tracing if enabled via MB_TRACING_ENABLED.
+  // Uses bootstrap data so it's available before the first API call.
+  const extraMiddlewares = [];
+  if (window.MetabaseBootstrap?.["tracing-enabled"]) {
+    initTracing();
+    // Rotate trace ID on route changes so all API calls within a single page
+    // view share one trace. The router emits LOCATION_CHANGE on navigation.
+    let lastPathname;
+    extraMiddlewares.push(() => (next) => (action) => {
+      if (action?.type === LOCATION_CHANGE) {
+        const pathname = action.payload?.pathname;
+        if (pathname !== lastPathname) {
+          lastPathname = pathname;
+          rotateTraceId();
+        }
+      }
+      return next(action);
+    });
+  }
+
+  const store = getStore(reducers, undefined, extraMiddlewares);
   const routes = getRoutes(store);
-  const history = syncHistoryWithStore(browserHistory, store);
-  const MetabotProvider = PLUGIN_METABOT.getMetabotProvider();
+  const mirrorLocation = createLocationMirror(store.dispatch);
 
-  createTracker(store);
+  createSnowplowTracker(() => getUserId(store.getState()));
+  initMetaplow({
+    getUserId: () => getUserId(store.getState()),
+  });
 
-  initializeEmbedding(store);
+  initializeInteractiveEmbedding(store.dispatch);
 
   const root = createRoot(document.getElementById("root"));
 
   root.render(
     <MetabaseReduxProvider store={store}>
       <EmotionCacheProvider>
-        <DragDropContextProvider backend={HTML5Backend} context={{ window }}>
-          <ThemeProvider>
-            <GlobalStyles />
-            <MetabotProvider>
-              <Router history={history}>{routes}</Router>
-            </MetabotProvider>
-          </ThemeProvider>
+        <DragDropContextProvider backend={ModifiedBackend} context={{ window }}>
+          <OverlayStackProvider>
+            <AppThemeProvider>
+              <GlobalStyles />
+              {createPortal(<PortalContainer />, document.body)}
+              <MetabotProvider>
+                <RouterProvider
+                  routes={routes}
+                  onLocationChange={mirrorLocation}
+                />
+              </MetabotProvider>
+            </AppThemeProvider>
+          </OverlayStackProvider>
         </DragDropContextProvider>
       </EmotionCacheProvider>
     </MetabaseReduxProvider>,
   );
 
   registerVisualizations();
+  registerDashboardVisualizations();
 
-  store.dispatch(refreshSiteSettings());
+  // Populate the settings cache on load for every app entry.
+  // The main app also keeps a live `useGetSettingsQuery` subscription in AppComponent,
+  // but the public and embed entries don't mount AppComponent/
+  // In RTK if there is no active subscriber, invalidating a tag does not trigger a refetch.
+  store.dispatch(refetchSiteSettings());
 
   PLUGIN_APP_INIT_FUNCTIONS.forEach((init) => init());
 

@@ -1,14 +1,11 @@
 import { createReducer } from "@reduxjs/toolkit";
 import { t } from "ttag";
 
-import { combineReducers } from "metabase/lib/redux";
-import { isNotNull } from "metabase/lib/types";
-import {
-  PLUGIN_ADMIN_ALLOWED_PATH_GETTERS,
-  PLUGIN_METABOT,
-} from "metabase/plugins";
-import { refreshCurrentUser } from "metabase/redux/user";
-import type { AdminPath, AdminPathKey } from "metabase-types/store";
+import { userApi } from "metabase/api";
+import { PLUGIN_ADMIN_ALLOWED_PATH_GETTERS } from "metabase/plugins";
+import { combineReducers } from "metabase/redux";
+import type { AdminPath, AdminPathKey } from "metabase/redux/store";
+import { isNotNull } from "metabase/utils/types";
 
 export const getAdminPaths: () => AdminPath[] = () => {
   const items: AdminPath[] = [
@@ -21,6 +18,16 @@ export const getAdminPaths: () => AdminPath[] = () => {
       name: t`Databases`,
       path: "/admin/databases",
       key: "databases",
+    },
+    {
+      name: t`Embedding`,
+      path: "/admin/embedding",
+      key: "embedding",
+    },
+    {
+      name: t`AI`,
+      path: "/admin/metabot",
+      key: "metabot",
     },
     {
       name: t`Table Metadata`,
@@ -43,15 +50,9 @@ export const getAdminPaths: () => AdminPath[] = () => {
       key: "performance",
     },
     {
-      name: t`Tools`,
-      path: "/admin/tools",
-      key: "tools",
-    },
-    ...PLUGIN_METABOT.adminNavItem,
-    {
-      name: t`Troubleshooting`,
-      path: "/admin/troubleshooting",
-      key: "troubleshooting",
+      name: t`Help`,
+      path: "/admin/help",
+      key: "help",
     },
   ];
 
@@ -59,24 +60,27 @@ export const getAdminPaths: () => AdminPath[] = () => {
 };
 
 const paths = createReducer(getAdminPaths(), (builder) => {
-  builder.addCase(refreshCurrentUser.fulfilled, (state, { payload: user }) => {
-    if (user?.is_superuser) {
-      return state;
-    }
+  builder.addMatcher(
+    userApi.endpoints.getCurrentUser.matchFulfilled,
+    (state, { payload: user }) => {
+      if (user?.is_superuser) {
+        return state;
+      }
 
-    const allowedPaths = PLUGIN_ADMIN_ALLOWED_PATH_GETTERS.map((getter) => {
-      return getter(user);
-    })
-      .flat()
-      .reduce((acc, pathKey) => {
-        acc.add(pathKey);
-        return acc;
-      }, new Set<AdminPathKey>());
+      const allowedPaths = PLUGIN_ADMIN_ALLOWED_PATH_GETTERS.map((getter) => {
+        return getter(user);
+      })
+        .flat()
+        .reduce((acc, pathKey) => {
+          acc.add(pathKey);
+          return acc;
+        }, new Set<AdminPathKey>());
 
-    return state
-      .filter((path) => (allowedPaths.has(path.key) ? path : null))
-      .filter(isNotNull);
-  });
+      return state
+        .filter((path) => (allowedPaths.has(path.key) ? path : null))
+        .filter(isNotNull);
+    },
+  );
 });
 
 export const appReducer = combineReducers({

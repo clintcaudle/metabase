@@ -25,8 +25,7 @@
                                                             {:query-params (m/remove-vals
                                                                             str/blank?
                                                                             {"instance" (version.settings/site-uuid-for-version-info-fetching)
-                                                                             "current-version" (:tag config/mb-version-info)
-                                                                             "channel" (version.settings/update-channel)})})))]
+                                                                             "current-version" (:tag config/mb-version-info)})})))]
     (when (not= status 200)
       (throw (Exception. (format "[%d]: %s" status body))))
     (json/decode+kw body)))
@@ -40,7 +39,7 @@
       (when-let [version-info (get-version-info)]
         (version.settings/version-info! version-info))
       (catch Throwable e
-        (log/error e "Error fetching version info; setting version-info value to nil")
+        (log/errorf "Error fetching version info; setting version-info value to nil: %s" (ex-message e))
         (version.settings/version-info! nil)))))
 
 (def ^:private job-key     "metabase.task.upgrade-checks.job")
@@ -63,6 +62,6 @@
                  (triggers/with-identity (triggers/key trigger-key))
                  (triggers/start-now)
                  (triggers/with-schedule
-                   ;; run twice a day
+                  ;; run twice a day
                   (cron/cron-schedule (format "0 %d %d,%d * * ? *" rand-minute rand-hour-1 rand-hour-2))))]
     (task/schedule-task! job trigger)))

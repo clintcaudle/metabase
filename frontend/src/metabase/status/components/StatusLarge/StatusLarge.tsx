@@ -1,9 +1,9 @@
+import type { PropsWithChildren } from "react";
 import { t } from "ttag";
 
-import { Ellipsified } from "metabase/core/components/Ellipsified";
-import Link from "metabase/core/components/Link";
-import type { IconName } from "metabase/ui";
-import { Icon } from "metabase/ui";
+import { Link } from "metabase/common/components/Link";
+import { Ellipsified, Icon, Loader } from "metabase/ui";
+import type { IconName } from "metabase-types/api";
 
 import useStatusVisibility from "../../hooks/use-status-visibility";
 
@@ -14,7 +14,6 @@ import {
   StatusCardIcon,
   StatusCardIconContainer,
   StatusCardRoot,
-  StatusCardSpinner,
   StatusCardTitle,
   StatusHeader,
   StatusRoot,
@@ -81,6 +80,12 @@ const StatusLarge = ({
   );
 };
 
+const LinkWrapper = ({
+  children,
+  item,
+}: PropsWithChildren<{ item: StatusItem }>) =>
+  item?.href ? <Link to={item.href}>{children}</Link> : children;
+
 interface StatusCardProps {
   item: StatusItem;
   isActive?: boolean;
@@ -95,17 +100,15 @@ const StatusCard = ({
 
   const isVisible = useStatusVisibility(isActive || isInProgress);
 
-  const LinkWrapper = ({ children }: { children: JSX.Element }) =>
-    item?.href ? <Link to={item.href}>{children}</Link> : children;
-
   if (!isVisible) {
     return null;
   }
 
   return (
-    <LinkWrapper key={id}>
+    <LinkWrapper item={item} key={id}>
       <StatusCardRoot hasBody={!!description}>
         <StatusCardIcon>
+          {/* Unjustified type cast. FIXME */}
           <Icon name={icon as unknown as IconName} />
         </StatusCardIcon>
         <StatusCardBody>
@@ -114,7 +117,7 @@ const StatusCard = ({
           </StatusCardTitle>
           <StatusCardDescription>{description}</StatusCardDescription>
         </StatusCardBody>
-        {isInProgress && <StatusCardSpinner size={24} borderWidth={3} />}
+        {isInProgress && <Loader size="md" color="core-brand" />}
         {isCompleted && (
           <StatusCardIconContainer>
             <Icon name="check" size={12} />

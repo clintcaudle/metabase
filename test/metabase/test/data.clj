@@ -39,21 +39,20 @@
    [colorize.core :as colorize]
    [mb.hawk.init :as hawk.init]
    [metabase.app-db.core :as mdb]
-   [metabase.app-db.schema-migrations-test.impl
-    :as schema-migrations-test.impl]
+   [metabase.app-db.schema-migrations-test.impl :as schema-migrations-test.impl]
    [metabase.driver :as driver]
    [metabase.driver.ddl.interface :as ddl.i]
    [metabase.driver.util :as driver.u]
-   [metabase.lib-be.metadata.jvm :as lib.metadata.jvm]
-   [metabase.lib.metadata :as lib.metadata]
+   [metabase.legacy-mbql.normalize :as mbql.normalize]
+   [metabase.legacy-mbql.schema :as mbql.s]
+   [metabase.lib-be.core :as lib-be]
    [metabase.lib.schema.id :as lib.schema.id]
    [metabase.permissions.models.permissions-group :as perms-group]
-   [metabase.query-processor :as qp]
+   [metabase.query-processor.core :as qp]
    [metabase.test.data.env :as tx.env]
    [metabase.test.data.impl :as data.impl]
    [metabase.test.data.interface :as tx]
    [metabase.test.data.mbql-query-impl :as mbql-query-impl]
-   [metabase.util :as u]
    [metabase.util.malli :as mu]
    [metabase.util.malli.registry :as mr]
    [next.jdbc]))
@@ -135,7 +134,9 @@
    (mbql-query-impl/parse-tokens table-name `(do ~@body))))
 
 (defmacro mbql-query
-  "Macro for easily building MBQL queries for test purposes.
+  "DEPRECATED: Use Lib to generate MBQL queries instead of hand-rolling legacy MBQL queries in new tests.
+
+  Macro for easily building MBQL queries for test purposes.
 
   *  `$`  = `:field` clause wrapping Field ID
   *  `$$` = table ID
@@ -151,44 +152,47 @@
      complete details.
   *  Wraps 'inner' query with the standard `{:database (data/id), :type :query, :query {...}}` boilerplate
   *  Adds `:source-table` clause if `:source-table` or `:source-query` is not already present"
-  {:style/indent :defn}
+  {:style/indent :defn, :deprecated "0.61.0"}
   ([table-name]
    `(mbql-query ~table-name {}))
 
   ([table-name inner-query]
    {:pre [(map? inner-query)]}
+   (assert (not (:type inner-query)) "Should be an inner-query, not an outer query")
    (as-> inner-query <>
      (mbql-query-impl/parse-tokens table-name <>)
      (mbql-query-impl/maybe-add-source-table <> table-name)
-     (mbql-query-impl/wrap-populate-idents <>)
-     (mbql-query-impl/wrap-inner-query <>)
-     (vary-meta <> assoc :type :mbql-query))))
+     (mbql-query-impl/wrap-inner-query <>))))
 
 (defmacro query
-  "Like `mbql-query`, but operates on an entire 'outer' query rather than the 'inner' MBQL query. Like `mbql-query`,
+  "DEPRECATED: Use Lib to generate MBQL queries instead of hand-rolling legacy MBQL queries in new tests.
+
+  Like `mbql-query`, but operates on an entire 'outer' query rather than the 'inner' MBQL query. Like `mbql-query`,
   automatically adds `:database` and `:type` to the top-level 'outer' query, and `:source-table` to the 'inner' MBQL
   query if not present."
-  {:style/indent 1}
+  {:style/indent 1, :deprecated "0.61.0"}
   ([table-name]
    `(query ~table-name {}))
 
   ([table-name outer-query]
    {:pre [(map? outer-query)]}
    (merge
-    ^{:type :mbql-query}
     {:database `(id)
      :type     :query}
     (cond-> (mbql-query-impl/parse-tokens table-name outer-query)
-      (not (:native outer-query)) (-> (update :query mbql-query-impl/maybe-add-source-table table-name)
-                                      (update :query mbql-query-impl/wrap-populate-idents))))))
+      (not (:native outer-query)) (update :query mbql-query-impl/maybe-add-source-table table-name)))))
 
-(defmacro native-query
-  "Like `mbql-query`, but for native queries."
-  {:style/indent 0}
-  [inner-native-query]
-  `{:database (id)
-    :type     :native
-    :native   ~inner-native-query})
+(declare id)
+
+(mu/defn native-query :- ::mbql.s/Query
+  "DEPRECATED: Use Lib to generate MBQL queries instead of hand-rolling legacy MBQL queries in new tests.
+
+  Like `mbql-query`, but for native queries."
+  [inner-native-query :- :map]
+  {:deprecated "0.61.0"}
+  {:database (id)
+   :type     :native
+   :native   (mbql.normalize/normalize ::mbql.s/TopLevelNativeInnerQuery inner-native-query)})
 
 (defn run-mbql-query* [query]
   ;; catch the Exception and rethrow with the query itself so we can have a little extra info for debugging if it fails.
@@ -200,11 +204,14 @@
                       e)))))
 
 (defmacro run-mbql-query
-  "Like `mbql-query`, but runs the query as well."
-  {:style/indent :defn}
+  "DEPRECATED: Use Lib to generate MBQL queries and [[metabase.query-processor/process-query]] instead of hand-rolling
+  legacy MBQL queries in new tests.
+
+  Like `mbql-query`, but runs the query as well."
+  {:style/indent :defn, :deprecated "0.61.0"}
   [table-name & [query]]
-  `(run-mbql-query* (-> (mbql-query ~table-name ~(or query {}))
-                        (assoc-in [:info :card-entity-id] (u/generate-nano-id)))))
+  #_{:clj-kondo/ignore [:deprecated-var]}
+  `(run-mbql-query* (mbql-query ~table-name ~(or query {}))))
 
 (def ^:private FormattableName
   [:or
@@ -240,12 +247,7 @@
 (defn metadata-provider
   "Get a metadata-provider for the current database."
   []
-  (lib.metadata.jvm/application-database-metadata-provider (id)))
-
-(defn ident
-  "Get the ident for a field. Arguments are the same as for `(mt/id :table :field)`."
-  [table-key field-key]
-  (:ident (lib.metadata/field (metadata-provider) (id table-key field-key))))
+  (lib-be/application-database-metadata-provider (id)))
 
 (defmacro dataset
   "Create a database and load it with the data defined by `dataset`, then do a quick metadata-only sync; make it the
@@ -299,13 +301,14 @@
       (with-redefs [perms-group/all-users (#'perms-group/magic-group perms-group/all-users-magic-group-type)
                     perms-group/admin     (#'perms-group/magic-group perms-group/admin-magic-group-type)]
         (mdb/setup-db! :create-sample-content? false)
+        ;; setup-db! writes through the encrypting transforms, so with MB_ENCRYPTION_SECRET_KEY set the dump would
+        ;; carry rows only that key can read. A test that binds a key of its own then sees rows it cannot decrypt.
+        (mdb/decrypt-db :h2 (mdb/data-source))
         (let [f (java.io.File/createTempFile "db-export" ".sql")]
           (next.jdbc/execute! conn ["SCRIPT TO ?" (str f)])
           f)))))
 
-;;; TODO FIXME -- rename this to `with-empty-h2-app-db!`
-#_{:clj-kondo/ignore [:metabase/test-helpers-use-non-thread-safe-functions]}
-(defmacro with-empty-h2-app-db
+(defmacro with-empty-h2-app-db!
   "Runs `body` under a new, blank, H2 application database (randomly named), in which all model tables have been
   created from `h2-app-db-script`. After `body` is finished, the original app DB bindings are restored.
 
@@ -318,10 +321,10 @@
      (mdb/finish-db-setup!)
      ~@body))
 
-;; Non-"normal" timeseries drivers are tested in [[metabase.timeseries-query-processor-test]] and elsewhere
+;; Non-"normal" timeseries drivers are tested in [[metabase.query-processor.timeseries-test]] and elsewhere
 (def timeseries-drivers
   "Drivers that are so weird that we can't use the standard dataset loading against them."
-  #{:druid :druid-jdbc})
+  #{:druid-jdbc})
 
 (mr/def ::driver-selector
   [:map {:closed true}
@@ -355,7 +358,10 @@
     (for [driver (tx.env/test-drivers)
           :let [driver (tx/the-driver-with-test-extensions driver)
                 conn-prop-names (when (or (seq +conn-props) (seq -conn-props))
-                                  (into #{} (map :name (driver/connection-properties driver))))]
+                                  (->> (driver/connection-properties driver)
+                                       driver.u/collect-all-props-by-name
+                                       keys
+                                       (into #{})))]
           :when (driver/with-driver driver
                   (let [the-db (delay (db))]
                     (cond-> true

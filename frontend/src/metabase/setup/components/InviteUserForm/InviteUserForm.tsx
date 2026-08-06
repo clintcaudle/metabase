@@ -2,13 +2,17 @@ import { useMemo } from "react";
 import { t } from "ttag";
 import * as Yup from "yup";
 
-import FormInput from "metabase/core/components/FormInput";
-import FormSubmitButton from "metabase/core/components/FormSubmitButton";
-import { Form, FormProvider } from "metabase/forms";
-import * as Errors from "metabase/lib/errors";
-import type { InviteInfo, UserInfo } from "metabase-types/store";
+import {
+  Form,
+  FormProvider,
+  FormSubmitButton,
+  FormTextInput,
+} from "metabase/forms";
+import type { InviteInfo, UserInfo } from "metabase/redux/store";
+import { Stack } from "metabase/ui";
+import * as Errors from "metabase/utils/errors";
 
-import { UserFieldGroup } from "./InviteUserForm.styled";
+import S from "./InviteUserForm.module.css";
 
 const INVITE_USER_SCHEMA = Yup.object({
   first_name: Yup.string().nullable().default(null).max(100, Errors.maxLength),
@@ -46,28 +50,28 @@ export const InviteUserForm = ({
       validationContext={user}
       onSubmit={onSubmit}
     >
-      <Form>
-        <UserFieldGroup>
-          <FormInput
+      <Form as={Stack} gap="md" data-testid="invite-user-form">
+        <div className={S.UserFieldGroup}>
+          <FormTextInput
             name="first_name"
-            title={t`First name`}
+            label={t`First name`}
             placeholder={t`Johnny`}
             nullable
             autoFocus
           />
-          <FormInput
+          <FormTextInput
             name="last_name"
-            title={t`Last name`}
+            label={t`Last name`}
             placeholder={t`Appleseed`}
             nullable
           />
-        </UserFieldGroup>
-        <FormInput
+        </div>
+        <FormTextInput
           name="email"
-          title={t`Email`}
+          label={t`Email`}
           placeholder={"nicetoseeyou@email.com"}
         />
-        <FormSubmitButton title={t`Send invitation`} primary />
+        <FormSubmitButton label={t`Send invitation`} variant="filled" />
       </Form>
     </FormProvider>
   );

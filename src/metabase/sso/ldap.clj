@@ -1,10 +1,10 @@
 (ns metabase.sso.ldap
   (:require
    [clj-ldap.client :as ldap]
+   [diehard.core :as dh]
    [metabase.settings.core :as setting]
    [metabase.sso.ldap.default-implementation :as default-impl]
    [metabase.sso.settings :as sso.settings]
-   [metabase.util :as u]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms])
@@ -54,7 +54,7 @@
   ^LDAPConnectionPool
   []
   (let [options (settings->ldap-options)]
-    (log/debugf "Opening LDAP connection with options %s" (u/pprint-to-str options))
+    (log/debug "Opening LDAP connection")
     (try
       (ldap/connect options)
       (catch LDAPException e
@@ -129,7 +129,9 @@
 
   ([conn user-info password]
    (let [dn (if (string? user-info) user-info (:dn user-info))]
-     (ldap/bind? conn dn password))))
+     (dh/with-timeout {:timeout-ms (int (* 1000 (sso.settings/ldap-timeout-seconds)))
+                       :interrupt? true}
+       (ldap/bind? conn dn password)))))
 
 (defn ldap-settings
   "A map of all ldap settings"
@@ -151,12 +153,9 @@
 
   ([ldap-connection :- (ms/InstanceOfClass LDAPConnectionPool)
     username        :- ms/NonBlankString]
-   (default-impl/find-user ldap-connection username (ldap-settings))))
-
-(mu/defn fetch-or-create-user! :- (ms/InstanceOf :model/User)
-  "Using the `user-info` (from [[find-user]]) get the corresponding Metabase user, creating it if necessary."
-  [user-info :- default-impl/UserInfo]
-  (default-impl/fetch-or-create-user! user-info (ldap-settings)))
+   (dh/with-timeout {:timeout-ms (int (* 1000 (sso.settings/ldap-timeout-seconds)))
+                     :interrupt? true}
+     (default-impl/find-user ldap-connection username (ldap-settings)))))
 
 (defn humanize-error-messages
   "Convert raw error message responses from our LDAP tests into our normal api error response structure."

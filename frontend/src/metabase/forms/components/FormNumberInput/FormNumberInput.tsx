@@ -18,13 +18,13 @@ export const FormNumberInput = forwardRef(function FormNumberInput(
     useField(name);
 
   const handleChange = useCallback(
-    (newValue: number | "") => {
+    (newValue: number | string) => {
       if (newValue === "") {
         setValue(nullable ? null : undefined);
-      } else {
+      } else if (typeof newValue === "number") {
         setValue(newValue);
       }
-      onChange?.(newValue || 0);
+      onChange?.(newValue);
     },
     [nullable, setValue, onChange],
   );

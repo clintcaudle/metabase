@@ -1,5 +1,6 @@
 (ns metabase.notification.test-util
   "Define the `metabase-test` channel and notification test utilities."
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.notification.test-util]}}}}}}
   (:require
    [clojure.set :as set]
    [clojure.test :refer :all]
@@ -7,6 +8,8 @@
    [metabase.channel.core :as channel]
    [metabase.channel.email :as email]
    [metabase.channel.render.js.svg :as js.svg]
+   [metabase.channel.slack :as slack]
+   [metabase.events.core :as events]
    [metabase.notification.core :as notification]
    [metabase.notification.events.notification :as events.notification]
    [metabase.notification.models :as models.notification]
@@ -38,7 +41,7 @@
   message)
 
 (defmethod channel/render-notification [:channel/metabase-test :notification/testing]
-  [_channel-type notification-info _template _recipients]
+  [_channel-type notification-info _handler]
   [notification-info])
 
 (defmethod notification.payload/payload :notification/testing
@@ -60,7 +63,6 @@
                 :content "<svg width=\"300\" height=\"130\" xmlns=\"http://www.w3.org/2000/svg\">\n  <rect width=\"200\" height=\"100\" x=\"10\" y=\"10\" rx=\"20\" ry=\"20\" fill=\"blue\" />\n</svg>"})]
      ~@body))
 
-#_{:clj-kondo/ignore [:metabase/test-helpers-use-non-thread-safe-functions]}
 (defn do-with-captured-channel-send!
   [thunk]
   (with-javascript-visualization-stub
@@ -92,12 +94,12 @@
   `(let [topics# ~topics]
      (try
        (doseq [topic# topics#]
-         (derive topic# :metabase/event))
+         (events/derive! topic# :metabase/event))
        (with-redefs [events.notification/supported-topics (set/union @#'events.notification/supported-topics topics#)]
          ~@body)
        (finally
          (doseq [topic# topics#]
-           (underive topic# :metabase/event))))))
+           (events/underive! topic# :metabase/event))))))
 
 (defmacro with-notification-cleanup!
   "Macro that clean ups notification related models"
@@ -148,7 +150,6 @@
                                 {:name          default-card-name
                                  :dataset_query (mt/mbql-query products {:aggregation [[:count]]
                                                                          :breakout    [$category]})}
-
                                 card)]
     (do-with-temp-notification
      {:notification  (merge {:payload      (assoc notification-card
@@ -195,9 +196,15 @@
 (def channel-type->fixture
   {:channel/email (fn [thunk] (mt/with-temporary-setting-values [email-smtp-host "fake_smtp_host"
                                                                  email-smtp-port 587
-                                                                 site-url        "https://testmb.com/"]
+                                                                 site-url        "https://testmb.com/"
+                                                                 site-name       "Metabase Test"]
                                 (thunk)))
-   :channel/slack (fn [thunk] (thunk))})
+   :channel/slack (fn [thunk] (mt/with-temporary-setting-values [site-url  "https://testmb.com/"
+                                                                 site-name "Metabase Test"]
+                                (mt/with-dynamic-fn-redefs [slack/upload-file! (fn [_file fname]
+                                                                                 {:url (format "https://uploaded.com/%s" fname)
+                                                                                  :id  fname})]
+                                  (thunk))))})
 
 (defn apply-channel-fixtures
   [channel-types thunk]
@@ -217,7 +224,6 @@
   (with-channel-fixtures (keys channel-type->assert-fn)
     (let [channel-type->captured-message (with-captured-channel-send!
                                            (notification/send-notification! notification))]
-
       (doseq [[channel-type assert-fn] channel-type->assert-fn]
         (testing (format "chanel-type = %s" channel-type)
           (assert-fn (get channel-type->captured-message channel-type)))))))
@@ -289,7 +295,8 @@
 
 (def channel-template-email-with-handlebars-body
   "A :model/ChannelTemplate for email channels that has a :event/handlebars-text template."
-  {:channel_type :channel/email
+  {:name         "Email default test template"
+   :channel_type :channel/email
    :details      {:type    :email/handlebars-text
                   :subject "Welcome {{payload.event_info.object.first_name}} to {{context.site_name}}"
                   :body    "Hello {{payload.event_info.object.first_name}}! Welcome to {{context.site_name}}!"}})

@@ -1,6 +1,5 @@
-import type { LocationDescriptorObject } from "history";
-
-import type { DatasetEditorTab, QueryBuilderMode } from "metabase-types/store";
+import type { DatasetEditorTab, QueryBuilderMode } from "metabase/redux/store";
+import type { Path } from "metabase/router";
 
 type LocationQBModeResult = {
   queryBuilderMode: QueryBuilderMode;
@@ -8,18 +7,24 @@ type LocationQBModeResult = {
 };
 
 export function getQueryBuilderModeFromLocation(
-  location: LocationDescriptorObject,
+  location: Partial<Path>,
 ): LocationQBModeResult {
   const { pathname } = location;
-  if (pathname?.endsWith("/notebook")) {
+  const lastPathSegment = pathname?.split("/").pop();
+
+  if (lastPathSegment === "notebook") {
     return {
       queryBuilderMode: "notebook",
     };
   }
-  if (pathname?.endsWith("/query") || pathname?.endsWith("/metadata")) {
+  if (
+    lastPathSegment === "query" ||
+    lastPathSegment === "metadata" ||
+    lastPathSegment === "columns"
+  ) {
     return {
       queryBuilderMode: "dataset",
-      datasetEditorTab: pathname.endsWith("/query") ? "query" : "metadata",
+      datasetEditorTab: lastPathSegment,
     };
   }
   return {

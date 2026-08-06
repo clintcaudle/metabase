@@ -2,12 +2,10 @@ import { useMemo } from "react";
 
 import { getShortStrategyLabel } from "metabase/admin/performance/utils";
 import { EllipsifiedCollectionPath } from "metabase/common/components/EllipsifiedPath/EllipsifiedCollectionPath";
-import { MaybeLink } from "metabase/components/Badge/Badge.styled";
-import { Ellipsified } from "metabase/core/components/Ellipsified";
-import Link from "metabase/core/components/Link";
-import { getIcon } from "metabase/lib/icon";
-import * as Urls from "metabase/lib/urls";
-import { Box, Button, FixedSizeIcon, Flex } from "metabase/ui";
+import { Link } from "metabase/common/components/Link";
+import { useGetIcon } from "metabase/hooks/use-icon";
+import { Box, Button, Ellipsified, FixedSizeIcon, Flex } from "metabase/ui";
+import * as Urls from "metabase/urls";
 import type { CacheableModel } from "metabase-types/api";
 
 import type { CacheableItem, UpdateTarget } from "../types";
@@ -30,6 +28,7 @@ export const TableRowForCacheableItem = ({
   updateTarget: UpdateTarget;
   isFormDirty: boolean;
 }) => {
+  const getIcon = useGetIcon();
   const { name, id, collection, model, strategy, iconModel } = item;
 
   const iconName = iconModel
@@ -37,6 +36,7 @@ export const TableRowForCacheableItem = ({
     : null;
 
   const url = useMemo(
+    // Unjustified type cast. FIXME
     () => getItemUrl(model, item as { id: number; name: string }) || undefined,
     [model, item],
   );
@@ -47,6 +47,20 @@ export const TableRowForCacheableItem = ({
     }
   };
 
+  const cellContent = (
+    <Flex
+      className={StrategyEditorForQuestionsAndDashboardsS.ItemLink}
+      align="center"
+      wrap="nowrap"
+      gap="sm"
+      fw={700}
+      style={{ overflow: "hidden" }}
+    >
+      {iconName ? <FixedSizeIcon name={iconName} /> : <Box h="sm" w="md" />}
+      <Ellipsified>{name}</Ellipsified>
+    </Flex>
+  );
+
   return (
     <tr
       className={
@@ -55,26 +69,7 @@ export const TableRowForCacheableItem = ({
           : undefined
       }
     >
-      <td>
-        <MaybeLink
-          className={StrategyEditorForQuestionsAndDashboardsS.ItemLink}
-          to={url}
-        >
-          <Flex
-            align="center"
-            wrap="nowrap"
-            gap="sm"
-            style={{ overflow: "hidden" }}
-          >
-            {iconName ? (
-              <FixedSizeIcon name={iconName} />
-            ) : (
-              <Box h="sm" w="md" />
-            )}
-            <Ellipsified style={{ fontWeight: "bold" }}>{name}</Ellipsified>
-          </Flex>
-        </MaybeLink>
-      </td>
+      <td>{url ? <Link to={url}>{cellContent}</Link> : cellContent}</td>
       <td>
         {collection && (
           <Link

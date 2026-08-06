@@ -1,17 +1,32 @@
-import { Sidebar } from "metabase/dashboard/components/Sidebar";
+import { useCallback } from "react";
+
+import { Sidebar } from "metabase/common/components/Sidebar";
+import { useDashboardContext } from "metabase/dashboard/context";
 import type { CardId } from "metabase-types/api";
 
 import { QuestionPicker } from "../QuestionPicker";
 
-interface AddCardSidebarProps {
-  onSelect: (cardId: CardId) => void;
-  onClose: () => void;
-}
+export function AddCardSidebar() {
+  const { dashboard, selectedTabId, addCardToDashboard } =
+    useDashboardContext();
 
-export function AddCardSidebar(props: AddCardSidebarProps) {
+  const handleAddCard = useCallback(
+    (cardId: string | number) => {
+      if (dashboard) {
+        addCardToDashboard({
+          dashId: dashboard.id,
+          // Unjustified type cast. FIXME
+          cardId: cardId as CardId,
+          tabId: selectedTabId,
+        });
+      }
+    },
+    [addCardToDashboard, dashboard, selectedTabId],
+  );
+
   return (
     <Sidebar data-testid="add-card-sidebar">
-      <QuestionPicker {...props} />
+      <QuestionPicker onSelect={handleAddCard} />
     </Sidebar>
   );
 }

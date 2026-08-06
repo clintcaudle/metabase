@@ -1,3 +1,11 @@
+import { updateMetadata } from "metabase/redux/metadata";
+import {
+  DatabaseSchema,
+  FieldSchema,
+  SchemaSchema,
+  TableSchema,
+} from "metabase/schema";
+import { generateSchemaId } from "metabase-lib/v1/metadata/utils/schema";
 import type {
   AutocompleteRequest,
   AutocompleteSuggestion,
@@ -6,10 +14,13 @@ import type {
   CreateDatabaseRequest,
   Database,
   DatabaseId,
+  DatabaseUsageInfo,
   Field,
+  GetDatabaseHealthRequest,
   GetDatabaseHealthResponse,
   GetDatabaseMetadataRequest,
   GetDatabaseRequest,
+  GetDatabaseSettingsAvailableResponse,
   ListDatabaseIdFieldsRequest,
   ListDatabaseSchemaTablesRequest,
   ListDatabaseSchemasRequest,
@@ -32,6 +43,22 @@ import {
   provideDatabaseTags,
   tag,
 } from "./tags";
+import { handleQueryFulfilled } from "./utils/lifecycle";
+
+/**
+ * schema names containing slashes, backslashes, or percent signs are rejected
+ * at the HTTP layer when percent-encoded in a URL path, so they must be passed
+ * as a query parameter instead (#77353)
+ */
+export const shouldSchemaBePassedAsQueryParam = (schema: SchemaName) =>
+  /[/\\%]/.test(schema);
+
+const toNormalizedSchemas = (dbId: DatabaseId, schemaNames: SchemaName[]) =>
+  schemaNames.map((schemaName) => ({
+    id: generateSchemaId(dbId, schemaName),
+    name: schemaName,
+    database: { id: dbId },
+  }));
 
 export const databaseApi = Api.injectEndpoints({
   endpoints: (builder) => ({
@@ -45,6 +72,10 @@ export const databaseApi = Api.injectEndpoints({
         params,
       }),
       providesTags: (response) => provideDatabaseListTags(response?.data ?? []),
+      onQueryStarted: (_, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (data) =>
+          dispatch(updateMetadata(data.data, [DatabaseSchema])),
+        ),
     }),
     getDatabase: builder.query<Database, GetDatabaseRequest>({
       query: ({ id, ...params }) => ({
@@ -54,14 +85,22 @@ export const databaseApi = Api.injectEndpoints({
       }),
       providesTags: (database) =>
         database ? provideDatabaseTags(database) : [],
+      onQueryStarted: (_, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (data) =>
+          dispatch(updateMetadata(data, DatabaseSchema)),
+        ),
     }),
-    getDatabaseHealth: builder.query<GetDatabaseHealthResponse, DatabaseId>({
-      query: (id) => ({
+    getDatabaseHealth: builder.query<
+      GetDatabaseHealthResponse,
+      GetDatabaseHealthRequest
+    >({
+      query: ({ id, ...params }) => ({
         method: "GET",
         url: `/api/database/${id}/healthcheck`,
+        params,
       }),
       // invalidate health check in the case db connection info changes
-      providesTags: (_, __, id) => [idTag("database", id)],
+      providesTags: (_, __, { id }) => [idTag("database", id)],
     }),
     getDatabaseMetadata: builder.query<Database, GetDatabaseMetadataRequest>({
       query: ({ id, ...params }) => ({
@@ -71,6 +110,27 @@ export const databaseApi = Api.injectEndpoints({
       }),
       providesTags: (database) =>
         database ? provideDatabaseTags(database) : [],
+      onQueryStarted: (_, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (data) =>
+          dispatch(updateMetadata(data, DatabaseSchema)),
+        ),
+    }),
+    getDatabaseUsageInfo: builder.query<DatabaseUsageInfo, DatabaseId>({
+      query: (id) => ({
+        method: "GET",
+        url: `/api/database/${id}/usage_info`,
+      }),
+      providesTags: (_response, _error, id) => [idTag("database", id)],
+    }),
+    getDatabaseSettingsAvailable: builder.query<
+      GetDatabaseSettingsAvailableResponse,
+      DatabaseId
+    >({
+      query: (id) => ({
+        method: "GET",
+        url: `/api/database/${id}/settings-available`,
+      }),
+      providesTags: (_response, _error, id) => [idTag("database", id)],
     }),
     listDatabaseSchemas: builder.query<
       SchemaName[],
@@ -85,6 +145,14 @@ export const databaseApi = Api.injectEndpoints({
         listTag("schema"),
         ...schemas.map((schema) => idTag("schema", schema)),
       ],
+      onQueryStarted: ({ id }, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (schemaNames) =>
+          dispatch(
+            updateMetadata(toNormalizedSchemas(id, schemaNames), [
+              SchemaSchema,
+            ]),
+          ),
+        ),
     }),
     listSyncableDatabaseSchemas: builder.query<SchemaName[], DatabaseId>({
       query: (id) => ({
@@ -95,20 +163,38 @@ export const databaseApi = Api.injectEndpoints({
         listTag("schema"),
         ...schemas.map((schema) => idTag("schema", schema)),
       ],
+      onQueryStarted: (id, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (schemaNames) =>
+          dispatch(
+            updateMetadata(toNormalizedSchemas(id, schemaNames), [
+              SchemaSchema,
+            ]),
+          ),
+        ),
     }),
     listDatabaseSchemaTables: builder.query<
       Table[],
       ListDatabaseSchemaTablesRequest
     >({
-      query: ({ id, schema, ...params }) => ({
-        method: "GET",
-        url: `/api/database/${id}/schema/${schema}`,
-        params,
-      }),
+      query: ({ id, schema, ...params }) => {
+        const isQueryParam = shouldSchemaBePassedAsQueryParam(schema);
+
+        return {
+          method: "GET",
+          url: isQueryParam
+            ? `/api/database/${id}/schema/`
+            : `/api/database/${id}/schema/${encodeURIComponent(schema)}`,
+          params: isQueryParam ? { ...params, schema } : params,
+        };
+      },
       providesTags: (tables = []) => [
         listTag("table"),
         ...tables.map((table) => idTag("table", table.id)),
       ],
+      onQueryStarted: (_, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (data) =>
+          dispatch(updateMetadata(data, [TableSchema])),
+        ),
     }),
     listVirtualDatabaseTables: builder.query<
       Table[],
@@ -116,13 +202,17 @@ export const databaseApi = Api.injectEndpoints({
     >({
       query: ({ id, schema, ...params }) => ({
         method: "GET",
-        url: `/api/database/${id}/datasets/${schema}`,
+        url: `/api/database/${id}/datasets/${encodeURIComponent(schema)}`,
         params,
       }),
       providesTags: (tables = []) => [
         listTag("table"),
         ...tables.map((table) => idTag("table", table.id)),
       ],
+      onQueryStarted: (_, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (data) =>
+          dispatch(updateMetadata(data, [TableSchema])),
+        ),
     }),
     listDatabaseIdFields: builder.query<Field[], ListDatabaseIdFieldsRequest>({
       query: ({ id, ...params }) => ({
@@ -131,6 +221,10 @@ export const databaseApi = Api.injectEndpoints({
         params,
       }),
       providesTags: [listTag("field")],
+      onQueryStarted: (_, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (data) =>
+          dispatch(updateMetadata(data, [FieldSchema])),
+        ),
     }),
     createDatabase: builder.mutation<Database, CreateDatabaseRequest>({
       query: (body) => ({
@@ -139,7 +233,10 @@ export const databaseApi = Api.injectEndpoints({
         body,
       }),
       invalidatesTags: (_, error) =>
-        invalidateTags(error, [listTag("database")]),
+        invalidateTags(error, [
+          listTag("database"),
+          listTag("embedding-hub-checklist"),
+        ]),
     }),
     updateDatabase: builder.mutation<Database, UpdateDatabaseRequest>({
       query: ({ id, ...body }) => ({
@@ -264,12 +361,18 @@ export const databaseApi = Api.injectEndpoints({
 
 export const {
   useListDatabasesQuery,
+  useLazyListDatabasesQuery,
   useGetDatabaseQuery,
   useGetDatabaseHealthQuery,
   useGetDatabaseMetadataQuery,
+  useGetDatabaseUsageInfoQuery,
+  useGetDatabaseSettingsAvailableQuery,
   useListDatabaseSchemasQuery,
+  useLazyListDatabaseSchemasQuery,
+  usePrefetch: useDatabasePrefetch,
   useListSyncableDatabaseSchemasQuery,
   useListDatabaseSchemaTablesQuery,
+  useLazyListDatabaseSchemaTablesQuery,
   useListVirtualDatabaseTablesQuery,
   useListDatabaseIdFieldsQuery,
   useCreateDatabaseMutation,

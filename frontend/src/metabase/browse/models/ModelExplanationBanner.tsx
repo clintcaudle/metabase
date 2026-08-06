@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { t } from "ttag";
 
-import { useDocsUrl, useUserSetting } from "metabase/common/hooks";
-import ExternalLink from "metabase/core/components/ExternalLink";
+import { ExternalLink } from "metabase/common/components/ExternalLink";
+import { useDocsUrl } from "metabase/common/hooks";
+import { useUserSetting } from "metabase/settings";
 import {
   Button,
   Flex,
@@ -35,7 +36,7 @@ export const ModelExplanationBanner = () => {
 
   return (
     <Paper
-      color="text-dark"
+      color="text-primary"
       bg="transparent"
       shadow="0"
       radius="0.25rem"

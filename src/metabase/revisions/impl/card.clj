@@ -1,17 +1,27 @@
 (ns metabase.revisions.impl.card
   (:require
+   [metabase.queries.core :as queries]
    [metabase.revisions.models.revision :as revision]))
 
 (def ^:private excluded-columns-for-card-revision
   #{:cache_invalidated_at
     :created_at
     :creator_id
+    :dimension_mappings
+    :dimensions
+    :document_id
     :entity_id
     :id
     :initially_published_at
     :last_used_at
+    :legacy_query
     :made_public_by_id
     :metabase_version
+    ;; internal Metabot bookkeeping (which conversation/chart the card was saved from);
+    ;; excluding them also keeps a revert from writing back a stale conversation id
+    ;; after the conversation is deleted (the FK would reject it)
+    :metabot_chart_id
+    :metabot_conversation_id
     :public_uuid
     :updated_at
     :view_count})
@@ -22,8 +32,8 @@
   (let [serialized-card (cond-> serialized-card
                           (contains? serialized-card :dataset) (-> (dissoc :dataset)
                                                                    (assoc :type (if (:dataset serialized-card) :model :question)))
-                          ;; Add the default `:card_schema` of 20, if it's missing.
-                          (not (:card_schema serialized-card)) (assoc :card_schema 20))]
+                          ;; Add the default `:card_schema` if it's missing.
+                          (not (:card_schema serialized-card)) (assoc :card_schema queries/starting-card-schema-version))]
     ((get-method revision/revert-to-revision! :default) model id user-id serialized-card)))
 
 (defn- model?

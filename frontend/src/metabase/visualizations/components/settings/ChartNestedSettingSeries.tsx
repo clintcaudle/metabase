@@ -1,11 +1,11 @@
-import ChartNestedSettingSeriesMultiple from "./ChartNestedSettingSeriesMultiple";
-import type { ChartNestedSettingsSeriesSingleProps } from "./ChartNestedSettingSeriesSingle";
+import type { ChartNestedSettingsSeriesMultipleProps } from "./ChartNestedSettingSeriesMultiple";
+import { ChartNestedSettingSeriesMultiple } from "./ChartNestedSettingSeriesMultiple";
 import ChartNestedSettingSeriesSingle from "./ChartNestedSettingSeriesSingle";
 
-interface ChartNestedSettingSeriesProps
-  extends ChartNestedSettingsSeriesSingleProps {
-  isDashboard: boolean;
-}
+export type ChartNestedSettingSeriesProps =
+  ChartNestedSettingsSeriesMultipleProps & {
+    isDashboard: boolean;
+  };
 
 const ChartNestedSettingSeries = ({
   isDashboard,

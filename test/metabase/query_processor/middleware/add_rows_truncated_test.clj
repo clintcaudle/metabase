@@ -1,14 +1,18 @@
 (ns metabase.query-processor.middleware.add-rows-truncated-test
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.query-processor.middleware.add-rows-truncated-test]}}}}}}
   (:require
    [clojure.test :refer :all]
-   [metabase.query-processor :as qp]
-   [metabase.query-processor.middleware.add-rows-truncated
-    :as add-rows-truncated]
+   [metabase.lib.core :as lib]
+   [metabase.lib.options :as lib.options]
+   [metabase.lib.test-metadata :as meta]
+   [metabase.lib.util :as lib.util]
+   [metabase.query-processor.middleware.add-rows-truncated :as add-rows-truncated]
    [metabase.query-processor.reducible :as qp.reducible]
+   [metabase.query-processor.test :as qp]
    [metabase.test :as mt]))
 
 (defn- add-rows-truncated [query rows]
-  (let [rff (add-rows-truncated/add-rows-truncated query qp.reducible/default-rff)
+  (let [rff (add-rows-truncated/add-rows-truncated (assoc query :lib/type :mbql/query) qp.reducible/default-rff)
         rf  (rff nil)]
     (transduce identity rf rows)))
 
@@ -19,8 +23,13 @@
             :data      {:rows           [[1] [1] [1] [1] [1]]
                         :rows_truncated 5}}
            (add-rows-truncated
-            {:constraints {:max-results           10
-                           :max-results-bare-rows 5}}
+            {:lib/type     :mbql/query
+             :database     1
+             :lib/metadata meta/metadata-provider
+             :stages       [{:lib/type     :mbql.stage/mbql
+                             :source-table 1}]
+             :constraints  {:max-results           10
+                            :max-results-bare-rows 5}}
             [[1] [1] [1] [1] [1]])))))
 
 (deftest ^:parallel add-rows-truncated-test-2
@@ -29,10 +38,41 @@
             :row_count 5
             :data      {:rows [[1] [1] [1] [1] [1]]}}
            (add-rows-truncated
-            {:query       {:aggregation [[:count]]}
-             :constraints {:max-results           10
-                           :max-results-bare-rows 5}}
+            {:lib/type     :mbql/query
+             :database     1
+             :lib/metadata meta/metadata-provider
+             :stages       [{:lib/type     :mbql.stage/mbql
+                             :source-table 1
+                             :aggregation  [[:count {:lib/uuid "00000000-0000-0000-0000-000000000000"}]]}]
+             :constraints  {:max-results           10
+                            :max-results-bare-rows 5}}
             [[1] [1] [1] [1] [1]])))))
+
+(deftest ^:parallel add-rows-truncated-aggregation-then-empty-stage-test
+  (testing "aggregation in an earlier stage + empty final stage uses `:max-results`, not `:max-results-bare-rows` (#48439)"
+    (is (= {:status    :completed
+            :row_count 5
+            :data      {:rows [[1] [1] [1] [1] [1]]}}
+           (add-rows-truncated
+            (-> (lib/query meta/metadata-provider (meta/table-metadata :venues))
+                (lib/aggregate (lib/count))
+                lib/append-stage
+                (assoc :constraints {:max-results 10, :max-results-bare-rows 5}))
+            [[1] [1] [1] [1] [1]])))))
+
+(deftest ^:parallel pivot-query-emits-pivot_rows_truncated-test
+  (testing "a query that carries a :pivot clause on its last stage emits :pivot_rows_truncated, not :rows_truncated"
+    (let [base    (-> (lib/query meta/metadata-provider (meta/table-metadata :venues))
+                      (lib/aggregate (lib/count))
+                      (lib/breakout (meta/field-metadata :venues :category-id)))
+          [u1]    (mapv lib.options/uuid (lib/breakouts base))
+          pivot-q (-> base
+                      (lib.util/update-query-stage -1 assoc :pivot
+                                                   {:rows [u1] :columns []
+                                                    :show-row-totals true :show-column-totals true})
+                      (assoc :constraints {:max-results 5 :max-results-bare-rows 5}))]
+      (is (=? {:data {:pivot_rows_truncated 5}}
+              (add-rows-truncated pivot-q [[1] [1] [1] [1] [1]]))))))
 
 (deftest ^:parallel e2e-test
   (let [result         (qp/process-query

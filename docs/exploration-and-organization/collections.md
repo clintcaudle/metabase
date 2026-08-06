@@ -36,7 +36,17 @@ Metabase admins can designate collections as "official" with the following effec
 
 Pairing Official badges with [verified items](./content-verification.md) can help everyone in your Metabase sort out which questions people can trust.
 
-To add an Official badge to a collection, an admin can visit the collection and click on the dot dot dot menu (**...**) and select **Make collection official**. Admins can also remove an Official badge in the same menu. Admins can also mark a collection as Official or not when they first create the collection.
+To add an Official badge to a collection, an admin can visit the collection and click on the three-dot menu (**...**) and select **Make collection official**. Admins can also remove an Official badge in the same menu. Admins can also mark a collection as Official or not when they first create the collection.
+
+### Library
+
+{% include plans-blockquote.html feature="Library" %}
+
+![Library](./images/library.png)
+
+The Library is a special collection that helps you create a source of truth for analytics by providing a centrally managed set of curated content. Use the Library to separate authoritative, reusable components from ad-hoc analyses.
+
+See [Library organization](../data-studio/library.md#library-organization).
 
 ## Collection permissions
 
@@ -48,7 +58,7 @@ To add an Official badge to a collection, an admin can visit the collection and 
 
 ## Your personal collection
 
- You'll find your **Your personal collection** in the left side navbar under collections. Only you (and your admins) can view and edit this collection.
+You'll find your **Your personal collection** in the left side navbar under collections. Only you (and your admins) can view and edit this collection.
 
 You can use your personal collection as a scratch space to put experiments and explorations that you don't think would be particularly interesting to the rest of your team, or as a work-in-progress space where you can work on things and then move them to a shared place once they're ready.
 
@@ -64,10 +74,6 @@ To pin and un-pin things in a collection, you need to have **Curate** permission
 
 - To pin an item, find the item on the collection page, go into the three-dot menu (**...**), and select **Pin this**.
 - To unpin a pinned item, hover over the pinned card, go to the three-dot menu (**...**), and select **Unpin**.
-
-For pinned questions, you can also choose whether to display the visualization from the three-dot menu (**...**).
-
-![Show pinned viz](./images/pinned-show-viz.png)
 
 Pinned items will appear pinned for all people looking at the collection. If you just want to organize your favorite items, you should [bookmark them](./exploration.md#bookmarks) (only you can see your bookmarks).
 

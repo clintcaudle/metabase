@@ -1,6 +1,5 @@
 import { userEvent } from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
-import { Route } from "react-router";
 
 import { callMockEvent } from "__support__/events";
 import {
@@ -12,23 +11,25 @@ import {
   renderWithProviders,
   screen,
   waitForLoaderToBeRemoved,
+  within,
 } from "__support__/ui";
 import { delay } from "__support__/utils";
 import DataPermissionsPage from "metabase/admin/permissions/pages/DataPermissionsPage/DataPermissionsPage";
-import DatabasesPermissionsPage from "metabase/admin/permissions/pages/DatabasePermissionsPage/DatabasesPermissionsPage";
-import { BEFORE_UNLOAD_UNSAVED_MESSAGE } from "metabase/hooks/use-before-unload";
+import { DatabasesPermissionsPage } from "metabase/admin/permissions/pages/DatabasePermissionsPage/DatabasesPermissionsPage";
+import { BEFORE_UNLOAD_UNSAVED_MESSAGE } from "metabase/common/hooks/use-before-unload";
 import { PLUGIN_ADMIN_PERMISSIONS_TABLE_GROUP_ROUTES } from "metabase/plugins";
+import { Route } from "metabase/router";
 import { createMockGroup } from "metabase-types/api/mocks/group";
 import { createSampleDatabase } from "metabase-types/api/mocks/presets";
-
-const NATIVE_QUERIES_PERMISSION_INDEX = 0;
-
 const TEST_DATABASE = createSampleDatabase();
 
-// Order is important here for test to pass, since admin options aren't editable
 const TEST_GROUPS = [
-  createMockGroup({ name: "All Users" }),
-  createMockGroup({ id: 2, name: "Administrators" }),
+  createMockGroup({
+    id: 1,
+    name: "All internal users",
+    magic_group_type: "all-internal-users",
+  }),
+  createMockGroup({ id: 2, name: "Administrators", magic_group_type: "admin" }),
 ];
 
 const setup = async () => {
@@ -44,13 +45,22 @@ const setup = async () => {
   const mockEventListener = jest.spyOn(window, "addEventListener");
 
   renderWithProviders(
-    <Route path="/admin/permissions/data" component={DataPermissionsPage}>
-      <Route
-        path="database(/:databaseId)(/schema/:schemaName)(/table/:tableId)"
-        component={DatabasesPermissionsPage}
-      >
-        {PLUGIN_ADMIN_PERMISSIONS_TABLE_GROUP_ROUTES}
-      </Route>
+    <Route path="/admin/permissions/data" element={<DataPermissionsPage />}>
+      {/*
+       * v7 cannot parse v3 optional groups, so the app spells each depth out as
+       * its own route (see DATABASES_PERMISSIONS_PATHS in permissions/routes.tsx).
+       * Mirror that here.
+       */}
+      {[
+        "database",
+        "database/:databaseId",
+        "database/:databaseId/schema/:schemaName",
+        "database/:databaseId/schema/:schemaName/table/:tableId",
+      ].map((path) => (
+        <Route key={path} path={path} element={<DatabasesPermissionsPage />}>
+          {PLUGIN_ADMIN_PERMISSIONS_TABLE_GROUP_ROUTES}
+        </Route>
+      ))}
     </Route>,
     {
       withRouter: true,
@@ -64,10 +74,9 @@ const setup = async () => {
 };
 
 const editDatabasePermission = async () => {
-  const permissionsSelectElem = (
-    await screen.findAllByTestId("permissions-select")
-  )[NATIVE_QUERIES_PERMISSION_INDEX];
-  await userEvent.click(permissionsSelectElem);
+  const row = await screen.findByRole("row", { name: /All internal users/i });
+  const permissionSelect = within(row).getAllByTestId("permissions-select")[0];
+  await userEvent.click(permissionSelect);
 
   const clickElement = screen.getByLabelText(/close icon/);
   await userEvent.click(clickElement);

@@ -2,10 +2,9 @@ import cx from "classnames";
 import { useCallback, useMemo } from "react";
 import { t } from "ttag";
 
-import ExpandingContent from "metabase/components/ExpandingContent";
+import { ExpandingContent } from "metabase/common/components/ExpandingContent";
+import { useToggle } from "metabase/common/hooks/use-toggle";
 import CS from "metabase/css/core/index.css";
-import { useToggle } from "metabase/hooks/use-toggle";
-import { color as c } from "metabase/lib/colors";
 import { Box, Flex } from "metabase/ui";
 import type * as Lib from "metabase-lib";
 
@@ -64,7 +63,9 @@ export function NotebookStep({
                 [CS.mr1]: !isLastStep || (isLastStep && !hasLargeActionButtons),
               })}
               large={hasLargeActionButtons}
-              {...stepUi}
+              icon={stepUi.icon}
+              color={stepUi.color}
+              secondary={stepUi.secondary}
               title={title}
               aria-label={title}
               onClick={() => action.action({ openStep })}
@@ -92,16 +93,13 @@ export function NotebookStep({
 
   const { title, color, Step, StepHeader } = getStepConfig(step.type);
 
-  const canPreview = step.previewQuery != null;
+  const canPreview = step.previewQuery != null && !readOnly;
   const hasPreviewButton = !isPreviewOpen && canPreview;
   const canRevert = step.revert != null && !readOnly;
 
   return (
     <ExpandingContent isInitiallyOpen={!isLastOpened} isOpen>
-      <Box
-        className={cx(CS.hoverParent, CS.hoverVisibility, S.StepRoot)}
-        data-testid={step.testID}
-      >
+      <Box className={S.StepRoot} data-testid={step.testID}>
         <Box w={`${(11 / 12) * 100}%`} maw="75rem">
           <StepHeader
             step={step}
@@ -134,7 +132,7 @@ export function NotebookStep({
                 component={NotebookActionButton}
                 icon="play"
                 title={t`Preview`}
-                color={c("text-light")}
+                color={"text-disabled"}
                 onClick={openPreview}
                 data-testid="step-preview-button"
               />

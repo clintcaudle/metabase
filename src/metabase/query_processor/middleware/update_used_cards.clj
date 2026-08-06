@@ -7,7 +7,7 @@
    [metabase.lib.schema.common :as lib.schema.common]
    [metabase.lib.schema.id :as lib.schema.id]
    [metabase.query-processor.schema :as qp.schema]
-   [metabase.query-processor.store :as qp.store]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.query-processor.store :as qp.store]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    ^{:clj-kondo/ignore [:discouraged-namespace]}
@@ -26,20 +26,21 @@
                                         (fn [xs] (apply t/max (map :timestamp xs))))]
     (log/debugf "Update last_used_at of %d cards" (count card-id->timestamp))
     (try
-      ;; need to use a shared lock for all updates to the card table
-      (cluster-lock/with-cluster-lock cluster-lock/card-statistics-lock
-        (t2/update! :model/Card :id [:in (keys card-id->timestamp)]
-                    {:last_used_at (into [:case]
-                                         (mapcat (fn [[id timestamp]]
-                                                   [[:= :id id] [:greatest [:coalesce :last_used_at (t/offset-date-time 0)] timestamp]])
-                                                 card-id->timestamp))
-                     ;; Set updated_at to its current value to prevent it from updating automatically
-                     :updated_at :updated_at}))
+      ;; need to use a shared lock for all updates to the card table.
+      ;; :retry-transient? — the body is a single idempotent statement, safe to re-run on a
+      ;; multi-master deadlock (e.g. MariaDB Galera, where the cluster lock can't serialize writers).
+      (cluster-lock/with-cluster-lock {:lock cluster-lock/card-statistics-lock :retry-transient? true}
+        (t2/query {:update [(t2/table-name :model/Card)]
+                   :where  [:in :id (keys card-id->timestamp)]
+                   :set    {:last_used_at (into [:case]
+                                                (mapcat (fn [[id timestamp]]
+                                                          [[:= :id id] [:greatest [:coalesce :last_used_at (t/offset-date-time 0)] timestamp]])
+                                                        card-id->timestamp))
+                            :updated_at :updated_at}}))
       (catch Throwable e
-        (log/error e "Error updating used cards")))))
+        (log/errorf "Error updating used cards: %s" (ex-message e))))))
 
-(defonce ^:private
-  update-used-cards-queue
+(defonce ^:private update-used-cards-queue
   (delay
     (grouper/start!
      #'update-used-cards!*
@@ -57,7 +58,7 @@
   - dashcard on dashboard
   - alert/pulse"
   [qp :- ::qp.schema/qp]
-  (mu/fn [query :- ::qp.schema/query
+  (mu/fn [query :- ::qp.schema/any-query
           rff   :- ::qp.schema/rff]
     (let [now  (t/offset-date-time)
           rff* (fn [metadata]

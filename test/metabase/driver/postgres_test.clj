@@ -1,6 +1,10 @@
-(ns metabase.driver.postgres-test
+(ns ^:mb/driver-tests metabase.driver.postgres-test
   "Tests for features/capabilities specific to PostgreSQL driver, such as support for Postgres UUID or enum types."
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query     {:namespaces [metabase.driver.postgres-test]}
+                                                            metabase.test.data/query          {:namespaces [metabase.driver.postgres-test]}
+                                                            metabase.test.data/run-mbql-query {:namespaces [metabase.driver.postgres-test]}}}}}}
   (:require
+   [clojure.core.async :as a]
    [clojure.java.jdbc :as jdbc]
    [clojure.string :as str]
    [clojure.test :refer :all]
@@ -14,7 +18,9 @@
    [metabase.driver.common.table-rows-sample :as table-rows-sample]
    [metabase.driver.postgres :as postgres]
    [metabase.driver.postgres.actions :as postgres.actions]
+   [metabase.driver.settings :as driver.settings]
    [metabase.driver.sql :as driver.sql]
+   [metabase.driver.sql-jdbc :as driver.sql-jdbc]
    [metabase.driver.sql-jdbc.actions :as sql-jdbc.actions]
    [metabase.driver.sql-jdbc.actions-test :as sql-jdbc.actions-test]
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
@@ -26,14 +32,24 @@
    [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.driver.sql.query-processor-test-util :as sql.qp-test-util]
    [metabase.lib-be.metadata.jvm :as lib.metadata.jvm]
+   [metabase.lib.convert :as lib.convert]
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
+   [metabase.lib.options :as lib.options]
+   [metabase.lib.pivot :as lib.pivot]
    [metabase.lib.test-metadata :as meta]
    [metabase.lib.test-util :as lib.tu]
    [metabase.lib.test-util.metadata-providers.mock :as providers.mock]
-   [metabase.query-processor :as qp]
+   [metabase.notification.payload.temp-storage :as temp-storage]
    [metabase.query-processor.compile :as qp.compile]
-   [metabase.query-processor.store :as qp.store]
+   [metabase.query-processor.error-type :as qp.error-type]
+   [metabase.query-processor.middleware.catch-exceptions :as catch-exceptions]
+   [metabase.query-processor.middleware.nest-for-pivot :as nest-for-pivot]
+   [metabase.query-processor.pipeline :as qp.pipeline]
+   [metabase.query-processor.pivot :as qp.pivot]
+   [metabase.query-processor.reducible :as qp.reducible]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.query-processor.store :as qp.store]
+   [metabase.query-processor.test :as qp]
    [metabase.secrets.models.secret :as secret]
    [metabase.sync.core :as sync]
    [metabase.sync.sync-metadata :as sync-metadata]
@@ -43,11 +59,15 @@
    [metabase.test.data.interface :as tx]
    [metabase.util :as u]
    [metabase.util.honey-sql-2 :as h2x]
+   [metabase.util.json :as json]
    [metabase.util.log :as log]
+   [metabase.warehouses.provider-detection :as provider-detection]
    [next.jdbc :as next.jdbc]
+   [taoensso.nippy :as nippy]
    [toucan2.core :as t2])
   (:import
-   (java.sql Connection)))
+   (java.sql Connection)
+   (org.postgresql.util PGobject PSQLException PSQLState)))
 
 (set! *warn-on-reflection* true)
 
@@ -58,26 +78,19 @@
                       ;; 2. Make sure we're in Honey SQL 2 mode for all the little SQL snippets we're compiling in these
                       ;;    tests.
                       (binding [sync-util/*log-exceptions-and-continue?* false]
-                        (thunk))))
-
-(deftest ^:parallel interval-test
-  (is (= ["INTERVAL '2 day'"]
-         (sql/format-expr [::postgres/interval 2 :day])))
-  (is (= ["INTERVAL '-2.5 year'"]
-         (sql/format-expr [::postgres/interval -2.5 :year])))
-  (are [amount unit msg] (thrown-with-msg?
-                          AssertionError
-                          msg
-                          (sql/format-expr [::postgres/interval amount unit]))
-    "2"  :day  #"\QAssert failed: (number? amount)\E"
-    :day 2     #"\QAssert failed: (number? amount)\E"
-    2    "day" #"\QAssert failed: (#{:day :hour :week :second :month :year :millisecond :minute} unit)\E"
-    2    2     #"\QAssert failed: (#{:day :hour :week :second :month :year :millisecond :minute} unit)\E"
-    2    :can  #"\QAssert failed: (#{:day :hour :week :second :month :year :millisecond :minute} unit)\E"))
+                        (mt/with-test-user :rasta (thunk)))))
 
 (deftest ^:parallel extract-test
   (is (= ["extract(month from NOW())"]
          (sql.qp/format-honeysql :postgres (#'postgres/extract :month :%now)))))
+
+(deftest ^:parallel hour-bucketing-time-without-database-type-test
+  (testing (str "Hour bucketing on a TIME-typed expression without `:database-type` (as happens for "
+                "fields referenced by name from a source query, #75193) should use the time-aware path "
+                "and not cast to `timestamp`")
+    (let [expr (h2x/with-type-info :test_col {:effective-type :type/Time})]
+      (is (= ["MAKE_TIME(extract(hour from \"test_col\")::integer, 0, 0.0)"]
+             (sql.qp/format-honeysql :postgres (sql.qp/date :postgres :hour expr)))))))
 
 (deftest ^:parallel datetime-diff-test
   (is (= [["CAST("
@@ -92,7 +105,7 @@
            ")"]
           "2021-10-03T09:00:00"
           "2021-10-03T09:00:00"]
-         (as-> [:datetime-diff "2021-10-03T09:00:00" "2021-10-03T09:00:00" :year] <>
+         (as-> [:datetime-diff {} "2021-10-03T09:00:00" "2021-10-03T09:00:00" :year] <>
            (sql.qp/->honeysql :postgres <>)
            (sql.qp/format-honeysql :postgres <>)
            (update (vec <>) 0 #(str/split-lines (driver/prettify-native-form :postgres %)))))))
@@ -121,7 +134,9 @@
                                                     :host   "localhost"
                                                     :port   5432
                                                     :dbname "bird_sightings"
-                                                    :user   "camsaul"}))))
+                                                    :user   "camsaul"})))))
+
+(deftest ^:parallel connection-details->spec-test-2
   (testing "ssl - check that expected params get added"
     (is (= {:classname                     "org.postgresql.Driver"
             :subprotocol                   "postgresql"
@@ -137,7 +152,9 @@
                                                     :host   "localhost"
                                                     :port   5432
                                                     :dbname "bird_sightings"
-                                                    :user   "camsaul"}))))
+                                                    :user   "camsaul"})))))
+
+(deftest ^:parallel connection-details->spec-test-3
   (testing "make sure connection details w/ extra params work as expected"
     (is (= {:classname                     "org.postgresql.Driver"
             :subprotocol                   "postgresql"
@@ -149,7 +166,9 @@
                                                    {:host               "localhost"
                                                     :port               "5432"
                                                     :dbname             "cool"
-                                                    :additional-options "prepareThreshold=0"}))))
+                                                    :additional-options "prepareThreshold=0"})))))
+
+(deftest ^:parallel connection-details->spec-test-4
   (testing "user-specified SSL options should always take precendence over defaults"
     (is (= {:classname                     "org.postgresql.Driver"
             :subprotocol                   "postgresql"
@@ -178,7 +197,7 @@
 
 ;;; ------------------------------------------- Tests for sync edge cases --------------------------------------------
 
-(deftest edge-case-identifiers-test
+(deftest ^:sequential edge-case-identifiers-test
   (mt/test-driver :postgres
     (testing "Make sure that Tables / Fields with dots in their names get escaped properly"
       (mt/dataset dots-in-names
@@ -191,7 +210,7 @@
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name "hyphen-names-test"})
             spec    (sql-jdbc.conn/connection-details->spec :postgres details)]
         ;; create the postgres DB
-        (tx/drop-if-exists-and-create-db! driver/*driver*  "hyphen-names-test")
+        (tx/drop-if-exists-and-create-db! driver/*driver* "hyphen-names-test")
         ;; create the DB object
         (mt/with-temp [:model/Database database {:engine :postgres, :details (assoc details :dbname "hyphen-names-test")}]
           (let [sync! #(sync/sync-database! database)]
@@ -215,9 +234,9 @@
           (sync/sync-database! (mt/db) {:scan :schema})
           (is (= [[42]]
                  (mt/rows (qp/process-query
-                           {:database (u/the-id (mt/db))
+                           {:database (mt/id)
                             :type     :query
-                            :query    {:source-table (t2/select-one-pk :model/Table :db_id (:id (mt/db)))}})))))))))
+                            :query    {:source-table (t2/select-one-pk :model/Table :db_id (mt/id))}})))))))))
 
 (mt/defdataset duplicate-names
   [["birds"
@@ -255,26 +274,28 @@
   [& args]
   (->> (apply driver/describe-database args)
        :tables
+       (into [])
        (sort-by :name)))
 
 (deftest materialized-views-test
   (mt/test-driver :postgres
     (testing (str "Check that we properly fetch materialized views. As discussed in #2355 they don't come back from "
                   "JDBC `DatabaseMetadata` so we have to fetch them manually.")
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "materialized_views_test")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "materialized_views_test")
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name "materialized_views_test"})]
         (jdbc/execute! (sql-jdbc.conn/connection-details->spec :postgres details)
                        ["DROP MATERIALIZED VIEW IF EXISTS test_mview;
                        CREATE MATERIALIZED VIEW test_mview AS
-                       SELECT 'Toucans are the coolest type of bird.' AS true_facts;"])
+                       SELECT 'Toucans are the coolest type of bird.' AS true_facts;
+                       ANALYZE test_mview;"])
         (mt/with-temp [:model/Database database {:engine :postgres, :details (assoc details :dbname "materialized_views_test")}]
-          (is (=? [(default-table-result "test_mview" {:estimated_row_count (mt/malli=? int?)})]
+          (is (=? [(default-table-result "test_mview")]
                   (describe-database->tables :postgres database))))))))
 
 (deftest foreign-tables-test
   (mt/test-driver :postgres
     (testing "Check that we properly fetch foreign tables."
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "fdw_test")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "fdw_test")
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name "fdw_test"})]
         ;; You need to set `MB_POSTGRESQL_TEST_USER` in order for this to work apparently.
         ;;
@@ -302,7 +323,19 @@
                               GRANT ALL ON public.local_table to PUBLIC;")])
         (mt/with-temp [:model/Database database {:engine :postgres, :details (assoc details :dbname "fdw_test")}]
           (is (=? [(default-table-result "foreign_table")
-                   (default-table-result "local_table" {:estimated_row_count (mt/malli=? int?)})]
+                   (default-table-result "local_table" {:estimated_row_count nil})]
+                  (describe-database->tables :postgres database))))))))
+
+(deftest estimated-row-count-hides-zero-test
+  (mt/test-driver :postgres
+    (testing "Check that tables with n_live_tup = 0 return nil for estimated_row_count to avoid confusion with stale stats"
+      (tx/drop-if-exists-and-create-db! driver/*driver* "estimated_count_test")
+      (let [details (mt/dbdef->connection-details :postgres :db {:database-name "estimated_count_test"})]
+        (jdbc/execute! (sql-jdbc.conn/connection-details->spec :postgres details)
+                       ["CREATE TABLE empty_table (id INTEGER);
+                         ANALYZE empty_table;"])
+        (mt/with-temp [:model/Database database {:engine :postgres, :details (assoc details :dbname "estimated_count_test")}]
+          (is (=? [(default-table-result "empty_table" {:estimated_row_count nil})]
                   (describe-database->tables :postgres database))))))))
 
 (deftest recreated-views-test
@@ -312,7 +345,7 @@
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name "dropped_views_test"})
             spec    (sql-jdbc.conn/connection-details->spec :postgres details)]
         ;; create the postgres DB
-        (tx/drop-if-exists-and-create-db! driver/*driver*  "dropped_views_test")
+        (tx/drop-if-exists-and-create-db! driver/*driver* "dropped_views_test")
         ;; create the DB object
         (mt/with-temp [:model/Database database {:engine :postgres, :details (assoc details :dbname "dropped_views_test")}]
           (let [sync! #(sync/sync-database! database)]
@@ -345,7 +378,7 @@
             details (mt/dbdef->connection-details :postgres :db {:database-name db-name})
             spec    (sql-jdbc.conn/connection-details->spec :postgres details)]
         ;; create the postgres DB
-        (tx/drop-if-exists-and-create-db! driver/*driver*  db-name)
+        (tx/drop-if-exists-and-create-db! driver/*driver* db-name)
         (let [major-v (sql-jdbc.execute/do-with-connection-with-options
                        :postgres
                        spec
@@ -384,26 +417,44 @@
                 "decimal"
                 [:meh]]
                (#'sql.qp/json-query :postgres boop-identifier boop-field)))
-        (is (= ["(boop.bleh#>> array[?]::text[])::decimal" "meh"]
+        (is (= ["(boop.bleh#>> (array[?]::text[]))::decimal" "meh"]
                (sql/format-expr (#'sql.qp/json-query :postgres boop-identifier boop-field))))))
     (testing "What if types are weird and we have lists"
       (let [weird-field {:nfc-path [:bleh "meh" :foobar 1234] :database-type "bigint"}]
-        (is (= ["(boop.bleh#>> array[?, ?, 1234]::text[])::bigint" "meh" "foobar"]
+        (is (= ["(boop.bleh#>> (array[?, ?, 1234]::text[]))::bigint" "meh" "foobar"]
                (sql/format-expr (#'sql.qp/json-query :postgres boop-identifier weird-field))))))
     (testing "Give us a boolean cast when the field is boolean"
       (let [boolean-boop-field {:database-type "boolean" :nfc-path [:bleh "boop" :foobar 1234]}]
-        (is (= ["(boop.bleh#>> array[?, ?, 1234]::text[])::boolean" "boop" "foobar"]
+        (is (= ["(boop.bleh#>> (array[?, ?, 1234]::text[]))::boolean" "boop" "foobar"]
                (sql/format-expr (#'sql.qp/json-query :postgres boop-identifier boolean-boop-field))))))
     (testing "Give us a bigint cast when the field is bigint (#22732)"
       (let [boolean-boop-field {:database-type "bigint" :nfc-path [:bleh "boop" :foobar 1234]}]
-        (is (= ["(boop.bleh#>> array[?, ?, 1234]::text[])::bigint" "boop" "foobar"]
+        (is (= ["(boop.bleh#>> (array[?, ?, 1234]::text[]))::bigint" "boop" "foobar"]
                (sql/format-expr (#'sql.qp/json-query :postgres boop-identifier boolean-boop-field))))))))
+
+(deftest ^:parallel json-query-survives-impersonation-validation-test
+  (testing "JSON-extracted field SQL still extracts the same value after `validate-impersonated-query*` re-emits it (#73776)"
+    ;; `validate-impersonated-query*` runs the native SQL through sqlglot's parse-and-emit
+    ;; canonicalization. We need its reconstruction of our `(parent #>> path)::field-type`
+    ;; expression to keep the inner `::text[]` cast on the path argument — not on the result
+    ;; of `#>>`, which would tell Postgres to read text values as array literals and fail.
+    (let [parent     (h2x/identifier :field "public" "test_table" "data")
+          nfc-field  {:nfc-path ["data" "key"] :database-type "text"}
+          [json-sql] (sql/format-expr (#'sql.qp/json-query :postgres parent nfc-field))
+          stage      {:lib/type :mbql.stage/native :native (str "SELECT " json-sql " AS k FROM t")}
+          out-sql    (-> (driver.sql/validate-impersonated-query* :postgres {:stages [stage]})
+                         :stages first :native)]
+      ;; The broken reconstruction looks like `CAST(parent #>> array[?] AS TEXT[])` — i.e.
+      ;; the cast wraps the entire `#>>` expression instead of just the path argument.
+      (is (not (re-find #"(?i)#>>\s+array\s*\[\?\]\s+AS\s+TEXT\s*\[\s*\]" out-sql))
+          (str "validate-impersonated-query* placed the TEXT[] cast on the result of #>> "
+               "rather than on the array path argument:\n  " out-sql)))))
 
 (deftest ^:parallel json-field-test
   (mt/test-driver :postgres
     (testing "Deal with complicated identifier (#22967)"
       (qp.store/with-metadata-provider (lib.tu/mock-metadata-provider
-                                        {:database (assoc meta/database :engine :postgres, :id 1)
+                                        {:database (assoc meta/database :engine driver/*driver*, :id 1)
                                          :tables   [(merge (meta/table-metadata :venues)
                                                            {:id     1
                                                             :db-id  1
@@ -414,19 +465,26 @@
                                                             :table-id      1
                                                             :nfc-path      ["jsons" "values" "qty"]
                                                             :database-type "integer"})]})
-        (let [field-clause [:field 1 {:binning
-                                      {:strategy  :num-bins
-                                       :num-bins  100
-                                       :min-value 0.75
-                                       :max-value 54.0
-                                       :bin-width 0.75}}]]
-          (is (= ["((FLOOR((((complicated_identifiers.jsons#>> array[?, ?]::text[])::integer - 0.75) / 0.75)) * 0.75) + 0.75)"
+        (let [field-clause [:field
+                            {:binning
+                             {:strategy  :num-bins
+                              :num-bins  100
+                              :min-value 0.75
+                              :max-value 54.0
+                              :bin-width 0.75}}
+                            1]]
+          (is (= ["((FLOOR((((complicated_identifiers.jsons#>> (array[?, ?]::text[]))::integer - 0.75) / 0.75)) * 0.75) + 0.75)"
                   "values" "qty"]
-                 (sql/format-expr (sql.qp/->honeysql :postgres field-clause) {:nested true}))))))))
+                 (sql/format-expr (sql.qp/->honeysql driver/*driver* field-clause) {:nested true}))))))))
 
-(def ^:private json-alias-mock-metadata-provider
+(defn- ^:private maybe-convert-and-compile [driver query]
+  (cond-> query
+    (= driver :postgres) (lib.convert/->mbql5)
+    :always qp.compile/compile))
+
+(defn- ^:private json-alias-mock-metadata-provider [driver]
   (lib.tu/mock-metadata-provider
-   {:database (assoc meta/database :engine :postgres, :id 1)
+   {:database (assoc meta/database :engine driver, :id 1)
     :tables   [(merge (meta/table-metadata :venues)
                       {:id     1
                        :db-id  1
@@ -444,26 +502,30 @@
 (deftest ^:parallel json-alias-test
   (mt/test-driver :postgres
     (testing "json breakouts and order bys have alias coercion"
-      (qp.store/with-metadata-provider json-alias-mock-metadata-provider
-        (let [field-bucketed [:field 1
-                              {:temporal-unit                                              :month
-                               :metabase.query-processor.util.add-alias-info/source-table  1
-                               :metabase.query-processor.util.add-alias-info/source-alias  "dontwannaseethis"
-                               :metabase.query-processor.util.add-alias-info/desired-alias "dontwannaseethis"
-                               :metabase.query-processor.util.add-alias-info/position      1}]
-              compile-res    (qp.compile/compile
-                              (mt/query nil
-                                {:database 1
-                                 :type     :query
-                                 :query    {:source-table 1
-                                            :aggregation  [[:count]]
-                                            :breakout     [field-bucketed]
-                                            :order-by     [[:asc field-bucketed]]}}))]
+      (qp.store/with-metadata-provider (json-alias-mock-metadata-provider driver/*driver*)
+        ;; need to make this a function to avoid a duplicate `:lib/uuid` error when we use it in `compile-res`
+        (let [field-bucketed-fn (fn []
+                                  [:field
+                                   {:temporal-unit                                              :month
+                                    :metabase.query-processor.util.add-alias-info/source-table  1
+                                    :metabase.query-processor.util.add-alias-info/source-alias  "dontwannaseethis"
+                                    :metabase.query-processor.util.add-alias-info/desired-alias "dontwannaseethis"
+                                    :metabase.query-processor.util.add-alias-info/position      1}
+                                   1])
+              compile-res (maybe-convert-and-compile
+                           driver/*driver*
+                           (mt/query nil
+                             {:database 1
+                              :type     :query
+                              :query    {:source-table 1
+                                         :aggregation  [[:count]]
+                                         :breakout     [(field-bucketed-fn)]
+                                         :order-by     [[:asc (field-bucketed-fn)]]}}))]
           (is (= ["SELECT"
                   "  DATE_TRUNC("
                   "    'month',"
                   "    CAST("
-                  "      (\"json_alias_test\".\"bob\" #>> array [ ?, ? ] :: text [ ]) :: VARCHAR AS timestamp"
+                  "      (\"json_alias_test\".\"bob\" #>> (array [ ?, ? ] :: text [ ])) :: VARCHAR AS timestamp"
                   "    )"
                   "  ) AS \"json_alias_test\","
                   "  COUNT(*) AS \"count\""
@@ -473,7 +535,7 @@
                   "  \"json_alias_test\""
                   "ORDER BY"
                   "  \"json_alias_test\" ASC"]
-                 (str/split-lines (driver/prettify-native-form :postgres (:query compile-res)))))
+                 (str/split-lines (driver/prettify-native-form driver/*driver* (:query compile-res)))))
           (is (= ["injection' OR 1=1--' AND released = 1"
                   "injection' OR 1=1--' AND released = 1"]
                  (:params compile-res))))))))
@@ -481,26 +543,27 @@
 (deftest ^:parallel json-alias-test-2
   (mt/test-driver :postgres
     (testing "json breakouts and order bys have alias coercion"
-      (qp.store/with-metadata-provider json-alias-mock-metadata-provider
-        (let [field-ordinary [:field 1 nil]
-              only-order     (qp.compile/compile
-                              {:database 1
-                               :type     :query
-                               :query    {:source-table 1
-                                          :order-by     [[:asc field-ordinary]]}})]
+      (qp.store/with-metadata-provider (json-alias-mock-metadata-provider driver/*driver*)
+        (let [field-ordinary [:field {} 1]
+              only-order (maybe-convert-and-compile
+                          driver/*driver*
+                          {:database 1
+                           :type     :query
+                           :query    {:source-table 1
+                                      :order-by     [[:asc field-ordinary]]}})]
           (is (= ["SELECT"
-                  "  (\"json_alias_test\".\"bob\" #>> array [ ?, ? ] :: text [ ]) :: VARCHAR AS \"json_alias_test\""
+                  "  (\"json_alias_test\".\"bob\" #>> (array [ ?, ? ] :: text [ ])) :: VARCHAR AS \"json_alias_test\""
                   "FROM"
                   "  \"json_alias_test\""
                   "ORDER BY"
                   "  \"json_alias_test\" ASC"
                   "LIMIT"
                   "  1048575"]
-                 (str/split-lines (driver/prettify-native-form :postgres (:query only-order))))))))))
+                 (str/split-lines (driver/prettify-native-form driver/*driver* (:query only-order))))))))))
 
-(def ^:private json-alias-in-model-mock-metadata-provider
+(defn- ^:private json-alias-in-model-mock-metadata-provider [driver]
   (providers.mock/mock-metadata-provider
-   json-alias-mock-metadata-provider
+   (json-alias-mock-metadata-provider driver)
    {:cards [{:name          "Model with JSON"
              :id            123
              :database-id   1
@@ -514,18 +577,19 @@
 (deftest ^:parallel json-breakout-in-model-test
   (mt/test-driver :postgres
     (testing "JSON columns in inner queries are referenced properly in outer queries #34930"
-      (qp.store/with-metadata-provider json-alias-in-model-mock-metadata-provider
-        (let [nested (qp.compile/compile
+      (qp.store/with-metadata-provider (json-alias-in-model-mock-metadata-provider driver/*driver*)
+        (let [nested (maybe-convert-and-compile
+                      driver/*driver*
                       {:database (meta/id)
                        :type     :query
                        :query    {:source-table "card__123"}})]
           (is (= ["SELECT"
-                  "  \"json_alias_test\" AS \"json_alias_test\","
-                  "  \"source\".\"count\" AS \"count\""
+                  "  \"__mb_source\".\"json_alias_test\" AS \"json_alias_test\","
+                  "  \"__mb_source\".\"count\" AS \"count\""
                   "FROM"
                   "  ("
                   "    SELECT"
-                  "      (\"json_alias_test\".\"bob\" #>> array [ ?, ? ] :: text [ ]) :: VARCHAR AS \"json_alias_test\","
+                  "      (\"json_alias_test\".\"bob\" #>> (array [ ?, ? ] :: text [ ])) :: VARCHAR AS \"json_alias_test\","
                   "      COUNT(*) AS \"count\""
                   "    FROM"
                   "      \"json_alias_test\""
@@ -533,15 +597,160 @@
                   "      \"json_alias_test\""
                   "    ORDER BY"
                   "      \"json_alias_test\" ASC"
-                  "  ) AS \"source\""
-                  "LIMIT"
-                  "  1048575"]
+                  "  ) AS \"__mb_source\""]
                  (str/split-lines (driver/prettify-native-form :postgres (:query nested))))))))))
+
+(deftest ^:parallel nested-field-pivot-compile-test
+  (mt/test-driver :postgres
+    (testing "Pivot with a nested-field (JSON-unfolded) breakout compiles to a derived table that pre-computes the JSON path expression and references plain identifiers in GROUPING SETS / GROUPING"
+      (let [mp       (lib.tu/mock-metadata-provider
+                      {:database (assoc meta/database :engine :postgres :id 1)
+                       :tables   [(merge (meta/table-metadata :venues)
+                                         {:id 1 :db-id 1 :name "json_table" :schema nil})]
+                       :fields   [(merge (meta/field-metadata :venues :id)
+                                         {:id            1
+                                          :table-id      1
+                                          :name          "category"
+                                          :nfc-path      ["payload" "category"]
+                                          :base-type     :type/Text
+                                          :effective-type :type/Text
+                                          :database-type "text"})
+                                  (merge (meta/field-metadata :venues :name)
+                                         {:id 2 :table-id 1 :name "region"})]})
+            json-col (lib.metadata/field mp 1)
+            reg-col  (lib.metadata/field mp 2)
+            base     (-> (lib/query mp (lib.metadata/table mp 1))
+                         (lib/breakout json-col)
+                         (lib/breakout reg-col)
+                         (lib/aggregate (lib/count)))
+            bks      (lib/breakouts base)
+            pivot-q  (lib.pivot/with-pivot base
+                       {:rows               [(lib.options/uuid (first bks))]
+                        :columns            [(lib.options/uuid (second bks))]
+                        :show-row-totals    true
+                        :show-column-totals true})]
+        (qp.store/with-metadata-provider mp
+          (let [sql (:query (qp.compile/compile (nest-for-pivot/wrap-nested-field-breakouts pivot-q)))]
+            (is (= ["SELECT"
+                    "  \"__mb_source\".\"__mb_pivot_nfc\" AS \"__mb_pivot_nfc\","
+                    "  \"__mb_source\".\"region\" AS \"region\","
+                    "  GROUPING("
+                    "    \"__mb_source\".\"region\","
+                    "    \"__mb_source\".\"__mb_pivot_nfc\""
+                    "  ) AS \"pivot-grouping\","
+                    "  COUNT(*) AS \"count\""
+                    "FROM"
+                    "  ("
+                    "    SELECT"
+                    "      (\"json_table\".\"payload\" #>> (array [ ? ] :: text [ ])) :: text AS \"category\","
+                    "      \"json_table\".\"region\" AS \"region\","
+                    "      (\"json_table\".\"payload\" #>> (array [ ? ] :: text [ ])) :: text AS \"__mb_pivot_nfc\""
+                    "    FROM"
+                    "      \"json_table\""
+                    "  ) AS \"__mb_source\""
+                    "GROUP BY"
+                    "  GROUPING SETS ("
+                    "    ("
+                    "      \"__mb_source\".\"__mb_pivot_nfc\","
+                    "      \"__mb_source\".\"region\""
+                    "    ),"
+                    "    (\"__mb_source\".\"region\"),"
+                    "    (\"__mb_source\".\"__mb_pivot_nfc\"),"
+                    "    ()"
+                    "  )"
+                    "ORDER BY"
+                    "  GROUPING("
+                    "    \"__mb_source\".\"region\","
+                    "    \"__mb_source\".\"__mb_pivot_nfc\""
+                    "  ) ASC,"
+                    "  \"__mb_source\".\"__mb_pivot_nfc\" ASC,"
+                    "  \"__mb_source\".\"region\" ASC"]
+                   (str/split-lines (driver/prettify-native-form :postgres sql))))))))))
+
+(deftest nested-field-pivot-e2e-test
+  (mt/test-driver :postgres
+    (mt/dataset json
+      (testing "pivot with a nested-field (JSON-unfolded) breakout executes end-to-end and the native path agrees with the multi-query path"
+        (let [mp        (mt/metadata-provider)
+              json-tbl  (lib.metadata/table mp (mt/id :json))
+              q-base    (lib/query mp json-tbl)
+              cols      (lib/breakoutable-columns q-base)
+              doop-col  (m/find-first #(= (:name %) "json_bit → doop") cols)
+              bloop-col (m/find-first #(= (:name %) "bloop") cols)]
+          (assert (and doop-col bloop-col)
+                  "expected json_bit → doop and bloop columns from json dataset")
+          (let [pivot-q (-> q-base
+                            (lib/breakout doop-col)
+                            (lib/breakout bloop-col)
+                            (lib/aggregate (lib/count))
+                            ;; Use the legacy positional pivot keys — same shape as what dashboards and the
+                            ;; REST API send. `apply-legacy-pivot-keys` in the native path will convert these
+                            ;; to a `:pivot` clause; the multi-query path reads them directly.
+                            (assoc :pivot-rows [0] :pivot-cols [1]))
+                results (qp.pivot/run-pivot-query pivot-q)
+                rows    (mt/rows results)
+                pgs     (mapv #(nth % 2) rows)]
+            (is (= #{;; pivot-grouping = 0  base detail rows
+                     ["boop" "doopdoopy" 0 1]
+                     ["boop" "moopywoop" 0 1]
+                     ["boop" "woopywoop" 0 1]
+                     ["boop" "zoopyzoop" 0 1]
+                     [nil    "doopyboop" 0 1]
+                     ;; pivot-grouping = 1  per-bloop subtotals (doop dropped)
+                     [nil    "doopdoopy" 1 1]
+                     [nil    "doopyboop" 1 1]
+                     [nil    "moopywoop" 1 1]
+                     [nil    "woopywoop" 1 1]
+                     [nil    "zoopyzoop" 1 1]
+                     ;; pivot-grouping = 2  per-doop subtotals (bloop dropped)
+                     ["boop" nil 2 4]
+                     [nil    nil 2 1]
+                     ;; pivot-grouping = 3  grand total
+                     [nil    nil 3 5]}
+                   (set rows)))
+            (is (= (sort pgs) pgs)
+                "rows should appear in non-decreasing pivot-grouping order")))))))
+
+;;; Postgres `:contains`/`:starts-with`/`:ends-with` must produce SQL that the PostgreSQL JDBC
+;;; driver can prepare regardless of the server's `standard_conforming_strings` setting. With
+;;; that setting off, PGJDBC's parser treats `\` as an escape inside string literals, so the
+;;; `'\'` in `LIKE ? ESCAPE '\'` is parsed as an unterminated literal and the query crashes with
+;;; `Unterminated string literal started at position N` before the SQL ever reaches the server
+;;; (#73721).
+(deftest contains-filter-jdbc-parser-test
+  (mt/test-driver :postgres
+    (testing "PGJDBC parses :contains/:starts-with/:ends-with SQL regardless of standard_conforming_strings (#73721)"
+      (let [mp       (mt/metadata-provider)
+            venues   (lib.metadata/table mp (mt/id :venues))
+            name-col (lib.metadata/field mp (mt/id :venues :name))]
+        (doseq [scs ["on" "off"]]
+          (testing (str "standard_conforming_strings = " scs)
+            ;; Fresh non-pooled connection per setting (the pool is bypassed because we pass a
+            ;; raw JDBC spec rather than a Database ID), so:
+            ;; - the session-scoped `SET` can't contaminate the shared pool, and
+            ;; - PGJDBC's per-connection parsed-query cache starts empty, so each
+            ;;   `prepareStatement` actually exercises the parser.
+            (sql-jdbc.execute/do-with-connection-with-options
+             :postgres
+             (sql-jdbc.conn/connection-details->spec :postgres (:details (mt/db)))
+             nil
+             (fn [^Connection conn]
+               (with-open [stmt (.createStatement conn)]
+                 (.execute stmt (str "SET standard_conforming_strings TO " scs)))
+               (doseq [[op-name op-fn] {:contains    lib/contains
+                                        :starts-with lib/starts-with
+                                        :ends-with   lib/ends-with}]
+                 (testing op-name
+                   (let [query (-> (lib/query mp venues)
+                                   (lib/filter (op-fn name-col "Foo")))
+                         {sql :query} (qp.compile/compile query)]
+                     (is (some? (with-open [pstmt (.prepareStatement conn sql)] pstmt))
+                         (str "PGJDBC should prepare the SQL; got SQL: " sql)))))))))))))
 
 (deftest describe-nested-field-columns-identifier-test
   (mt/test-driver :postgres
     (testing "sync goes and runs with identifier if there is a schema other than default public one"
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "describe-json-with-schema-test")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "describe-json-with-schema-test")
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name  "describe-json-with-schema-test"
                                                                  :json-unfolding true})
             spec    (sql-jdbc.conn/connection-details->spec :postgres details)]
@@ -566,7 +775,7 @@
 (deftest describe-funky-name-table-nested-field-columns-test
   (mt/test-driver :postgres
     (testing "sync goes and still works with funky schema and table names, including caps and special chars (#23026, #23027)"
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "describe-json-funky-names-test")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "describe-json-funky-names-test")
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name  "describe-json-funky-names-test"
                                                                  :json-unfolding true})
             spec    (sql-jdbc.conn/connection-details->spec :postgres details)]
@@ -627,13 +836,13 @@
                (mt/rows
                 (qp/process-query
                  (assoc (mt/native-query
-                          {:query         "SELECT * FROM users WHERE {{user}}"
-                           :template-tags {:user
-                                           {:name         "user"
-                                            :display_name "User ID"
-                                            :type         "dimension"
-                                            :widget-type  "number"
-                                            :dimension    [:field (mt/id :users :user_id) nil]}}})
+                         {:query         "SELECT * FROM users WHERE {{user}}"
+                          :template-tags {:user
+                                          {:name         "user"
+                                           :display_name "User ID"
+                                           :type         "dimension"
+                                           :widget-type  "number"
+                                           :dimension    [:field (mt/id :users :user_id) nil]}}})
                         :parameters
                         [{:type   "text"
                           :target ["dimension" ["template-tag" "user"]]
@@ -644,13 +853,13 @@
                (mt/rows
                 (qp/process-query
                  (assoc (mt/native-query
-                          {:query         "SELECT * FROM users WHERE {{user}}"
-                           :template-tags {:user
-                                           {:name         "user"
-                                            :display_name "User ID"
-                                            :type         "dimension"
-                                            :widget-type  :number
-                                            :dimension    [:field (mt/id :users :user_id) nil]}}})
+                         {:query         "SELECT * FROM users WHERE {{user}}"
+                          :template-tags {:user
+                                          {:name         "user"
+                                           :display_name "User ID"
+                                           :type         "dimension"
+                                           :widget-type  :number
+                                           :dimension    [:field (mt/id :users :user_id) nil]}}})
                         :parameters
                         [{:type   "text"
                           :target ["dimension" ["template-tag" "user"]]
@@ -715,7 +924,7 @@
                            :filter      [:= $ip "192.168.1.1"]}))))))))
 
 (defn- do-with-money-test-db! [thunk]
-  (tx/drop-if-exists-and-create-db! driver/*driver*  "money_columns_test")
+  (tx/drop-if-exists-and-create-db! driver/*driver* "money_columns_test")
   (let [details (mt/dbdef->connection-details :postgres :db {:database-name "money_columns_test"})]
     (sql-jdbc.execute/do-with-connection-with-options
      :postgres
@@ -732,21 +941,23 @@
       (mt/with-db db
         (thunk)))))
 
+(deftest ^:parallel money-columns-in-results-test
+  (mt/test-driver :postgres
+    (testing "It should be possible to return money column results (#3754)"
+      (sql-jdbc.execute/do-with-connection-with-options
+       :postgres
+       (mt/db)
+       nil
+       (fn [conn]
+         (with-open [stmt (sql-jdbc.execute/prepared-statement :postgres conn "SELECT 1000::money AS \"money\";" nil)
+                     rs   (sql-jdbc.execute/execute-prepared-statement! :postgres stmt)]
+           (let [row-thunk (sql-jdbc.execute/row-thunk :postgres rs (.getMetaData rs))]
+             (is (= [1000.00M]
+                    (row-thunk))))))))))
+
 (deftest money-columns-test
   (mt/test-driver :postgres
     (testing "We should support the Postgres MONEY type"
-      (testing "It should be possible to return money column results (#3754)"
-        (sql-jdbc.execute/do-with-connection-with-options
-         :postgres
-         (mt/db)
-         nil
-         (fn [conn]
-           (with-open [stmt (sql-jdbc.execute/prepared-statement :postgres conn "SELECT 1000::money AS \"money\";" nil)
-                       rs   (sql-jdbc.execute/execute-prepared-statement! :postgres stmt)]
-             (let [row-thunk (sql-jdbc.execute/row-thunk :postgres rs (.getMetaData rs))]
-               (is (= [1000.00M]
-                      (row-thunk))))))))
-
       (do-with-money-test-db!
        (fn []
          (testing "We should be able to select avg() of a money column (#11498)"
@@ -758,7 +969,6 @@
                   (mt/rows
                    (mt/run-mbql-query bird_prices
                      {:aggregation [[:avg $price]]})))))
-
          (testing "Should be able to filter on a money column"
            (is (= [["Katie Parakeet" 23.99M]]
                   (mt/rows
@@ -768,13 +978,25 @@
                   (mt/rows
                    (mt/run-mbql-query bird_prices
                      {:filter [:!= $price $price]})))))
-
          (testing "Should be able to sort by price"
            (is (= [["Katie Parakeet" 23.99M]
                    ["Lucky Pigeon" 6.00M]]
                   (mt/rows
                    (mt/run-mbql-query bird_prices
-                     {:order-by [[:desc $price]]}))))))))))
+                     {:order-by [[:desc $price]]})))))
+         (testing "Should support floor/ceil/round (#32068)"
+           (doseq [[expr expected] (mt/$ids bird_prices
+                                     {[:ceil $price]                      [[24M]  [6M]]
+                                      [:floor $price]                     [[23M]  [6M]]
+                                      [:round $price]                     [[24M]  [6M]]
+                                      [:* [:floor [:/ $price 10.0]] 10.0] [[20.0] [0.0]]})]
+             (testing (pr-str expr)
+               (let [query (mt/mbql-query bird_prices
+                             {:fields      [[:expression "expr"]]
+                              :expressions {"expr" expr}
+                              :order-by    [[:desc $price]]})]
+                 (is (= expected
+                        (mt/rows (qp/process-query query)))))))))))))
 
 (defn- enums-test-db-details [] (mt/dbdef->connection-details :postgres :db {:database-name "enums_test"}))
 
@@ -803,7 +1025,7 @@
   One of those types has a space in the name, which is legal when quoted, to make sure we handle such wackiness
   properly."
   []
-  (tx/drop-if-exists-and-create-db! driver/*driver*  "enums_test")
+  (tx/drop-if-exists-and-create-db! driver/*driver* "enums_test")
   (let [spec (sql-jdbc.conn/connection-details->spec :postgres (enums-test-db-details))]
     (jdbc/execute! spec [enums-db-sql])))
 
@@ -819,7 +1041,7 @@
     (testing "check that values for enum types get wrapped in appropriate CAST() fn calls in `->honeysql`"
       (is (= (h2x/with-database-type-info [:cast "toucan" (h2x/identifier :type-name "bird type")]
                                           "bird type")
-             (sql.qp/->honeysql :postgres [:value "toucan" {:database_type "bird type", :base_type :type/PostgresEnum}]))))))
+             (sql.qp/->honeysql driver/*driver* [:value {:database-type "bird type", :base-type :type/PostgresEnum} "toucan"]))))))
 
 (deftest enums-test-2
   (mt/test-driver :postgres
@@ -900,6 +1122,37 @@
                                    :limit        10}})
                       :data
                       (select-keys [:rows :native_form]))))))))))
+
+(deftest enum-field-filter-test
+  (mt/test-driver :postgres
+    (do-with-enums-db!
+     (fn [db]
+       (let [mp            (lib.metadata.jvm/application-database-metadata-provider (u/the-id db))
+             table-id      (t2/select-one-pk :model/Table :db_id (u/the-id db) :name "birds")
+             type-field-id (t2/select-one-pk :model/Field :table_id table-id :name "type")
+             type-field    (lib.metadata/field mp type-field-id)]
+         (testing "an MBQL string/= param on a postgres enum column filters correctly (#40396)"
+           (is (= [["Rasta" "good bird" "sad bird" "toucan"]]
+                  (mt/rows
+                   (qp/process-query
+                    (assoc (lib/query mp (lib.metadata/table mp table-id))
+                           :parameters [{:type   :string/=
+                                         :target [:dimension (lib.convert/->legacy-MBQL (lib/ref type-field))]
+                                         :value  ["toucan"]}]))))))
+         (testing "a native field filter over a postgres enum column filters correctly (#63537)"
+           (is (= [["Rasta" "good bird" "sad bird" "toucan"]]
+                  (mt/rows
+                   (qp/process-query
+                    (assoc (-> (lib/native-query mp "SELECT * FROM birds WHERE {{type}}")
+                               (lib/with-template-tags
+                                 {"type" {:name         "type"
+                                          :display-name "Type"
+                                          :type         :dimension
+                                          :dimension    (lib/ref type-field)
+                                          :widget-type  :string/=}}))
+                           :parameters [{:type   :string/=
+                                         :target [:dimension [:template-tag "type"]]
+                                         :value  ["toucan"]}])))))))))))
 
 (deftest enums-test-3
   (mt/test-driver :postgres
@@ -1016,27 +1269,21 @@
     (do-with-enums-db!
      (fn [enums-db]
        (mt/with-db enums-db
-         (let [eid   (u/generate-nano-id)
-               query {:database (mt/id)
+         (let [query {:database (mt/id)
                       :type     :native
-                      :info     {:card-entity-id eid}
                       :native   {:query "select * from birds"
                                  :parameters []}}]
            (testing "results_metadata columns are correctly typed"
-             (is (=? [{:name  "name"
-                       :ident (lib/native-ident "name" eid)}
+             (is (=? [{:name "name"}
                       {:name "status"
-                       :ident (lib/native-ident "status" eid)
                        :base_type :type/PostgresEnum
                        :effective_type :type/PostgresEnum
                        :database_type "bird_status"}
                       {:name "other_status"
-                       :ident (lib/native-ident "other_status" eid)
                        :base_type :type/PostgresEnum
                        :effective_type :type/PostgresEnum
                        :database_type "\"bird_schema\".\"bird_status\""}
                       {:name "type"
-                       :ident (lib/native-ident "type" eid)
                        :base_type :type/PostgresEnum
                        :effective_type :type/PostgresEnum
                        :database_type "bird type"}]
@@ -1045,7 +1292,7 @@
                (mt/with-temp
                  [:model/Card {id :id} (mt/card-with-metadata {:dataset_query query
                                                                :type          card-type})]
-                 (let [mp (lib.metadata.jvm/application-database-metadata-provider (mt/id))
+                 (let [mp (mt/metadata-provider)
                        query (as-> (lib/query mp (lib.metadata/card mp id)) $
                                (lib/filter $ (lib/= (m/find-first (comp #{"status"} :name)
                                                                   (lib/filterable-columns $))
@@ -1060,77 +1307,163 @@
                      (is (=? {:data {:rows [["Rasta" "good bird" "sad bird" "toucan"]]}}
                              (qp/process-query query))))))))))))))
 
-;; API tests are in [[metabase.actions.api-test]]
+(deftest filtering-on-enum-from-source-bad-effective-type-test
+  (mt/test-driver
+    :postgres
+    (do-with-enums-db!
+     (fn [enums-db]
+       (mt/with-db enums-db
+         (testing "filtering on enum column should cast properly (#67440)"
+           (let [mp (-> (mt/metadata-provider)
+                        (lib.tu/merged-mock-metadata-provider
+                         {:fields [{:id (mt/id :birds :status)
+                                    :effective-type :type/Text}]}))
+                 query (as-> (lib/query mp (lib.metadata/table mp (mt/id :birds))) $q
+                         (lib/filter $q (lib/= (m/find-first (comp #{"status"} :name)
+                                                             (lib/filterable-columns $q))
+                                               "good bird")))
+                 sql (:query (qp.compile/compile query))]
+             (is (re-find #"CAST" sql))
+             (is (some? (mt/rows (qp/process-query query)))))))))))
+
+(deftest create-schema-if-needed-nil-guard-test
+  (testing "create-schema-if-needed! is a no-op when schema is nil or blank (GDGT-2144)"
+    (let [executed-queries (atom [])]
+      (with-redefs [driver/execute-raw-queries! (fn [_driver _conn-spec queries]
+                                                  (swap! executed-queries conj queries))]
+        (driver/create-schema-if-needed! :postgres ::fake-conn nil)
+        (driver/create-schema-if-needed! :postgres ::fake-conn "")
+        (driver/create-schema-if-needed! :postgres ::fake-conn "   ")
+        (is (empty? @executed-queries)
+            "nil/blank schema should not issue any SQL")))))
+
+(deftest ^:parallel describe-fields-sql-nil-schema-test
+  (testing "describe-fields-sql for Postgres handles nil schema-names correctly (GDGT-2144)"
+    (let [[nil-schema-sql]   (sql-jdbc.sync/describe-fields-sql
+                              :postgres
+                              {:schema-names [nil]
+                               :table-names  ["my_table"]
+                               :details      {}})
+          [mixed-schema-sql] (sql-jdbc.sync/describe-fields-sql
+                              :postgres
+                              {:schema-names [nil "public"]
+                               :table-names  ["my_table"]
+                               :details      {}})
+          [normal-schema-sql] (sql-jdbc.sync/describe-fields-sql
+                               :postgres
+                               {:schema-names ["public"]
+                                :table-names  ["my_table"]
+                                :details      {}})]
+      (is (not (re-find #"(?i)IN \(NULL\)" nil-schema-sql))
+          "rendered SQL must not contain `IN (NULL)` which never matches anything")
+      (is (re-find #"\"table_schema\" IS NULL" nil-schema-sql)
+          "passing [nil] schemas should produce an IS NULL check on table_schema")
+      (is (re-find #"\"table_schema\" IN .+OR .+\"table_schema\" IS NULL" mixed-schema-sql)
+          "mixed nil + non-nil schemas should include both IN and IS NULL")
+      (is (not (re-find #"\"table_schema\" IS NULL" normal-schema-sql))
+          "non-nil-only schemas should not have IS NULL on table_schema"))))
+
+;; API tests are in [[metabase.actions-rest.api-test]]
 (deftest ^:parallel actions-maybe-parse-sql-violate-not-null-constraint-test
   (testing "violate not null constraint"
-    (is (= {:type :metabase.actions.error/violate-not-null-constraint,
-            :message "Ranking must have values."
-            :errors {"ranking" "You must provide a value."}}
-           (sql-jdbc.actions/maybe-parse-sql-error
-            :postgres actions.error/violate-not-null-constraint nil :row/created
-            "ERROR: null value in column \"ranking\" violates not-null constraint\n  Detail: Failing row contains (3, admin, null).")))))
+    (is (=? {:type :metabase.actions.error/violate-not-null-constraint,
+             :message "Ranking must have values."
+             :errors {"ranking" "You must provide a value."}}
+            (sql-jdbc.actions/maybe-parse-sql-error
+             :postgres actions.error/violate-not-null-constraint nil :model.row/created
+             "ERROR: null value in column \"ranking\" violates not-null constraint\n  Detail: Failing row contains (3, admin, null).")))))
 
 (deftest ^:parallel actions-maybe-parse-sql-violate-not-null-constraint-test-2
   (testing "violate not null constraint"
-    (is (= {:type :metabase.actions.error/violate-not-null-constraint,
-            :message "Ranking must have values."
-            :errors {"ranking" "You must provide a value."}}
-           (sql-jdbc.actions/maybe-parse-sql-error
-            :postgres actions.error/violate-not-null-constraint nil :row/created
-            "ERROR: null value in column \"ranking\" of relation \"group\" violates not-null constraint\n  Detail: Failing row contains (57, admin, null).")))))
+    (is (=? {:type :metabase.actions.error/violate-not-null-constraint,
+             :message "Ranking must have values."
+             :errors {"ranking" "You must provide a value."}}
+            (sql-jdbc.actions/maybe-parse-sql-error
+             :postgres actions.error/violate-not-null-constraint nil :model.row/created
+             "ERROR: null value in column \"ranking\" of relation \"group\" violates not-null constraint\n  Detail: Failing row contains (57, admin, null).")))))
 
 (deftest actions-maybe-parse-sql-error-violate-unique-constraint-test
   (testing "violate unique constraint"
-    (with-redefs [postgres.actions/constraint->column-names (constantly ["ranking"])]
-      (is (= {:type :metabase.actions.error/violate-unique-constraint,
-              :message "Ranking already exists.",
-              :errors {"ranking" "This Ranking value already exists."}}
-             (sql-jdbc.actions/maybe-parse-sql-error
-              :postgres actions.error/violate-unique-constraint nil nil
-              "Batch entry 0 UPDATE \"public\".\"group\" SET \"ranking\" = CAST(2 AS INTEGER) WHERE \"public\".\"group\".\"id\" = 1 was aborted: ERROR: duplicate key value violates unique constraint \"group_ranking_key\"\n  Detail: Key (ranking)=(2) already exists.  Call getNextException to see other errors in the batch."))))))
+    (mt/with-dynamic-fn-redefs [postgres.actions/constraint->column-names (constantly ["ranking"])]
+      (is (=? {:type :metabase.actions.error/violate-unique-constraint,
+               :message "Ranking already exists.",
+               :errors {"ranking" "This Ranking value already exists."}}
+              (sql-jdbc.actions/maybe-parse-sql-error
+               :postgres actions.error/violate-unique-constraint nil nil
+               "Batch entry 0 UPDATE \"public\".\"group\" SET \"ranking\" = CAST(2 AS INTEGER) WHERE \"public\".\"group\".\"id\" = 1 was aborted: ERROR: duplicate key value violates unique constraint \"group_ranking_key\"\n  Detail: Key (ranking)=(2) already exists.  Call getNextException to see other errors in the batch."))))))
 
 (deftest ^:parallel actions-maybe-parse-sql-error-incorrect-type-test
   (testing "incorrect type"
-    (is (= {:type :metabase.actions.error/incorrect-value-type,
-            :message "Some of your values aren’t of the correct type for the database.",
-            :errors {}}
-           (sql-jdbc.actions/maybe-parse-sql-error
-            :postgres actions.error/incorrect-value-type nil nil
-            "Batch entry 0 UPDATE \"public\".\"group\" SET \"ranking\" = CAST('S' AS INTEGER) WHERE \"public\".\"group\".\"id\" = 1 was aborted: ERROR: invalid input syntax for type integer: \"S\"  Call getNextException to see other errors in the batch.")))))
+    (is (=? {:type :metabase.actions.error/incorrect-value-type,
+             :message "Some of your values aren’t of the correct type for the database.",
+             :errors {}}
+            (sql-jdbc.actions/maybe-parse-sql-error
+             :postgres actions.error/incorrect-value-type nil nil
+             "Batch entry 0 UPDATE \"public\".\"group\" SET \"ranking\" = CAST('S' AS INTEGER) WHERE \"public\".\"group\".\"id\" = 1 was aborted: ERROR: invalid input syntax for type integer: \"S\"  Call getNextException to see other errors in the batch.")))))
 
 (deftest ^:parallel actions-maybe-parse-sql-error-violate-fk-constraints-test
   (testing "violate fk constraints"
-    (is (= {:type :metabase.actions.error/violate-foreign-key-constraint,
-            :message "Unable to create a new record.",
-            :errors {"group-id" "This Group-id does not exist."}}
-           (sql-jdbc.actions/maybe-parse-sql-error
-            :postgres actions.error/violate-foreign-key-constraint nil :row/create
-            "ERROR: insert or update on table \"user\" violates foreign key constraint \"user_group-id_group_-159406530\"\n  Detail: Key (group-id)=(999) is not present in table \"group\".")))))
+    (is (=? {:type    :metabase.actions.error/violate-foreign-key-constraint,
+             :message "Unable to create a new record."
+             :errors  {"group-id" "This value does not exist in table \"group\"."}}
+            (sql-jdbc.actions/maybe-parse-sql-error
+             :postgres actions.error/violate-foreign-key-constraint nil :model.row/create
+             "ERROR: insert or update on table \"user\" violates foreign key constraint \"user_group-id_group_-159406530\"\n  Detail: Key (group-id)=(999) is not present in table \"group\".")))))
 
 (deftest ^:parallel actions-maybe-parse-sql-error-violate-fk-constraints-test-2
   (testing "violate fk constraints"
-    (is (= {:type :metabase.actions.error/violate-foreign-key-constraint,
-            :message "Unable to update the record.",
-            :errors {"id" "This Id does not exist."}}
-           (sql-jdbc.actions/maybe-parse-sql-error
-            :postgres actions.error/violate-foreign-key-constraint nil :row/update
-            "ERROR: update or delete on table \"group\" violates foreign key constraint \"user_group-id_group_-159406530\" on table \"user\"\n  Detail: Key (id)=(1) is still referenced from table \"user\".")))))
+    (is (=? {:type    :metabase.actions.error/violate-foreign-key-constraint,
+             :message "Other rows refer to this value so it cannot be changed."
+             :errors  {"id" "Referenced in table \"user\"."}}
+            (sql-jdbc.actions/maybe-parse-sql-error
+             :postgres actions.error/violate-foreign-key-constraint nil :model.row/update
+             "ERROR: update or delete on table \"group\" violates foreign key constraint \"user_group-id_group_-159406530\" on table \"user\"\n  Detail: Key (id)=(1) is still referenced from table \"user\".")))))
 
 (deftest ^:parallel actions-maybe-parse-sql-error-violate-fk-constraints-test-3
   (testing "violate fk constraints"
-    (is (= {:type :metabase.actions.error/violate-foreign-key-constraint,
-            :message "Other tables rely on this row so it cannot be deleted.",
-            :errors {}}
-           (sql-jdbc.actions/maybe-parse-sql-error
-            :postgres actions.error/violate-foreign-key-constraint nil :row/delete
-            "ERROR: update or delete on table \"group\" violates foreign key constraint \"user_group-id_group_-159406530\" on table \"user\"\n  Detail: Key (id)=(1) is still referenced from table \"user\".")))))
+    (is (=? {:type :metabase.actions.error/violate-foreign-key-constraint,
+             :message "Other rows refer to this row so it cannot be deleted.",
+             :errors {}}
+            (sql-jdbc.actions/maybe-parse-sql-error
+             :postgres actions.error/violate-foreign-key-constraint nil :model.row/delete
+             "ERROR: update or delete on table \"group\" violates foreign key constraint \"user_group-id_group_-159406530\" on table \"user\"\n  Detail: Key (id)=(1) is still referenced from table \"user\".")))))
 
-;; this contains specical tests case for postgres
+;; this contains special tests case for postgres
+;; for generic tests, check [[metabase.driver.sql-jdbc.actions-test/action-error-handling-test]]
+(deftest check-constraint-test
+  (mt/test-driver :postgres
+    (testing "violate check constraints"
+      (tx/drop-if-exists-and-create-db! driver/*driver* "check-constraint-test")
+      (let [details (mt/dbdef->connection-details :postgres :db {:database-name "check-constraint-test"})]
+        (doseq [stmt ["CREATE TABLE test_users (
+                        id serial PRIMARY KEY,
+                        email VARCHAR(255) NOT NULL,
+                        age INTEGER,
+                        CONSTRAINT email_format_check CHECK (email ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$')
+                      );"]]
+          (jdbc/execute! (sql-jdbc.conn/connection-details->spec :postgres details) [stmt]))
+        (mt/with-temp [:model/Database database {:engine driver/*driver* :details details}]
+          (mt/with-db database
+            (sync/sync-database! database)
+            (mt/with-actions-enabled
+              (testing "when creating with invalid email"
+                (is (=? {:errors      {}
+                         :message     "Some of your values violate the constraint: email_format_check"
+                         :status-code 400
+                         :type        actions.error/violate-check-constraint}
+                        (sql-jdbc.actions-test/perform-action-ex-data!
+                         :model.row/create (mt/$ids {:create-row {"email" "invalid-email"
+                                                                  "age"   25}
+                                                     :database   (:id database)
+                                                     :query      {:source-table $$test_users}
+                                                     :type       :query}))))))))))))
+
+;; this contains special tests case for postgres
 ;; for generic tests, check [[metabase.driver.sql-jdbc.actions-test/action-error-handling-test]]
 (deftest action-error-handling-test
   (mt/test-driver :postgres
     (testing "violate not-null constraints with multiple columns"
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "not-null-constraint-on-multiple-cols")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "not-null-constraint-on-multiple-cols")
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name "not-null-constraint-on-multiple-cols"})]
         (doseq [stmt ["CREATE TABLE mytable (id serial PRIMARY KEY,
                       column1 VARCHAR(50),
@@ -1145,31 +1478,31 @@
             (sync/sync-database! database)
             (mt/with-actions-enabled
               (testing "when creating"
-                (is (= {:errors      {"column1" "This Column1 value already exists."
-                                      "column2" "This Column2 value already exists."}
-                        :message     "Column1 and Column2 already exist."
-                        :status-code 400
-                        :type        actions.error/violate-unique-constraint}
-                       (sql-jdbc.actions-test/perform-action-ex-data
-                        :row/create (mt/$ids {:create-row {"id"      3
-                                                           "column1" "A"
-                                                           "column2" "A"}
-                                              :database   (:id database)
-                                              :query      {:source-table $$mytable}
-                                              :type       :query})))))
+                (is (=? {:errors      {"column1" "This Column1 value already exists."
+                                       "column2" "This Column2 value already exists."}
+                         :message     "Column1 and Column2 already exist."
+                         :status-code 400
+                         :type        actions.error/violate-unique-constraint}
+                        (sql-jdbc.actions-test/perform-action-ex-data!
+                         :model.row/create (mt/$ids {:create-row {"id"      3
+                                                                  "column1" "A"
+                                                                  "column2" "A"}
+                                                     :database   (:id database)
+                                                     :query      {:source-table $$mytable}
+                                                     :type       :query})))))
               (testing "when updating"
-                (is (= {:errors      {"column1" "This Column1 value already exists."
-                                      "column2" "This Column2 value already exists."}
-                        :message     "Column1 and Column2 already exist."
-                        :status-code 400
-                        :type        actions.error/violate-unique-constraint}
-                       (sql-jdbc.actions-test/perform-action-ex-data
-                        :row/update (mt/$ids {:update-row {"column1" "A"
-                                                           "column2" "A"}
-                                              :database   (:id database)
-                                              :query      {:source-table $$mytable
-                                                           :filter       [:= $mytable.id 2]}
-                                              :type       :query}))))))))))))
+                (is (=? {:errors      {"column1" "This Column1 value already exists."
+                                       "column2" "This Column2 value already exists."}
+                         :message     "Column1 and Column2 already exist."
+                         :status-code 400
+                         :type        actions.error/violate-unique-constraint}
+                        (sql-jdbc.actions-test/perform-action-ex-data!
+                         :model.row/update (mt/$ids {:update-row {"column1" "A"
+                                                                  "column2" "A"}
+                                                     :database   (:id database)
+                                                     :query      {:source-table $$mytable
+                                                                  :filter       [:= $mytable.id 2]}
+                                                     :type       :query}))))))))))))
 
 ;;; ------------------------------------------------ Timezone-related ------------------------------------------------
 
@@ -1183,8 +1516,8 @@
                                      :type     :native
                                      :native   {:query "SELECT current_setting('TIMEZONE') AS timezone;"}})))))]
       (testing "check that if we set report-timezone to US/Pacific that the session timezone is in fact US/Pacific"
-        (is  (= "US/Pacific"
-                (get-timezone-with-report-timezone "US/Pacific"))))
+        (is  (= "America/Los_Angeles"
+                (get-timezone-with-report-timezone "America/Los_Angeles"))))
       (testing "check that we can set it to something else: America/Chicago"
         (is (= "America/Chicago"
                (get-timezone-with-report-timezone "America/Chicago"))))
@@ -1196,7 +1529,7 @@
 (deftest fingerprint-time-fields-test
   (mt/test-driver :postgres
     (testing "Make sure we're able to fingerprint TIME fields (#5911)"
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "time_field_test")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "time_field_test")
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name "time_field_test"})]
         (jdbc/execute! (sql-jdbc.conn/connection-details->spec :postgres details)
                        [(str "CREATE TABLE toucan_sleep_schedule ("
@@ -1208,23 +1541,31 @@
                              "  VALUES ('22:00'::time, '9:00'::time, 'Beauty Sleep');")])
         (mt/with-temp [:model/Database database {:engine :postgres, :details (assoc details :dbname "time_field_test")}]
           (sync/sync-database! database)
-          (is (= {"start_time" {:global {:distinct-count 1
-                                         :nil%           0.0}
-                                :type   {:type/DateTime {:earliest "22:00:00"
-                                                         :latest   "22:00:00"}}}
-                  "end_time"   {:global {:distinct-count 1
-                                         :nil%           0.0}
-                                :type   {:type/DateTime {:earliest "09:00:00"
-                                                         :latest   "09:00:00"}}}
-                  "reason"     {:global {:distinct-count 1
-                                         :nil%           0.0}
-                                :type   {:type/Text {:percent-json   0.0
-                                                     :percent-url    0.0
-                                                     :percent-email  0.0
-                                                     :percent-state  0.0
-                                                     :average-length 12.0}}}}
-                 (t2/select-fn->fn :name :fingerprint :model/Field
-                                   :table_id (t2/select-one-pk :model/Table :db_id (u/the-id database))))))))))
+          (let [fingerprints  (t2/select-fn->fn :name :fingerprint :model/Field
+                                                :table_id (t2/select-one-pk :model/Table :db_id (u/the-id database)))
+                ;; Strip extended interestingness stats — this test covers the core TIME fingerprint
+                ;; shape (#5911), not the interestingness metrics.
+                extended-keys [:skewness :mode-fraction :top-3-fraction :percent-blank]
+                trim-type     (fn [fp]
+                                (update fp :type
+                                        (fn [types]
+                                          (update-vals types #(apply dissoc % extended-keys)))))]
+            (is (= {"start_time" {:global {:distinct-count 1
+                                           :nil%           0.0}
+                                  :type   {:type/DateTime {:earliest "22:00:00"
+                                                           :latest   "22:00:00"}}}
+                    "end_time"   {:global {:distinct-count 1
+                                           :nil%           0.0}
+                                  :type   {:type/DateTime {:earliest "09:00:00"
+                                                           :latest   "09:00:00"}}}
+                    "reason"     {:global {:distinct-count 1
+                                           :nil%           0.0}
+                                  :type   {:type/Text {:percent-json   0.0
+                                                       :percent-url    0.0
+                                                       :percent-email  0.0
+                                                       :percent-state  0.0
+                                                       :average-length 12.0}}}}
+                   (update-vals fingerprints trim-type)))))))))
 
 ;;; ----------------------------------------------------- Other ------------------------------------------------------
 
@@ -1251,20 +1592,23 @@
                    (catch Throwable e
                      e)))))))))
 
+;;; see [[metabase.query-processor.middleware.annotate-test/native-query-infer-effective-type-test]] for a test that
+;;; just makes sure metadata is calculated correctly.
 (deftest ^:parallel pgobject-test
   (mt/test-driver :postgres
     (testing "Make sure PGobjects are decoded correctly"
-      (let [results (qp/process-query (mt/native-query {:query "SELECT pg_sleep(0.1) AS sleep;"}))]
+      (let [results (qp/process-query (mt/native-query {:query "SELECT pg_sleep(0.01) AS sleep;"}))]
         (testing "rows"
           (is (= [[""]]
                  (mt/rows results))))
         (testing "cols"
-          (is (=? [{:display_name "sleep"
-                    :base_type    :type/Text
+          (is (=? [{:display_name   "sleep"
+                    :base_type      :type/Text
                     :effective_type :type/Text
-                    :source       :native
-                    :field_ref    [:field "sleep" {:base-type :type/Text}]
-                    :name         "sleep"}]
+                    :database_type  "void"
+                    :source         :native
+                    :field_ref      [:field "sleep" {:base-type :type/Text}]
+                    :name           "sleep"}]
                   (mt/cols results))))))))
 
 (deftest ^:parallel id-field-parameter-test
@@ -1278,7 +1622,7 @@
 (deftest dont-sync-tables-with-no-select-permissions-test
   (testing "Make sure we only sync databases for which the current user has SELECT permissions"
     (mt/test-driver :postgres
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "no-select-test")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "no-select-test")
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name "no-select-test"})
             spec    (sql-jdbc.conn/connection-details->spec :postgres details)]
         (doseq [statement ["CREATE TABLE PUBLIC.table_with_perms (x INTEGER NOT NULL);"
@@ -1301,7 +1645,7 @@
 (deftest json-operator-?-works
   (testing "Make sure the Postgres ? operators (for JSON types) work in native queries"
     (mt/test-driver :postgres
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "json-test")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "json-test")
       (let [details (mt/dbdef->connection-details :postgres :db {:database-name "json-test"})
             spec    (sql-jdbc.conn/connection-details->spec :postgres details)]
         (doseq [statement ["DROP TABLE IF EXISTS PUBLIC.json_table;"
@@ -1319,12 +1663,28 @@
                    (-> {:query query}
                        (mt/native-query)
                        (qp/process-query)
-                       (mt/rows))))))))))
+                       (mt/rows)))))
+          (testing "Make sure we get a good error message when using ? with other parameters"
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                  #"It looks like you have a '\?' in your code which Postgres's JDBC driver interprets as a parameter\. You might need to escape it like '\?\?'\."
+                                  (-> {:query         (str "SELECT * FROM json_table "
+                                                           "WHERE json_val::jsonb ? 'a' "
+                                                           "AND json_val::jsonb ->> 'a' = {{val}}")
+                                       :template-tags {"val"
+                                                       {:name         "val"
+                                                        :display-name "Val"
+                                                        :type         :text}}}
+                                      mt/native-query
+                                      (assoc :parameters
+                                             [{:type   "number/="
+                                               :target ["variable" ["template-tag" "val"]]
+                                               :value  ["1"]}])
+                                      qp/process-query)))))))))
 
 (deftest sync-json-with-composite-pks-test
   (testing "Make sure sync a table with json columns that have composite pks works"
     (mt/test-driver :postgres
-      (tx/drop-if-exists-and-create-db! driver/*driver*  "composite-pks-test")
+      (tx/drop-if-exists-and-create-db! driver/*driver* "composite-pks-test")
       (with-redefs [table-rows-sample/nested-field-sample-limit 4]
         (let [details (mt/dbdef->connection-details driver/*driver* :db {:database-name "composite-pks-test"})
               spec    (sql-jdbc.conn/connection-details->spec driver/*driver* details)]
@@ -1433,9 +1793,9 @@
 
 (deftest can-set-ssl-key-via-gui
   (testing "ssl key can be set via the gui (#20319)"
-    (with-redefs [secret/value-as-file!
-                  (fn [driver details secret-property & [_ext]]
-                    (str "file:" secret-property "="  (u/bytes-to-string (:value (#'secret/resolve-secret-map driver details secret-property)))))]
+    (mt/with-dynamic-fn-redefs [secret/value-as-file!
+                                (fn [driver details secret-property & [_ext]]
+                                  (str "file:" secret-property "="  (u/bytes-to-string (:value (#'secret/resolve-secret-map driver details secret-property)))))]
       (is (= "file:ssl-key=/clientkey.pkcs12"
              (:sslkey
               (#'postgres/ssl-params
@@ -1508,7 +1868,7 @@
               get-privileges (fn []
                                (sql-jdbc.conn/with-connection-spec-for-testing-connection
                                 [spec [:postgres (assoc (:details (mt/db)) :user "privilege_rows_test_example_role")]]
-                                 (with-redefs [sql-jdbc.conn/db->pooled-connection-spec (fn [_] spec)]
+                                 (mt/with-dynamic-fn-redefs [sql-jdbc.conn/db->pooled-connection-spec (fn [_] spec)]
                                    (set (sql-jdbc.sync/current-user-table-privileges driver/*driver* spec)))))]
           (try
             (jdbc/execute! conn-spec (str
@@ -1593,18 +1953,21 @@
 
 (deftest ^:parallel set-role-statement-test
   (testing "set-role-statement should return a SET ROLE command, with the role quoted if it contains special characters"
-    ;; No special characters
-    (is (= "SET ROLE MY_ROLE;"        (driver.sql/set-role-statement :postgres "MY_ROLE")))
-    (is (= "SET ROLE ROLE123;"        (driver.sql/set-role-statement :postgres "ROLE123")))
-    (is (= "SET ROLE lowercase_role;" (driver.sql/set-role-statement :postgres "lowercase_role")))
-
-    ;; None (special role in Postgres to revert back to login role; should not be quoted)
-    (is (= "SET ROLE none;"      (driver.sql/set-role-statement :postgres "none")))
-    (is (= "SET ROLE NONE;"      (driver.sql/set-role-statement :postgres "NONE")))
-
-    ;; Special characters
-    (is (= "SET ROLE \"Role.123\";"   (driver.sql/set-role-statement :postgres "Role.123")))
-    (is (= "SET ROLE \"$role\";"      (driver.sql/set-role-statement :postgres "$role")))))
+    (mt/test-driver :postgres
+      (sql-jdbc.execute/do-with-connection-with-options
+       :postgres (mt/id) nil
+       (fn [conn]
+         (are [role expected] (= expected
+                                 (driver.sql-jdbc/set-role-statement :postgres conn role))
+           "MY_ROLE"                      "SET ROLE MY_ROLE;"
+           "ROLE123"                      "SET ROLE ROLE123;"
+           "lowercase_role"               "SET ROLE lowercase_role;"
+           "Role.123"                     "SET ROLE \"Role.123\";"
+           "$role"                        "SET ROLE \"$role\";"
+           "role\"; SELECT sleep(10); --" "SET ROLE \"role\"\"; SELECT sleep(10); --\";"
+           ;; None (special role in Postgres to revert back to login role; should not be quoted)
+           "none"                         "SET ROLE none;"
+           "NONE"                         "SET ROLE NONE;"))))))
 
 (deftest get-tables-parity-with-jdbc-test
   (testing "make sure our get-tables return result consistent with jdbc getTables"
@@ -1626,7 +1989,6 @@
                                              ["TABLE" "PARTITIONED TABLE" "VIEW" "FOREIGN TABLE" "MATERIALIZED VIEW"]))
                                   (into #{} (map #(dissoc % :estimated_row_count))
                                         (#'postgres/get-tables (mt/db) schemas tables)))))]
-
              (doseq [stmt ["CREATE TABLE public.table (id INTEGER, type TEXT);"
                            "CREATE UNIQUE INDEX idx_table_type ON public.table(type);"
                            "CREATE TABLE public.partition_table (id INTEGER) PARTITION BY RANGE (id);"
@@ -1708,7 +2070,7 @@
     (let [{schema :schema, table-name :name} (t2/select-one :model/Table (mt/id :checkins))]
       (qp.store/with-metadata-provider (mt/id)
         (testing "checking select privilege defaults to allow on timeout (#56737)"
-          (with-redefs [sql-jdbc.describe-database/simple-select-probe-query (constantly ["SELECT pg_sleep(3)"])]
+          (mt/with-dynamic-fn-redefs [sql-jdbc.describe-database/simple-select-probe-query (constantly ["SELECT pg_sleep(3)"])]
             (binding [sql-jdbc.describe-database/*select-probe-query-timeout-seconds* 1]
               (sql-jdbc.execute/do-with-connection-with-options
                driver/*driver*
@@ -1717,3 +2079,416 @@
                (fn [^java.sql.Connection conn]
                  (is (true? (sql-jdbc.sync.interface/have-select-privilege?
                              driver/*driver* conn schema table-name))))))))))))
+
+(deftest sync-writable-test
+  (mt/test-driver :postgres
+    (testing "`sync-tables-and-database!` should set is_writable correctly based on table privileges"
+      (let [db-name "sync_writable_test"
+            details (tx/dbdef->connection-details :postgres :db {:database-name db-name})]
+        (tx/drop-if-exists-and-create-db! driver/*driver* db-name)
+        #_{:clj-kondo/ignore [:discouraged-var]}
+        (jdbc/with-db-connection [conn (sql-jdbc.conn/connection-details->spec :postgres details)]
+          (try
+            (jdbc/execute! conn "CREATE SCHEMA IF NOT EXISTS sync_test_schema")
+            (doseq [stmt ["CREATE TABLE sync_test_schema.readonly_table (id INTEGER);"
+                          "CREATE TABLE sync_test_schema.readwrite_table (id INTEGER);"
+                          "CREATE TABLE sync_test_schema.fullaccess_table (id INTEGER);"]]
+              (jdbc/execute! conn stmt))
+            (jdbc/execute! conn "DROP USER IF EXISTS sync_writable_test_user")
+            (jdbc/execute! conn "CREATE USER sync_writable_test_user WITH PASSWORD 'password'")
+            (jdbc/execute! conn "GRANT USAGE ON SCHEMA sync_test_schema TO sync_writable_test_user")
+            (jdbc/execute! conn "GRANT SELECT ON sync_test_schema.readonly_table TO sync_writable_test_user")
+            (jdbc/execute! conn "GRANT SELECT, INSERT ON sync_test_schema.readwrite_table TO sync_writable_test_user")
+            (jdbc/execute! conn "GRANT SELECT, INSERT, UPDATE, DELETE ON sync_test_schema.fullaccess_table TO sync_writable_test_user")
+            (let [user-connection-details (assoc details
+                                                 :user "sync_writable_test_user"
+                                                 :password "password")]
+              (mt/with-temp [:model/Database database {:engine "postgres", :details user-connection-details}]
+                (sync/sync-database! database)
+                (testing "only fullaccess table has writeable permissions"
+                  (is (= {"readonly_table"   false
+                          "readwrite_table"  false
+                          "fullaccess_table" true}
+                         (t2/select-fn->fn :name :is_writable :model/Table :db_id (:id database)))))
+                (testing "After granting full access to all tables and re-syncing"
+                  (doseq [table-name ["readonly_table" "readwrite_table"]]
+                    (jdbc/execute! conn (format "GRANT INSERT, UPDATE, DELETE ON sync_test_schema.%s TO sync_writable_test_user" table-name)))
+                  (sync/sync-database! database)
+                  (is (= {"readonly_table"   true
+                          "readwrite_table"  true
+                          "fullaccess_table" true}
+                         (t2/select-fn->fn :name :is_writable :model/Table :db_id (:id database)))))))
+            (finally
+              (jdbc/execute! conn "DROP SCHEMA IF EXISTS sync_test_schema CASCADE")
+              (jdbc/execute! conn "DROP USER IF EXISTS sync_writable_test_user"))))))))
+
+(deftest ^:parallel null-array-query-test
+  (testing "queries with nulls in arrays should be returned in a readable format"
+    (mt/test-driver :postgres
+      (is (= [[[nil]
+               [nil nil]
+               [1 nil 3]
+               [[nil]]
+               [[nil] [nil]]
+               [[1 nil] [nil 2]]]]
+             (->> (mt/native-query {:query "select array[null], array[null, null],
+                                            array[1, null, 3], array[array[null]],
+                                            array[array[null], array[null]],
+                                            array[array[1, null], array[null, 2]]"})
+                  mt/process-query
+                  mt/rows))))))
+
+(deftest ^:parallel arrays-have-base-type
+  (testing "queries with pg arrays have a base type on column metadata (#63909)"
+    (mt/test-driver :postgres
+      (is (=? [{:name "id"
+                :database_type "int4"
+                :base_type :type/Integer}
+               {:name "urls"
+                :database_type "_text"
+                :base_type :type/*}]
+              (->> (mt/native-query {:query "SELECT *
+                                             FROM (
+                                               VALUES
+                                                 (1, ARRAY['https://example.com', 'https://example.org']),
+                                                 (2, ARRAY['https://test.com']),
+                                                 (3, ARRAY['https://foo.com', 'https://bar.com', 'https://baz.com'])
+                                             ) AS adhoc_table (id, urls);"})
+                   mt/process-query
+                   mt/cols))))))
+
+(deftest can-edit-model-metadata
+  (testing "queries with pg arrays have a base type on column metadata (#63909)"
+    (mt/test-driver :postgres
+      (let [query "SELECT *
+                   FROM (
+                     VALUES
+                       (1, ARRAY['https://example.com', 'https://example.org']),
+                       (2, ARRAY['https://test.com']),
+                       (3, ARRAY['https://foo.com', 'https://bar.com', 'https://baz.com'])
+                   ) AS adhoc_table (id, urls);"]
+        (mt/with-temp [:model/Card model (mt/card-with-metadata
+                                          {:name "model"
+                                           :type :model
+                                           :dataset_query (mt/native-query {:query query})
+                                           :database_id (mt/id)})]
+          ;; update cards such that base_type is missing, similuating existing data
+          (t2/query ["update report_card set result_metadata = ? where id = ?"
+                     (json/encode [(first (:result_metadata model))
+                                   (assoc (second (:result_metadata model))
+                                          :base_type nil)])
+                     (:id model)])
+          (let [response (mt/user-http-request :crowberto :put 200
+                                               (format "card/%d" (:id model))
+                                               {:dataset_query
+                                                (mt/native-query {:query (str "-- comment at top\n " query)})})]
+            (is (=? [{:name "id"
+                      :database_type "int4"
+                      :base_type "type/Integer"}
+                     {:name "urls"
+                      :database_type "_text"
+                      :base_type "type/*"}]
+                    (:result_metadata response)))))))))
+
+(deftest ^:parallel detect-provider-from-database-test
+  (let [tests [["Aiven" "mydb-project.aivencloud.com"]
+               ["Amazon RDS" "czrs8kj4isg7.us-east-1.rds.amazonaws.com"]
+               ["Azure" "production-flexible-server.postgres.database.azure.com"]
+               ["Crunchy Data" "p.vbjrfujv5beutaoelw725gvi3i.db.postgresbridge.com"]
+               ["DigitalOcean" "cluster-do-user-1234567-0.db.ondigitalocean.com"]
+               ["Fly.io" "db.fly.dev"]
+               ["Neon" "ep-autumn-frost-alwlmval-pooler.ap-southeast-1.aws.neon.tech"]
+               ["PlanetScale" "my-db.horizon.psdb.cloud"]
+               ["Railway" "nodejs-copy-production-7aa4.up.railway.app"]
+               ["Render" "your_host_name.your_region-postgres.render.com"]
+               ["Scaleway" "my-db.region-1.scw.cloud"]
+               ["Supabase" "db.apbkobhfnmcqqzqeeqss.supabase.co"]
+               ["Supabase" "aws-0-us-west-1.pooler.supabase.com"]
+               ["Timescale" "service.project.tsdb.cloud.timescale.com"]]]
+    (testing "full database entity detection with postgres engine"
+      (doseq [[provider host] tests]
+        (let [database {:details {:host host} :engine :postgres}]
+          (is (= provider (provider-detection/detect-provider-from-database database))))))))
+
+(deftest ^:parallel complex-types-in-notification-payload
+  (mt/test-driver :postgres
+    (testing "we handle complex types in notifications"
+      (let [sql "SELECT
+                    i AS id,
+                    'User_' || i AS username,
+                    -- JSON types
+                    ('{\"userId\": ' || i || ', \"score\": ' || (i % 1000) || ', \"active\": ' || (i % 2 = 0)::text || '}')::jsonb AS settings,
+                    -- Arrays
+                    ARRAY['tag' || (i % 10), 'category' || (i % 5)]::text[] AS tags,
+                    ARRAY[i, i*2, i*3]::integer[] AS numbers,
+                    -- UUID
+                    '7e3cd49d-bfe1-4620-83dd-0c163719175c'::uuid AS uuid,
+                    -- Network
+                    ('192.168.' || (i % 255) || '.' || ((i*7) % 255))::inet AS ip,
+                    -- Geometric
+                    point(i % 180 - 90, i % 360 - 180) AS coordinates,
+                    circle(point(i % 100, i % 100), 50) AS area,
+                    -- Text search
+                    to_tsvector('english', 'Content for row ' || i) AS search_data,
+                    -- Binary
+                    decode(md5(i::text), 'hex') AS hash,
+                    -- Range types
+                    int4range(i, i + 100) AS value_range,
+                    -- Money
+                    ((RANDOM() * 1000)::numeric(10,2))::money AS price,
+                    -- Standard
+                    NOW() - ((i % 365) || ' days')::interval AS created_at
+               FROM generate_series(1, 5000) AS i;"
+            results (qp/process-query (mt/native-query {:query sql})
+                                      (temp-storage/notification-rff
+                                       {:budget (temp-storage/make-resident-budget
+                                                 {:per-card 5000 :resident-cap Long/MAX_VALUE :floor Long/MAX_VALUE})}
+                                       {:context 'complex-types-in-notification-payload}))]
+        (is (integer? (:data.rows-file-size results)))
+        (is (temp-storage/streaming-temp-file? (-> results :data :rows)))
+        (is (=? [1
+                 "User_1"
+                 "{\"score\": 1, \"active\": false, \"userId\": 1}"
+                 ["tag1" "category1"]
+                 [1 2 3]
+                 ;; match on type
+                 uuid?
+                 "192.168.1.7"
+                 "(-89.0,-179.0)"
+                 "<(1.0,1.0),50.0>"
+                 "'1':4 'content':1 'row':3"
+                 "\\xc4ca4238a0b923820dcc509a6f75849b"
+                 "[1,101)"
+                 ;; match on type
+                 decimal?
+                 ;; we don't have an easy way to recognize a datetime string. assuming if it's a string and query
+                 ;; doesnt error then it worked
+                 string?]
+                (-> results :data :rows deref first)))))))
+
+(defn- hex->bytes [hex]
+  (->> (partition 2 hex)
+       (map #(apply str %))
+       (map #(Integer/parseInt % 16))
+       (map unchecked-byte)
+       byte-array))
+
+(deftest bytea-column-not-truncated-test
+  (testing "fix for #30671"
+    (mt/test-driver :postgres
+      (mt/dataset (mt/dataset-definition
+                   "bytea_dataset"
+                   [["bytea_table"
+                     [{:field-name "bytea_col", :base-type {:native "bytea"}, :effective-type :type/*}]
+                     [[(hex->bytes "900000000000810074123E9DB008AB5C")]
+                      [(hex->bytes "900000000000475000DE4EC0C0A920AB")]]]])
+        (let [mp (mt/metadata-provider)]
+          (is (= [[1 "\\x900000000000810074123e9db008ab5c"]
+                  [2 "\\x900000000000475000de4ec0c0a920ab"]]
+                 (->> (lib.metadata/table mp (mt/id :bytea_table))
+                      (lib/query mp)
+                      (qp/process-query)
+                      (mt/rows)))))))))
+
+(defn- pg-obj [type val]
+  (doto (PGobject.) (.setType type) (.setValue val)))
+
+(deftest pgobject-freeze-thaw-test
+  (letfn [(test-pgobject-caching [obj]
+            (is (= obj (-> obj nippy/freeze nippy/thaw))))]
+    (testing "Simple PGobject instances can be frozen and thawed"
+      (test-pgobject-caching (pg-obj "foo_type" "abc_val")))
+    (testing "PGobjects in an array can be frozen and thawed"
+      (let [pg-obj-1 (pg-obj "foo_type" "abc_val")
+            pg-obj-2 (pg-obj "foo_type" "xyz_val")
+            pg-obj-arr [pg-obj-1 pg-obj-2]]
+        (test-pgobject-caching pg-obj-arr)))
+    (testing "PGobjects in a map can be frozen and thawed"
+      (let [pg-object (pg-obj "foo_type" "abc_val")
+            pg-obj-map {:data [pg-object] :metadata {:type "test"}}]
+        (test-pgobject-caching pg-obj-map)))))
+
+(deftest canceled-query-no-stacktrace-test
+  (mt/test-driver :postgres
+    (letfn [(catch-exceptions [run]
+              (let [query    (cond-> {:type :query, :database 1}
+                               (= driver/*driver* :postgres) (lib.convert/->mbql5))
+                    metadata {}
+                    rows     []
+                    qp       (fn [query rff]
+                               (run)
+                               (binding [qp.pipeline/*execute* (fn [_driver _query respond]
+                                                                 (respond metadata rows))]
+                                 (qp.pipeline/*run* query rff)))
+                    qp       (catch-exceptions/catch-exceptions qp)
+                    result   (driver/with-driver driver/*driver*
+                               (qp (qp/userland-query query) qp.reducible/default-rff))]
+                (cond-> result
+                  (map? result) (update :data dissoc :rows))))
+            (cancel-messages []
+              (comp
+               (filter (comp #(str/includes? % "canceling statement due to user request")
+                             :message))
+               ;; grab first line of the log message to exclude huge stacktrace
+               (map (comp first str/split-lines :message))))]
+      (mt/with-log-messages-for-level [log-messages :error]
+        (testing "Regular exceptions are logged"
+          (catch-exceptions (fn [] (throw (ex-info "Regular error during query" {}))))
+          (is (>= (count (log-messages)) 1)
+              "Regular exceptions should be logged")))
+      (testing "Query cancellation exceptions are not logged"
+        (mt/with-log-messages-for-level [log-messages :error]
+          (let [pg-cancel-ex (PSQLException. "canceling statement due to user request" PSQLState/QUERY_CANCELED)]
+            ;; Wrap it in an ExceptionInfo with the :query-canceled? flag, as our code does
+            (catch-exceptions
+             (fn [] (throw (ex-info "Error executing query: canceling statement due to user request"
+                                    {:driver driver/*driver*
+                                     :sql    ["SELECT pg_sleep(1000)"]
+                                     :params []
+                                     :type   qp.error-type/invalid-query
+                                     :query/query-canceled? true}
+                                    pg-cancel-ex)))))
+          (is (= 0 (count (into [] (cancel-messages) (log-messages))))
+              "Query cancellation exceptions should not be logged")))
+      (let [mp (mt/metadata-provider)]
+        ;; Refresh the permission set in case the metadata provider created this test DB.
+        (mt/with-test-user :rasta
+          (binding [qp.pipeline/*canceled-chan* (a/promise-chan)]
+            (future
+              (Thread/sleep 400)
+              (a/put! qp.pipeline/*canceled-chan* :cancel))
+            (mt/with-log-messages-for-level [messages :error]
+              (let [response (qp/process-query (assoc-in (lib/native-query mp "select pg_sleep(8), false")
+                                                         [:middleware :userland-query?] true))]
+                (is (= "ERROR: canceling statement due to user request" (:error response)))
+                (let [bad-messages (into [] (cancel-messages) (messages))]
+                  (is (empty? bad-messages)))))))))))
+
+(deftest bit-strings-can-be-filtered
+  (mt/test-driver :postgres
+    (mt/dataset (mt/dataset-definition
+                 "bit_string_dataset"
+                 [["bit_string_table"
+                   [{:field-name "single_bit", :base-type {:native "BIT"}}
+                    {:field-name "fixed_bit", :base-type {:native "BIT(8)"}}
+                    {:field-name "var_bit", :base-type {:native "VARBIT(16)"}}
+                    {:field-name "bit_varying", :base-type {:native "BIT VARYING(32)"}}]
+                   [[(pg-obj "BIT" "1") (pg-obj "BIT" "10101010") (pg-obj "BIT" "1101") (pg-obj "BIT" "111000111")]
+                    [(pg-obj "BIT" "0") (pg-obj "BIT" "00001111") (pg-obj "BIT" "10101") (pg-obj "BIT" "1001001")]
+                    [nil nil nil nil]]]])
+      (let [mp (mt/metadata-provider)
+            base-query (lib/query mp (lib.metadata/table mp (mt/id :bit_string_table)))]
+        (testing "can query all rows"
+          (is (= [[1 "1" "10101010" "1101" "111000111"]
+                  [2 "0" "00001111" "10101" "1001001"]
+                  [3 nil nil nil nil]]
+                 (mt/rows (qp/process-query base-query)))))
+        (testing "can filter by single_bit column"
+          (let [single-bit-col (mt/id :bit_string_table :single_bit)
+                query (-> base-query
+                          (lib/filter (lib/= (lib.metadata/field mp single-bit-col)
+                                             "1")))]
+            (is (= [[1 "1" "10101010" "1101" "111000111"]]
+                   (mt/rows (qp/process-query query))))))
+        (testing "can filter by fixed_bit column"
+          (let [fixed-bit-col (mt/id :bit_string_table :fixed_bit)
+                query (-> base-query
+                          (lib/filter (lib/= (lib.metadata/field mp fixed-bit-col)
+                                             "00001111")))]
+            (is (= [[2 "0" "00001111" "10101" "1001001"]]
+                   (mt/rows (qp/process-query query))))))
+        (testing "can filter by var_bit column"
+          (let [var-bit-col (mt/id :bit_string_table :var_bit)
+                query (-> base-query
+                          (lib/filter (lib/= (lib.metadata/field mp var-bit-col)
+                                             "1101")))]
+            (is (= [[1 "1" "10101010" "1101" "111000111"]]
+                   (mt/rows (qp/process-query query))))))
+        (testing "can filter by bit_varying column"
+          (let [bit-varying-col (mt/id :bit_string_table :bit_varying)
+                query (-> base-query
+                          (lib/filter (lib/= (lib.metadata/field mp bit-varying-col)
+                                             "1001001")))]
+            (is (= [[2 "0" "00001111" "10101" "1001001"]]
+                   (mt/rows (qp/process-query query))))))
+        (let [fixed-bit-col (mt/id :bit_string_table :fixed_bit)]
+          (testing "can filter with not equals"
+            (let [query (-> base-query
+                            (lib/filter (lib/!= (lib.metadata/field mp fixed-bit-col)
+                                                "00001111")))]
+              (is (= [[1 "1" "10101010" "1101" "111000111"]
+                      [3 nil nil nil nil]]
+                     (mt/rows (qp/process-query query))))))
+          (testing "can filter with is empty"
+            (let [query (-> base-query
+                            (lib/filter (lib/is-empty (lib.metadata/field mp fixed-bit-col))))]
+              (is (= [[3 nil nil nil nil]]
+                     (mt/rows (qp/process-query query))))))
+          (testing "can filter with is not empty"
+            (let [query (-> base-query
+                            (lib/filter (lib/not-empty (lib.metadata/field mp fixed-bit-col))))]
+              (is (= [[1 "1" "10101010" "1101" "111000111"]
+                      [2 "0" "00001111" "10101" "1001001"]]
+                     (mt/rows (qp/process-query query)))))))))))
+
+(deftest set-network-timeout-test
+  (mt/test-driver :postgres
+    (testing "network hangs are interrupted after *network-timeout-ms*"
+      (binding [driver.settings/*network-timeout-ms* 3000]
+        (is (thrown-with-msg?
+             org.postgresql.util.PSQLException
+             #"An I/O error occurred while sending to the backend"
+             (try
+               (sql-jdbc.execute/do-with-connection-with-options
+                driver/*driver* (mt/id) nil
+                (fn [^Connection conn]
+                  (with-open [stmt (.createStatement conn)]
+                    (.execute stmt "SELECT pg_sleep(6)"))))
+               (catch Exception e
+                 (is (true? (some #(instance? java.net.SocketTimeoutException %)
+                                  (u/full-exception-chain e))))
+                 (throw e)))))))
+    (testing "network hangs are not interrupted before *network-timeout-ms*"
+      (is (true?
+           (sql-jdbc.execute/do-with-connection-with-options
+            driver/*driver* (mt/id) nil
+            (fn [^Connection conn]
+              (with-open [stmt (.createStatement conn)]
+                (.execute stmt "SELECT pg_sleep(6)")))))))))
+
+(deftest ^:parallel parse-final-identifier-test
+  (mt/test-driver :postgres
+    (testing "`final` is allowed as identifier and parsed correctly"
+      (mt/with-temp [:model/Database db {:engine "postgres"
+                                         :name "final"
+                                         :initial_sync_status "complete"}
+                     :model/Table t {:name "final"
+                                     :schema "public"
+                                     :db_id (:id db)}
+                     :model/Field _ {:name "final"
+                                     :table_id (:id t)}]
+        (mt/with-db
+          db
+          (let [mp (mt/metadata-provider)
+                query (lib/native-query mp "select final from final")
+                broken-query (lib/native-query mp "select final, xix from final")]
+            (is (=? #{{:table (:id t)}}
+                    (driver/native-query-deps :postgres query)))
+            (is (=? [{:name "final"
+                      :lib/desired-column-alias "final"}]
+                    (driver/native-result-metadata :postgres query)))
+            (is (=? {:type :missing-column
+                     :name "xix"}
+                    (first (driver/validate-native-query-fields :postgres broken-query))))))))))
+
+(deftest ^:synchronized reducible-query-streams-large-result-set-test
+  (testing "reducible-query streams large result sets via a server-side cursor (autoCommit=false)"
+    (mt/test-driver :postgres
+      ;; A 2.1-billion-row generate_series in the SELECT list streams row-by-row (no server-side materialization).
+      ;; Pulling just the first few is fast ONLY if reducible-query streams (a cursor) and stops early; without
+      ;; streaming the JDBC driver buffers the whole ResultSet (~2.1B rows) and OOMs at any heap size.
+      (let [n      Integer/MAX_VALUE
+            result (sql-jdbc.execute/reducible-query
+                    (mt/db) [(format "SELECT generate_series(1, %d) AS i" n)])]
+        (testing "only the first rows are pulled, not all ~2 billion"
+          (is (= [1 2 3] (into [] (comp (take 3) (map :i)) result))))))))

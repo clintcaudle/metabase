@@ -9,7 +9,7 @@
    [metabase.lib.test-metadata :as meta]
    [metabase.lib.test-util :as lib.tu]
    [metabase.lib.test-util.metadata-providers.mock :as providers.mock]
-   [metabase.lib.util :as lib.util]))
+   [metabase.util.malli :as mu]))
 
 #?(:cljs (comment metabase.test-runner.assert-exprs.approximately-equal/keep-me))
 
@@ -129,6 +129,27 @@
     metric-clause
     metric-metadata))
 
+(deftest ^:parallel type-of-normalization-test
+  (testing "Metric type-of should normalize the metric :dataset-query as needed"
+    (let [metric {:description    "A metric"
+                  :archived       false
+                  :lib/type       :metadata/metric
+                  :database-id    (meta/id)
+                  :table-id       (meta/id :orders)
+                  :name           "Count"
+                  :type           :metric
+                  :source-card-id nil
+                  :id             80
+                  :dataset-query  {:lib/type "mbql/query"
+                                   :database (meta/id)
+                                   :stages   [{:source-table (meta/id :orders)
+                                               :lib/type     "mbql.stage/mbql"
+                                               :aggregation  [["count" {:lib/uuid "bd23f4c1-c973-4a04-8dc2-342236fe2b0f"}]]}]}}]
+      ;; disable Malli enforcement to make sure this works in the FE
+      (mu/disable-enforcement
+        (is (= :type/Integer
+               (lib/type-of (lib/query meta/metadata-provider (meta/table-metadata :orders)) metric)))))))
+
 (deftest ^:parallel unknown-type-of-test
   (is (= :type/*
          (lib/type-of query-with-metric [:metric {} 1]))))
@@ -199,8 +220,8 @@
                  :aggregation [[:metric {} 1]]}]}
               metric-based-query)))
     (testing "The columns of the query underlying the metric are visible in the metric-based query"
-      (is (= (lib/visible-columns metric-card-query 0 (lib.util/query-stage metric-card-query 0))
-             (lib/visible-columns metric-based-query 0 (lib.util/query-stage metric-based-query 0)))))))
+      (is (= (lib/visible-columns metric-card-query 0)
+             (lib/visible-columns metric-based-query 0))))))
 
 (deftest ^:parallel available-metrics-test
   (let [expected-metric-metadata {:lib/type      :metadata/metric
@@ -230,13 +251,15 @@
                     :description          "Number of toucans plus number of pelicans",
                     :aggregation-position 0}]
                   (map #(lib/display-info query-with-metric %)
-                       metrics)))))))
+                       metrics))))))))
 
+(deftest ^:parallel available-metrics-test-2
   (testing "Should return the available metrics as sorted"
     (let [query   (lib/query metadata-provider-with-multiple-metrics (meta/table-metadata :venues))
           metrics (lib.metric/available-metrics query)]
-      (is (=? [{:id second-metric-id} {:id metric-id}] metrics))))
+      (is (=? [{:id second-metric-id} {:id metric-id}] metrics)))))
 
+(deftest ^:parallel available-metrics-test-3
   (testing "Metrics based on cards are available"
     (let [metric {:name "Metrics"
                   :id 2
@@ -253,22 +276,121 @@
                {:cards [metric]}))]
       (is (=? [(assoc metric :lib/type :metadata/metric)]
               (-> (lib/query mp (lib.metadata/card lib.tu/metadata-provider-with-model 1))
-                  lib/available-metrics)))))
+                  lib/available-metrics))))))
+
+(deftest ^:parallel available-metrics-test-4
   (testing "query with different Table -- don't return Metrics"
-    (is (nil? (lib.metric/available-metrics (lib/query metadata-provider (meta/table-metadata :orders))))))
+    (is (nil? (lib.metric/available-metrics (lib/query metadata-provider (meta/table-metadata :orders)))))))
+
+(deftest ^:parallel available-metrics-test-5
   (testing "for subsequent stages -- don't return Metrics (#37173)"
     (let [query (lib/append-stage (lib/query metadata-provider (meta/table-metadata :venues)))]
       (is (nil? (lib.metric/available-metrics query)))
       (are [stage-number] (nil? (lib.metric/available-metrics query stage-number))
-        1 -1)))
+        1 -1))))
+
+(deftest ^:parallel available-metrics-test-6
   (testing "query with different source table joining the metrics table -- don't return Metrics"
     (let [query (-> (lib/query metadata-provider (meta/table-metadata :categories))
                     (lib/join (-> (lib/join-clause (lib/query metadata-provider (meta/table-metadata :venues))
                                                    [(lib/= (meta/field-metadata :venues :price) 4)])
                                   (lib/with-join-fields :all))))]
-      (is (nil? (lib.metric/available-metrics query)))))
+      (is (nil? (lib.metric/available-metrics query))))))
+
+(deftest ^:parallel available-metrics-test-7
   (testing "query based on a card -- don't return Metrics"
     (doseq [card-key [:venues :venues/native]]
       (let [query (lib/query metadata-provider-with-cards (card-key (lib.tu/mock-cards)))]
         (is (not (lib/uses-metric? query metric-id)))
         (is (nil? (lib.metric/available-metrics (lib/append-stage query))))))))
+
+(defn- referencing-metric-card
+  "A mock metric card whose definition has `aggregation` as its single aggregation."
+  [id card-name aggregation]
+  {:id            id
+   :name          card-name
+   :type          :metric
+   :database-id   (meta/id)
+   :table-id      (meta/id :venues)
+   :dataset-query {:database (meta/id)
+                   :type     :query
+                   :query    {:source-table (meta/id :venues)
+                              :aggregation  [aggregation]}}})
+
+(defn- query-aggregating-metric
+  "A query on `VENUES` aggregating `[:metric id]`, with `cards` served by the metadata provider."
+  [cards id]
+  (-> (lib/query (lib.tu/mock-metadata-provider meta/metadata-provider {:cards cards})
+                 (meta/table-metadata :venues))
+      (lib/aggregate [:metric {:lib/uuid (str (random-uuid))} id])))
+
+(defn- returned-columns-error
+  "The error thrown by [[lib/returned-columns]] on `query`, or nil if it computed successfully."
+  [query]
+  (try
+    (lib/returned-columns query)
+    nil
+    (catch #?(:clj Exception :cljs js/Error) e
+      e)))
+
+(deftest ^:parallel metric-metadata-mutual-reference-cycle-test
+  (testing "computing metadata for a metric whose references form a mutual cycle throws a cycle error (#74954)"
+    (let [query (query-aggregating-metric
+                 [(referencing-metric-card 1 "Metric A" [:metric 2])
+                  (referencing-metric-card 2 "Metric B" [:metric 1])]
+                 1)
+          e     (returned-columns-error query)]
+      (is (some? e))
+      (is (re-find #"Metric cycle detected" (ex-message e)))
+      (is (= [1 2 1]
+             (:cycle-path (ex-data e)))))))
+
+(deftest ^:parallel metric-metadata-self-reference-cycle-test
+  (testing "computing metadata for a metric that references itself throws a cycle error (#74954)"
+    (let [query (query-aggregating-metric
+                 [(referencing-metric-card 1 "Metric A" [:metric 1])]
+                 1)
+          e     (returned-columns-error query)]
+      (is (some? e))
+      (is (re-find #"Metric cycle detected" (ex-message e)))
+      (is (= [1 1]
+             (:cycle-path (ex-data e)))))))
+
+(deftest ^:parallel metric-metadata-reference-chain-test
+  (testing "an acyclic metric reference chain computes metadata, named for the outermost metric"
+    (let [query (query-aggregating-metric
+                 [(referencing-metric-card 1 "Metric A" [:metric 2])
+                  (referencing-metric-card 2 "Metric B" [:count])]
+                 1)]
+      (is (=? [{:name         "count"
+                :display-name "Metric A"}]
+              (lib/returned-columns query))))))
+
+(deftest ^:parallel metric-metadata-reference-diamond-test
+  (testing "two sibling metrics referencing the same base metric both compute metadata"
+    (let [cards [(referencing-metric-card 3 "Base Metric" [:count])
+                 (referencing-metric-card 1 "Left Metric" [:metric 3])
+                 (referencing-metric-card 2 "Right Metric" [:metric 3])]
+          query (-> (query-aggregating-metric cards 1)
+                    (lib/aggregate [:metric {:lib/uuid (str (random-uuid))} 2]))]
+      (is (=? [{:name         "count"
+                :display-name "Left Metric"}
+               {:name         "count_2"
+                :display-name "Right Metric"}]
+              (lib/returned-columns query))))))
+
+#?(:clj
+   (deftest ^:parallel check-card-overwrite-rejects-metric-cycle-test
+     (testing "saving a metric whose :metric refs would close a cycle is rejected up front (#74954)"
+       ;; the write-time counterpart to the read-time `check-metric-cycle!` guard: the card API rejects cyclic saves,
+       ;; so the read-time guard only has to backstop non-API paths (serdes, remote sync, direct writes).
+       (let [mp        (lib.tu/mock-metadata-provider
+                        meta/metadata-provider
+                        {:cards [(referencing-metric-card 1 "Metric A" [:metric 2])
+                                 (referencing-metric-card 2 "Metric B" [:metric 1])]})
+             new-query (lib/query mp {:database (meta/id)
+                                      :type     :query
+                                      :query    {:source-table (meta/id :venues)
+                                                 :aggregation  [[:metric 2]]}})]
+         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Cannot save card with cycles"
+                               (lib/check-card-overwrite 1 new-query)))))))

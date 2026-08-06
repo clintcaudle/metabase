@@ -1,7 +1,7 @@
 import { jt, t } from "ttag";
 
+import { ExternalLink } from "metabase/common/components/ExternalLink";
 import { useDocsUrl } from "metabase/common/hooks";
-import ExternalLink from "metabase/core/components/ExternalLink";
 import { Flex, Stack, Text, Title, rem } from "metabase/ui";
 
 export const ApplicationPermissionsHelp = () => {
@@ -23,7 +23,7 @@ export const ApplicationPermissionsHelp = () => {
         <Text>
           {jt`${(
             <strong key="label">{t`Monitoring:`}</strong>
-          )} monitoring access grants permissions to the Tools, Auditing, and Troubleshooting tabs in the Admin panel.`}
+          )} monitoring access grants permission to use Monitor tools.`}
         </Text>
         <Text>
           {jt`${(

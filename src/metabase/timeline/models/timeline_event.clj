@@ -22,7 +22,9 @@
 
 (def Icon
   "Schema for Timeline and TimelineEvents `icon`"
-  [:enum default-icon "cake" "mail" "warning" "bell" "cloud"])
+  ;; using "mail" icon is deprecated, but we keep it for backwards compatibility
+  [:enum default-icon "cake" "mail" "mail_at" "warning" "bell" "cloud"
+   "info" "note" "event"])
 
 (def Source
   "Timeline Event Source Schema. For Snowplow Events, where the Event is created from is important.
@@ -45,6 +47,10 @@
   (let [timeline (or (:timeline event)
                      (t2/select-one 'Timeline :id (:timeline_id event)))]
     (mi/perms-objects-set timeline read-or-write)))
+
+(defmethod mi/can-create? :model/TimelineEvent
+  [_ {:keys [timeline]}]
+  (mi/can-create? :model/Timeline {:collection_id (:collection_id timeline)}))
 
 ;;;; hydration
 
@@ -114,10 +120,6 @@
 
 ;;;; model
 
-(defmethod serdes/hash-fields :model/TimelineEvent
-  [_timeline-event]
-  [:name :timestamp (serdes/hydrated-hash :timeline) :created_at])
-
 ;;;; serialization
 
 ;; nested in Timeline
@@ -127,4 +129,5 @@
    :transform {:created_at  (serdes/date)
                :creator_id  (serdes/fk :model/User)
                :timeline_id (serdes/parent-ref)
-               :timestamp   (serdes/date)}})
+               :timestamp   (serdes/date)}
+   :defaults {:archived false}})

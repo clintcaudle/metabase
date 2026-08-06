@@ -2,6 +2,9 @@ import { useMemo } from "react";
 import { t } from "ttag";
 
 import { QueryColumnPicker } from "metabase/common/components/QueryColumnPicker";
+import { useLocale } from "metabase/common/hooks";
+import { useTranslateContent } from "metabase/content-translation/hooks";
+import { PLUGIN_CONTENT_TRANSLATION } from "metabase/plugins";
 import * as Lib from "metabase-lib";
 
 import type { NotebookStepProps } from "../../types";
@@ -17,6 +20,8 @@ export function BreakoutStep({
 }: NotebookStepProps) {
   const { question, stageIndex } = step;
   const isMetric = question.type() === "metric";
+  const tc = useTranslateContent();
+  const { locale } = useLocale();
 
   const breakouts = useMemo(
     () => Lib.breakouts(query, stageIndex),
@@ -24,16 +29,18 @@ export function BreakoutStep({
   );
 
   const metricColumns = useMemo(() => {
-    return isMetric
-      ? Lib.breakoutableColumns(query, stageIndex).filter(Lib.isDateOrDateTime)
-      : [];
+    return isMetric ? Lib.breakoutableColumns(query, stageIndex) : [];
   }, [query, stageIndex, isMetric]);
 
   const hasAddButton = !readOnly && (!isMetric || breakouts.length === 0);
   const isAddButtonDisabled = isMetric && metricColumns.length === 0;
 
   const renderBreakoutName = (clause: Lib.BreakoutClause) =>
-    Lib.displayInfo(query, stageIndex, clause).longDisplayName;
+    PLUGIN_CONTENT_TRANSLATION.translateColumnDisplayName({
+      displayName: Lib.displayInfo(query, stageIndex, clause).longDisplayName,
+      tc,
+      locale,
+    });
 
   const handleAddBreakout = (column: Lib.ColumnMetadata) => {
     const nextQuery = Lib.breakout(query, stageIndex, column);
@@ -71,7 +78,7 @@ export function BreakoutStep({
       items={breakouts}
       initialAddText={
         isAddButtonDisabled
-          ? t`No datetime columns available`
+          ? t`No columns available`
           : t`Pick a column to group by`
       }
       readOnly={readOnly}
@@ -80,18 +87,19 @@ export function BreakoutStep({
       hasAddButton={hasAddButton}
       isAddButtonDisabled={isAddButtonDisabled}
       renderName={renderBreakoutName}
-      renderPopover={({ item: breakout, index, onClose }) => (
-        <BreakoutPopover
-          query={query}
-          stageIndex={stageIndex}
-          breakout={breakout}
-          breakoutIndex={index}
-          isMetric={isMetric}
-          onAddBreakout={handleAddBreakout}
-          onUpdateBreakoutColumn={handleUpdateBreakoutColumn}
-          onClose={onClose}
-        />
-      )}
+      renderPopover={({ item: breakout, index, onClose }) =>
+        readOnly ? null : (
+          <BreakoutPopover
+            query={query}
+            stageIndex={stageIndex}
+            breakout={breakout}
+            breakoutIndex={index}
+            onAddBreakout={handleAddBreakout}
+            onUpdateBreakoutColumn={handleUpdateBreakoutColumn}
+            onClose={onClose}
+          />
+        )
+      }
       onReorder={handleReorderBreakout}
       onRemove={handleRemoveBreakout}
       data-testid="breakout-step"
@@ -105,7 +113,6 @@ interface BreakoutPopoverProps {
   stageIndex: number;
   breakout: Lib.BreakoutClause | undefined;
   breakoutIndex: number | undefined;
-  isMetric: boolean;
   onAddBreakout: (column: Lib.ColumnMetadata) => void;
   onUpdateBreakoutColumn: (
     breakout: Lib.BreakoutClause,
@@ -120,7 +127,6 @@ export const BreakoutPopover = ({
   stageIndex,
   breakout,
   breakoutIndex,
-  isMetric,
   onAddBreakout,
   onUpdateBreakoutColumn,
   onClose,
@@ -130,9 +136,7 @@ export const BreakoutPopover = ({
     const filteredColumns = columns.reduce(
       (columns: Lib.ColumnMetadata[], column) => {
         const columnInfo = Lib.displayInfo(query, stageIndex, column);
-        if (isMetric && !Lib.isDateOrDateTime(column)) {
-          return columns;
-        } else if (breakout && checkColumnSelected(columnInfo, breakoutIndex)) {
+        if (breakout && checkColumnSelected(columnInfo, breakoutIndex)) {
           const column = Lib.breakoutColumn(query, stageIndex, breakout);
           if (column != null) {
             columns.push(column);
@@ -145,7 +149,7 @@ export const BreakoutPopover = ({
       [],
     );
     return Lib.groupColumns(filteredColumns);
-  }, [query, stageIndex, breakout, breakoutIndex, isMetric]);
+  }, [query, stageIndex, breakout, breakoutIndex]);
 
   return (
     <QueryColumnPicker
@@ -156,7 +160,7 @@ export const BreakoutPopover = ({
       hasBinning
       hasTemporalBucketing
       withInfoIcons
-      color="summarize"
+      color="core-summarize"
       checkIsColumnSelected={(item) => checkColumnSelected(item, breakoutIndex)}
       onSelect={(column: Lib.ColumnMetadata) => {
         const isUpdate = breakout != null;

@@ -1,12 +1,16 @@
 import { t } from "ttag";
 
-import { isNotFalsy } from "metabase/lib/types";
+import { isNotFalsy } from "metabase/utils/types";
 import type Metadata from "metabase-lib/v1/metadata/Metadata";
 import type Schema from "metabase-lib/v1/metadata/Schema";
 import type Table from "metabase-lib/v1/metadata/Table";
 import type { Group } from "metabase-types/api";
 
-import type { DataRouteParams, GroupRouteParams } from "../../types";
+import type {
+  DataRouteParams,
+  GroupRouteParams,
+  PermissionEditorBreadcrumb,
+} from "../../types";
 import {
   getDatabaseEntityId,
   getSchemaEntityId,
@@ -17,17 +21,11 @@ import {
   getGroupFocusPermissionsUrl,
 } from "../../utils/urls";
 
-export type EditorBreadcrumb = {
-  id?: number | string;
-  text: string;
-  url?: string;
-};
-
 export const getDatabasesEditorBreadcrumbs = (
   params: GroupRouteParams,
   metadata: Metadata,
   group: Group,
-): EditorBreadcrumb[] | null => {
+): PermissionEditorBreadcrumb[] | null => {
   const { groupId, databaseId, schemaName } = params;
 
   if (groupId == null) {
@@ -59,6 +57,7 @@ export const getDatabasesEditorBreadcrumbs = (
     return [groupItem, databaseItem];
   }
 
+  // Unjustified type cast. FIXME
   const schema = database.schema(schemaName) as Schema;
   const schemaItem = {
     id: schema.name,
@@ -70,7 +69,7 @@ export const getDatabasesEditorBreadcrumbs = (
 export const getGroupsDataEditorBreadcrumbs = (
   params: DataRouteParams,
   metadata: Metadata,
-): EditorBreadcrumb[] | null => {
+): PermissionEditorBreadcrumb[] | null => {
   const { databaseId, schemaName, tableId } = params;
 
   if (databaseId == null) {
@@ -95,6 +94,7 @@ export const getGroupsDataEditorBreadcrumbs = (
     return [databaseItem];
   }
 
+  // Unjustified type cast. FIXME
   const schema = database.schema(schemaName) as Schema;
   const schemaItem = {
     id: schema.id,
@@ -108,6 +108,7 @@ export const getGroupsDataEditorBreadcrumbs = (
     return [databaseItem, hasMultipleSchemas && schemaItem].filter(isNotFalsy);
   }
 
+  // Unjustified type cast. FIXME
   const table = metadata.table(tableId) as Table;
 
   const tableItem = {

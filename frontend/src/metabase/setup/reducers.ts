@@ -1,12 +1,12 @@
 import { createReducer } from "@reduxjs/toolkit";
 
-import type { SetupState } from "metabase-types/store";
+import type { SetupState, SetupStep } from "metabase/redux/store";
 
 import {
   loadLocaleDefaults,
-  loadUserDefaults,
   selectStep,
   skipDatabase,
+  startAiConfig,
   submitDatabase,
   submitLicenseToken,
   submitUsageReason,
@@ -16,7 +16,6 @@ import {
   updateLocale,
   updateTracking,
 } from "./actions";
-import type { SetupStep } from "./types";
 
 const getUserFromQueryParams = () => {
   const params = new URLSearchParams(window.location.search);
@@ -46,16 +45,12 @@ const initialState: SetupState = {
   step: getInitialStep(),
   isLocaleLoaded: false,
   isTrackingAllowed: true,
+  isAiConfigRequested: false,
   user: getUserFromQueryParams(),
   isEmbeddingUseCase,
 };
 
 export const reducer = createReducer(initialState, (builder) => {
-  builder.addCase(loadUserDefaults.fulfilled, (state, { payload: user }) => {
-    if (user) {
-      state.user = user;
-    }
-  });
   builder.addCase(
     loadLocaleDefaults.fulfilled,
     (state, { payload: locale }) => {
@@ -66,11 +61,13 @@ export const reducer = createReducer(initialState, (builder) => {
   builder.addCase(selectStep, (state, { payload: step }) => {
     state.step = step;
   });
-  builder.addCase(updateLocale.pending, (state, { meta }) => {
-    state.locale = meta.arg;
+  builder.addCase(updateLocale.pending, (state) => {
     state.isLocaleLoaded = false;
   });
-  builder.addCase(updateLocale.fulfilled, (state) => {
+  builder.addCase(updateLocale.fulfilled, (state, { meta }) => {
+    // Note: locale needs to be set here to make sure that the locale has been loaded.
+    // Otherwise the components might reload before the locale is available.
+    state.locale = meta.arg;
     state.isLocaleLoaded = true;
   });
   builder.addCase(submitUser.fulfilled, (state, { meta }) => {
@@ -99,6 +96,9 @@ export const reducer = createReducer(initialState, (builder) => {
   builder.addCase(skipDatabase.pending, (state) => {
     state.database = undefined;
     state.invite = undefined;
+  });
+  builder.addCase(startAiConfig.pending, (state) => {
+    state.isAiConfigRequested = true;
   });
   builder.addCase(updateTracking.fulfilled, (state, { meta }) => {
     state.isTrackingAllowed = meta.arg;

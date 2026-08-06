@@ -1,8 +1,10 @@
+import { P, isMatching } from "ts-pattern";
+
 const { H } = cy;
 
 import { commandPaletteInput } from "../../../support/helpers/e2e-command-palette-helpers";
 
-H.describeWithSnowplow("scenarios > search > snowplow", () => {
+describe("scenarios > search > snowplow", () => {
   const NEW_SEARCH_QUERY_EVENT_NAME = "search_query";
   const SEARCH_CLICK = "search_click";
 
@@ -24,24 +26,40 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
       H.commandPaletteSearch("Orders", false);
 
       //Passing a function to ensure that runtime_milliseconds is populated as a number
-      H.expectUnstructuredSnowplowEvent((data) => {
-        if (!data) {
-          return false;
-        }
-        return (
-          data.event === NEW_SEARCH_QUERY_EVENT_NAME &&
-          data.context === "command-palette" &&
-          typeof data.runtime_milliseconds === "number"
-        );
-      });
+      H.expectUnstructuredSnowplowEvent((event) =>
+        isMatching(
+          {
+            event: NEW_SEARCH_QUERY_EVENT_NAME,
+            context: "command-palette",
+            runtime_milliseconds: P.number,
+            search_engine: P.string,
+            request_id: P.string,
+            offset: null,
+            search_term_hash: P.string,
+            search_term: null,
+          },
+          event,
+        ),
+      );
 
       H.commandPalette().findByRole("option", { name: "Orders Model" }).click();
       H.expectUnstructuredSnowplowEvent(
-        {
-          event: SEARCH_CLICK,
-          context: "command-palette",
-          position: 3,
-        },
+        (event) =>
+          isMatching(
+            {
+              event: SEARCH_CLICK,
+              target_type: "item",
+              context: "command-palette",
+              position: 3,
+              search_engine: P.string,
+              request_id: P.string,
+              entity_model: P.string,
+              entity_id: P.number,
+              search_term_hash: P.string,
+              search_term: null,
+            },
+            event,
+          ),
         1,
       );
     });
@@ -50,17 +68,26 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
       cy.visit("/");
       H.commandPaletteSearch("Orders", false);
 
-      //Passing a function to ensure that runtime_milliseconds is populated as a number
-      H.expectUnstructuredSnowplowEvent((data) => {
-        if (!data) {
-          return false;
-        }
-        return (
-          data.event === NEW_SEARCH_QUERY_EVENT_NAME &&
-          data.context === "command-palette" &&
-          typeof data.runtime_milliseconds === "number"
-        );
-      });
+      // Match the full event shape (notably a non-null search_term_hash) so this pins the user's "Orders"
+      // search specifically, and stays a count-of-1 even as more search surfaces start emitting events.
+      // Passing a function also asserts runtime_milliseconds is a number.
+      H.expectUnstructuredSnowplowEvent((event) =>
+        isMatching(
+          {
+            event: NEW_SEARCH_QUERY_EVENT_NAME,
+            context: "command-palette",
+            runtime_milliseconds: P.number,
+            search_engine: P.string,
+            request_id: P.string,
+            offset: null,
+            search_term_hash: P.string,
+            // The raw term is redacted to null on every instance except Metabase's own stats instance
+            // (shouldReportSearchTerm); the salted search_term_hash above is what identifies the query.
+            search_term: null,
+          },
+          event,
+        ),
+      );
 
       // FIX ME: We need to slow cypress down before we start inputting keyboard events.
       // Not clear why though :/.
@@ -96,7 +123,7 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
       });
 
       H.entityPickerModal()
-        .findByRole("button", { name: /Second/ })
+        .findByRole("link", { name: /Second collection/ })
         .click();
 
       H.expectUnstructuredSnowplowEvent({
@@ -143,11 +170,23 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
           context: "search-app",
         });
 
-        cy.findByRole("heading", { name: "Orders in a dashboard" }).click();
-        H.expectUnstructuredSnowplowEvent({
-          event: SEARCH_CLICK,
-          context: "search-app",
-          position: 0,
+        // The result's rank depends on ranking weights, so derive its position from the DOM order
+        // rather than pinning a specific index.
+        cy.findAllByTestId("search-result-item").then(($items) => {
+          const position = $items
+            .toArray()
+            .findIndex((el) =>
+              el.textContent?.includes("Orders in a dashboard"),
+            );
+          expect(position, "Orders in a dashboard is in the results").to.be.gte(
+            0,
+          );
+          cy.wrap($items.eq(position)).click();
+          H.expectUnstructuredSnowplowEvent({
+            event: SEARCH_CLICK,
+            context: "search-app",
+            position,
+          });
         });
       });
     });
@@ -458,7 +497,7 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
 
     describe("verified filter", () => {
       beforeEach(() => {
-        H.setTokenFeatures("all");
+        H.activateToken("pro-self-hosted");
       });
 
       it("should send a snowplow event when a search filter is used in the URL", () => {
@@ -483,7 +522,7 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
         });
 
         cy.findByTestId("verified-search-filter")
-          .findByText("Verified items only")
+          .findByLabelText("Verified items only")
           .click();
 
         H.expectUnstructuredSnowplowEvent({
@@ -505,7 +544,7 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
         });
 
         cy.findByTestId("verified-search-filter")
-          .findByText("Verified items only")
+          .findByLabelText("Verified items only")
           .click();
 
         H.expectUnstructuredSnowplowEvent({
@@ -540,7 +579,7 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
         });
 
         cy.findByTestId("search_native_query-search-filter")
-          .findByText("Search the contents of native queries")
+          .findByLabelText("Search the contents of native queries")
           .click();
 
         H.expectUnstructuredSnowplowEvent({
@@ -562,7 +601,7 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
         });
 
         cy.findByTestId("search_native_query-search-filter")
-          .findByText("Search the contents of native queries")
+          .findByLabelText("Search the contents of native queries")
           .click();
 
         H.expectUnstructuredSnowplowEvent({
@@ -597,7 +636,7 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
         });
 
         cy.findByTestId("archived-search-filter")
-          .findByText("Search items in trash")
+          .findByLabelText("Search items in trash")
           .click();
 
         H.expectUnstructuredSnowplowEvent({
@@ -619,7 +658,7 @@ H.describeWithSnowplow("scenarios > search > snowplow", () => {
         });
 
         cy.findByTestId("archived-search-filter")
-          .findByText("Search items in trash")
+          .findByLabelText("Search items in trash")
           .click();
 
         H.expectUnstructuredSnowplowEvent({

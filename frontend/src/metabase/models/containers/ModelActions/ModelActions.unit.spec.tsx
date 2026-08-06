@@ -1,11 +1,11 @@
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
-import { IndexRedirect, Route } from "react-router";
 
 import { createMockMetadata } from "__support__/metadata";
 import {
   setupCardQueryMetadataEndpoint,
   setupCardsEndpoints,
+  setupCardsUsingModelEndpoint,
   setupCollectionsEndpoints,
   setupDatabasesEndpoints,
   setupModelActionsEndpoints,
@@ -18,11 +18,15 @@ import {
   within,
 } from "__support__/ui";
 import ActionCreator from "metabase/actions/containers/ActionCreatorModal";
-import Models from "metabase/entities/questions";
-import { ModalRoute } from "metabase/hoc/ModalRoute";
-import { checkNotNull } from "metabase/lib/types";
+import { modalRoute } from "metabase/common/components/ModalRoute";
+import {
+  createMockSettingsState,
+  createMockState,
+} from "metabase/redux/store/mocks";
+import { Route, redirect } from "metabase/router";
+import * as Urls from "metabase/urls";
+import { checkNotNull } from "metabase/utils/types";
 import { TYPE } from "metabase-lib/v1/types/constants";
-import * as ML_Urls from "metabase-lib/v1/urls";
 import type {
   Card,
   Collection,
@@ -49,10 +53,6 @@ import {
   createStructuredModelCard as _createStructuredModelCard,
   createSavedStructuredCard,
 } from "metabase-types/api/mocks/presets";
-import {
-  createMockSettingsState,
-  createMockState,
-} from "metabase-types/store/mocks";
 
 import ModelActions from "./ModelActions";
 
@@ -196,18 +196,8 @@ async function setup({
     checkNotNull(metadata.question(q.id)),
   );
 
-  const modelUpdateSpy = jest.spyOn(Models.actions, "update");
-
   setupDatabasesEndpoints(databases);
-
-  fetchMock.get(
-    {
-      url: "path:/api/card",
-      query: { f: "using_model", model_id: card.id },
-    },
-    usedBy,
-  );
-
+  setupCardsUsingModelEndpoint(card, usedBy);
   setupCardsEndpoints([card]);
   setupCardQueryMetadataEndpoint(
     card,
@@ -217,7 +207,7 @@ async function setup({
         createMockTable({
           id: `card__${card.id}`,
           name: card.name,
-          fields: card.result_metadata,
+          fields: card.result_metadata ?? [],
         }),
       ],
     }),
@@ -229,31 +219,27 @@ async function setup({
   const slug = `${model.id()}-${name}`;
   const baseUrl = `/model/${slug}/detail`;
 
-  const { history } = renderWithProviders(
+  const { router } = renderWithProviders(
     <>
       <Route path="/model/:slug/detail">
-        <IndexRedirect to="actions" />
-        <Route path="actions" component={ModelActions}>
-          <ModalRoute
-            path="new"
-            modal={ActionCreator}
-            modalProps={{ enableTransition: false }}
-          />
-          <ModalRoute
-            path=":actionId"
-            modal={ActionCreator}
-            modalProps={{ enableTransition: false }}
-          />
+        <Route index element={redirect("actions")} />
+        <Route path="actions" element={<ModelActions />}>
+          {modalRoute("new", ActionCreator, {
+            modalProps: { transitionProps: { duration: 0 } },
+          })}
+          {modalRoute(":actionId", ActionCreator, {
+            modalProps: { transitionProps: { duration: 0 } },
+          })}
         </Route>
       </Route>
-      <Route path="/question/:slug" component={() => null} />
+      <Route path="/question/:slug" element={null} />
     </>,
     { withRouter: true, initialRoute: baseUrl, storeInitialState },
   );
 
   await waitForLoaderToBeRemoved();
 
-  return { model, history, baseUrl, metadata, usedByQuestions, modelUpdateSpy };
+  return { model, router, baseUrl, metadata, usedByQuestions };
 }
 
 async function setupActions({
@@ -270,6 +256,13 @@ async function openActionMenu(action: WritebackAction) {
   const listItem = screen.getByRole("listitem", { name: action.name });
   const menuButton = within(listItem).getByLabelText("ellipsis icon");
   await userEvent.click(menuButton);
+}
+
+async function openHeaderActionsMenu() {
+  const header = screen.getByTestId("model-actions-header");
+  await userEvent.click(
+    within(header).getByRole("button", { name: "Actions" }),
+  );
 }
 
 describe("ModelActions", () => {
@@ -438,11 +431,16 @@ describe("ModelActions", () => {
         );
 
         expect(
-          fetchMock.calls(`path:/api/action/${action.id}`, { method: "PUT" }),
+          fetchMock.callHistory.calls(`path:/api/action/${action.id}`, {
+            method: "PUT",
+          }),
         ).toHaveLength(1);
-        const call = fetchMock.lastCall(`path:/api/action/${action.id}`, {
-          method: "PUT",
-        });
+        const call = fetchMock.callHistory.lastCall(
+          `path:/api/action/${action.id}`,
+          {
+            method: "PUT",
+          },
+        );
         expect(await call?.request?.json()).toEqual({
           id: action.id,
           archived: true,
@@ -466,13 +464,13 @@ describe("ModelActions", () => {
         const actions = createMockImplicitCUDActions(model.id);
         await setupActions({ model, actions });
 
-        await userEvent.click(screen.getByLabelText("Actions menu"));
+        await openHeaderActionsMenu();
         await userEvent.click(await screen.findByText("Disable basic actions"));
         await userEvent.click(screen.getByRole("button", { name: "Disable" }));
 
         for (const action of actions) {
           expect(
-            fetchMock.called(`path:/api/action/${action.id}`, {
+            fetchMock.callHistory.called(`path:/api/action/${action.id}`, {
               method: "DELETE",
             }),
           ).toBe(true);
@@ -580,15 +578,22 @@ describe("ModelActions", () => {
     it("allows to create implicit actions", async () => {
       const action = createMockQueryAction({ model_id: modelCard.id });
       await setupActions({ model: modelCard, actions: [action] });
-      fetchMock.post("path:/api/action", {}, { overwriteRoutes: true });
+      fetchMock.modifyRoute("action-post", { response: {} });
 
-      await userEvent.click(screen.getByLabelText("Actions menu"));
+      await openHeaderActionsMenu();
       await userEvent.click(await screen.findByText("Create basic actions"));
 
-      const createActionCalls = fetchMock.calls("path:/api/action", {
-        method: "POST",
+      await waitFor(() => {
+        expect(
+          fetchMock.callHistory.calls("path:/api/action", { method: "POST" }),
+        ).toHaveLength(3);
       });
-      expect(createActionCalls).toHaveLength(3);
+      const createActionCalls = fetchMock.callHistory.calls(
+        "path:/api/action",
+        {
+          method: "POST",
+        },
+      );
 
       expect(await createActionCalls[0].request?.json()).toEqual({
         name: "Delete",
@@ -612,16 +617,24 @@ describe("ModelActions", () => {
 
     it("allows to create implicit actions from the empty state", async () => {
       await setupActions({ model: modelCard, actions: [] });
-      fetchMock.post("path:/api/action", {}, { overwriteRoutes: true });
+      fetchMock.modifyRoute("action-post", { response: {} });
 
       await userEvent.click(
         screen.getByRole("button", { name: /Create basic action/i }),
       );
 
-      const createActionCalls = fetchMock.calls("path:/api/action", {
-        method: "POST",
+      await waitFor(() => {
+        expect(
+          fetchMock.callHistory.calls("path:/api/action", { method: "POST" }),
+        ).toHaveLength(3);
       });
-      expect(createActionCalls).toHaveLength(3);
+
+      const createActionCalls = fetchMock.callHistory.calls(
+        "path:/api/action",
+        {
+          method: "POST",
+        },
+      );
 
       expect(await createActionCalls[0].request?.json()).toEqual({
         name: "Delete",
@@ -649,7 +662,7 @@ describe("ModelActions", () => {
         actions: createMockImplicitCUDActions(modelCard.id),
       });
 
-      await userEvent.click(screen.getByLabelText("Actions menu"));
+      await openHeaderActionsMenu();
 
       expect(
         screen.queryByText(/Create basic action/i),
@@ -659,7 +672,7 @@ describe("ModelActions", () => {
     it("doesn't allow to disable implicit actions if they don't exist", async () => {
       await setupActions({ model: modelCard, actions: [] });
 
-      await userEvent.click(screen.getByLabelText("Actions menu"));
+      await openHeaderActionsMenu();
 
       expect(
         screen.queryByText("Disable basic actions"),
@@ -682,19 +695,18 @@ describe("ModelActions", () => {
 
   describe("navigation", () => {
     it("redirects to query builder when trying to open a question", async () => {
-      const { model: question, history } = await setup({
+      const { model: question, router } = await setup({
         model: createSavedStructuredCard(),
       });
 
-      expect(history?.getCurrentLocation().pathname).toBe(
-        ML_Urls.getUrl(question),
-      );
+      expect(router?.location.pathname).toBe(Urls.question(question));
     });
 
     it("shows 404 when opening an archived model", async () => {
       const { model } = await setup({
         model: createStructuredModelCard({ archived: true }),
       });
+      // Unjustified type cast. FIXME
       const modelName = model.displayName() as string;
 
       expect(screen.queryByText(modelName)).not.toBeInTheDocument();

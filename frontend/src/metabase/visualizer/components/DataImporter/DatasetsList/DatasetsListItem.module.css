@@ -9,12 +9,18 @@
   display: none;
 }
 
+.WarningIcon {
+  position: absolute;
+  top: 13px;
+  left: 19px;
+}
+
 .RemoveButton {
   display: none;
 }
 
 .DatasetsListItem:hover {
-  color: var(--mb-color-brand);
+  color: var(--mb-color-core-brand);
 
   .InfoIcon {
     display: unset;
@@ -29,14 +35,14 @@
   }
 
   .AddButton[data-variant="inverse"] {
-    --button-color: var(--mb-color-brand);
+    --button-color: var(--mb-color-core-brand);
   }
 }
 
 .DatasetsListItemSelected,
 .DatasetsListItemSelected:hover {
-  color: var(--mb-color-text-white);
-  background-color: var(--mb-color-brand);
+  color: var(--mb-color-text-primary-inverse);
+  background-color: var(--mb-color-core-brand);
 }
 
 .DatasetsListItemActions {
@@ -47,5 +53,5 @@
 }
 
 .AddButton[data-variant="inverse"] {
-  --button-color: var(--mb-color-text-light);
+  --button-color: var(--mb-color-text-disabled);
 }

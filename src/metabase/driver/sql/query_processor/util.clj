@@ -1,5 +1,7 @@
 (ns metabase.driver.sql.query-processor.util
   (:require
+   [metabase.driver-api.core :as driver-api]
+   [metabase.lib.core :as lib]
    [metabase.util.honey-sql-2 :as h2x]))
 
 (defn nfc-field->parent-identifier
@@ -20,3 +22,12 @@
                               (pop)
                               (conj (first nfc-path)))]
     (apply h2x/identifier (cons :field parent-components))))
+
+(defn field-with-tz?
+  "Given a clause, possibly a `:field` ref, return true iff its type is known to have timezone information."
+  [arg]
+  (if-let [opts (and (driver-api/is-clause? :field arg) (lib/options arg))]
+    (when-let [type ((some-fn :effective-type :base-type) opts)]
+      (or (isa? type :type/DateTimeWithTZ)
+          (isa? type :type/TimeWithTZ)))
+    false))

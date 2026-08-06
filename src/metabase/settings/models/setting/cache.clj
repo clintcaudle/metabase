@@ -3,7 +3,7 @@
   lookup."
   (:require
    [clojure.core :as core]
-   [clojure.java.jdbc :as jdbc]
+   [clojure.string :as str]
    [metabase.app-db.core :as mdb]
    [metabase.util :as u]
    [metabase.util.honey-sql-2 :as h2x]
@@ -60,7 +60,7 @@
 ;; locally cached value is older than the one in the DB, we will flush our cache. When the cache is fetched again, it
 ;; will have the up-to-date value.
 ;;
-;; Because different machines can have out-of-sync clocks, we'll rely entirely on the application DB for caclulating
+;; Because different machines can have out-of-sync clocks, we'll rely entirely on the application DB for calculating
 ;; and comparing values of `settings-last-updated`. Because the Setting table itself only stores text values, we'll
 ;; need to cast it between TEXT and TIMESTAMP SQL types as needed.
 
@@ -85,12 +85,19 @@
           ;; Use `simple-insert!` because we do *not* want to trigger pre-insert behavior, such as encrypting `:value`
           (t2/insert! (t2/table-name (t2/resolve-model :model/Setting)) :key settings-last-updated-key, :value current-timestamp-as-string-honeysql)
           (catch java.sql.SQLException e
-            ;; go ahead and log the Exception anyway on the off chance that it *wasn't* just a race condition issue
+            ;; go ahead and log the whole SQLException message chain anyway on the off chance that it *wasn't* just a
+            ;; race condition issue
             (log/errorf "Error updating Settings last updated value: %s"
-                        (with-out-str (jdbc/print-sql-exception-chain e)))))))
+                        (str/join "; " (keep ex-message (take-while some? (iterate #(.getNextException ^java.sql.SQLException %) e)))))))))
   ;; Now that we updated the value in the DB, go ahead and update our cached value as well, because we know about the
   ;; changes
   (swap! (cache*) assoc settings-last-updated-key (t2/select-one-fn :value :model/Setting :key settings-last-updated-key)))
+
+(defn cache-last-updated-at
+  "Fetch the value of `settings-last-updated`, indicating the timestamp of the settings cache. Possibly null."
+  []
+  (let [current-cache (cache)]
+    (core/get current-cache settings-last-updated-key)))
 
 (defn- cache-out-of-date?
   "Check whether our Settings cache is out of date. We know the cache is out of date if either of the following
@@ -105,12 +112,12 @@
   (let [current-cache (cache)]
     (boolean
      (or
-        ;; is the cache empty?
+      ;; is the cache empty?
       (not current-cache)
-        ;; if not, get the cached value of `settings-last-updated`, and if it exists...
-      (when-let [last-known-update (core/get current-cache settings-last-updated-key)]
-          ;; compare it to the value in the DB. This is done be seeing whether a row exists
-          ;; WHERE value > <local-value>
+      ;; if not, get the cached value of `settings-last-updated`, and if it exists...
+      (when-let [last-known-update (cache-last-updated-at)]
+        ;; compare it to the value in the DB. This is done be seeing whether a row exists
+        ;; WHERE value > <local-value>
         (u/prog1 (t2/select-one-fn :value :model/Setting
                                    {:where [:and
                                             [:= :key settings-last-updated-key]

@@ -1,4 +1,6 @@
-(ns metabase.app-db.query-cancelation)
+(ns metabase.app-db.query-cancelation
+  (:require
+   [metabase.app-db.h2 :as mdb.h2]))
 
 (set! *warn-on-reflection* true)
 
@@ -9,7 +11,7 @@
 
 (defmethod query-canceled-exception?* :h2
   [_db-type ^java.sql.SQLException e]
-  (= (.getErrorCode e) org.h2.api.ErrorCode/STATEMENT_WAS_CANCELED))
+  (= (.getErrorCode e) mdb.h2/statement-was-canceled-error-code))
 
 (defn- sql-state
   [^java.sql.SQLException e]
@@ -37,7 +39,7 @@
 ;;; https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
 ;;;
 ;;; MySQL can return 1317 and 3024, but 1969 is not an error code in the mysql reference. All of these codes make sense
-;;; for MariaDB to return. Hibernate expects 3024, but in testing 1969 was observered.
+;;; for MariaDB to return. Hibernate expects 3024, but in testing 1969 was observed.
 (defmethod query-canceled-exception?* :mysql
   [_db-type ^java.sql.SQLException e]
   ;; apparently there is no enum in the MariaDB JDBC driver for different error codes >:(

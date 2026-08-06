@@ -19,7 +19,7 @@ const userOptions = {
   ...process.env,
 } as const;
 
-printBold(`Running Cypress Sample App Tests with options:
+printBold(`Setting up the Sample App environment with options:
   - EMBEDDING_SDK_VERSION      : ${userOptions.EMBEDDING_SDK_VERSION}
   - SAMPLE_APP_BRANCH_NAME     : ${userOptions.SAMPLE_APP_BRANCH_NAME}
 `);
@@ -28,6 +28,7 @@ export async function startSampleAppContainers(
   testSuite: SampleAppTestSuiteName,
 ) {
   const embeddingSdkVersion =
+    // Unjustified type cast. FIXME
     userOptions.EMBEDDING_SDK_VERSION as EmbeddingSdkVersion;
   const setupConfig = SAMPLE_APP_SETUP_CONFIGS[testSuite];
 
@@ -39,6 +40,7 @@ export async function startSampleAppContainers(
     "docker-env-example-path": dockerEnvExamplePath,
     "docker-env-path": dockerEnvPath,
     env,
+    healthcheckPorts,
   } = setupConfig;
   const branch = userOptions.SAMPLE_APP_BRANCH_NAME || defaultBranch;
 
@@ -70,8 +72,10 @@ export async function startSampleAppContainers(
     await startContainers({
       cwd: rootPath,
       env,
+      appName,
       dockerUpCommand,
       dockerDownCommand,
+      healthcheckPorts,
     });
 
     printBold(`All done! The ${appName} sample app is now running.`);

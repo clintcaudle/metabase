@@ -13,10 +13,10 @@ import {
   waitForLoaderToBeRemoved,
   within,
 } from "__support__/ui";
-import { Route } from "metabase/hoc/Title";
-import { checkNotNull } from "metabase/lib/types";
-import SearchApp from "metabase/search/containers/SearchApp";
-import type { SearchFilters } from "metabase/search/types";
+import type { SearchFilters } from "metabase/common/search/types";
+import { Route } from "metabase/router";
+import { SearchApp } from "metabase/search/containers/SearchApp";
+import { checkNotNull } from "metabase/utils/types";
 import type { EnabledSearchModel, SearchResult } from "metabase-types/api";
 import {
   createMockCollection,
@@ -38,9 +38,13 @@ const TYPE_FILTER_LABELS: Record<EnabledSearchModel, string> = {
   dataset: "Model",
   table: "Table",
   card: "Question",
+  measure: "Measure",
   metric: "Metric",
   action: "Action",
   "indexed-entity": "Indexed record",
+  document: "Document",
+  exploration: "Research",
+  transform: "Transform",
 };
 
 const TEST_ITEMS: Partial<SearchResult>[] = [
@@ -86,13 +90,14 @@ const setup = async ({
   };
 
   const searchParams = new URLSearchParams(
+    // Unjustified type cast. FIXME
     params as unknown as Record<string, string>,
   ).toString();
 
   const initialRoute = searchParams ? `/search?${searchParams}` : `/search`;
 
-  const { history } = renderWithProviders(
-    <Route path="search" component={SearchApp} />,
+  const { router } = renderWithProviders(
+    <Route path="search" element={<SearchApp />} />,
     {
       withRouter: true,
       initialRoute,
@@ -102,7 +107,7 @@ const setup = async ({
   await waitForLoaderToBeRemoved();
 
   return {
-    history: checkNotNull(history),
+    router: checkNotNull(router),
   };
 };
 
@@ -166,7 +171,7 @@ describe("SearchApp", () => {
     it.each(TEST_SEARCH_RESULTS)(
       "should reload with filtered searches when type=$model is changed in the dropdown sidebar filter",
       async ({ model }) => {
-        const { history } = await setup({
+        const { router } = await setup({
           searchText: "Test",
         });
 
@@ -181,15 +186,17 @@ describe("SearchApp", () => {
         const popover = within(screen.getByTestId("popover"));
         await userEvent.click(
           popover.getByRole("checkbox", {
+            // Unjustified type cast. FIXME
             name: TYPE_FILTER_LABELS[
+              // Unjustified type cast. FIXME
               model as EnabledSearchModel
             ] as EnabledSearchModel,
           }),
         );
         await userEvent.click(popover.getByRole("button", { name: "Apply" }));
 
-        const url = history.getCurrentLocation();
-        expect(url.query.type).toEqual(model);
+        const url = router.location;
+        expect(new URLSearchParams(url.search).get("type")).toEqual(model);
       },
     );
   });
@@ -202,6 +209,7 @@ describe("SearchApp", () => {
       async ({ name, model }) => {
         await setup({
           searchText: name,
+          // Unjustified type cast. FIXME
           searchFilters: { type: [model as EnabledSearchModel] },
         });
 
@@ -215,6 +223,7 @@ describe("SearchApp", () => {
         const fieldSetContent = typeFilter.getByTestId("field-set-content");
 
         expect(fieldSetContent).toHaveTextContent(
+          // Unjustified type cast. FIXME
           TYPE_FILTER_LABELS[model as EnabledSearchModel],
         );
       },

@@ -30,9 +30,17 @@
                              (tru "There was an error uploading the file"))}})
     (finally (io/delete-file file :silently))))
 
+;; TODO (Cam 2025-11-25) please add a response schema to this API endpoint, it makes it easier for our customers to
+;; use our API + we will need it when we make auto-TypeScript-signature generation happen
+;;
+#_{:clj-kondo/ignore [:metabase/validate-defendpoint-has-response-schema]}
 (api.macros/defendpoint :post "/csv"
-  "Create a table and model populated with the values from the attached CSV. Returns the model ID if successful."
-  {:multipart true}
+  "Create a table and model populated with the values from the attached CSV.
+  Returns the model ID if successful.
+
+  The file may be at most 50 MB; larger uploads are rejected with a 413 response."
+  {:multipart {:max-file-size  upload/max-upload-size-bytes
+               :max-file-count upload/max-upload-part-count}}
   ;; TODO -- not clear collection_id and file are supposed to come from `:multipart-params`
   [_route-params
    _query-params
@@ -40,7 +48,7 @@
    {{collection-id "collection_id", file "file"} :multipart-params, :as _request}
    :- [:map
        [:multipart-params
-        [:map
+        [:map {:closed true}
          ["collection_id" [:maybe
                            {:decode/api (fn [collection-id]
                                           (when-not (= collection-id "root")

@@ -4,7 +4,6 @@
   (:require
    [metabase.driver :as driver]
    [metabase.driver.ddl.interface :as ddl.i]
-   [metabase.driver.sql.util :as sql.u]
    [metabase.driver.util :as driver.u]
    [metabase.lib.schema.id :as lib.schema.id]
    [metabase.lib.schema.metadata :as lib.schema.metadata]
@@ -28,19 +27,21 @@
           (model-persistence/metadata->definition (:result-metadata card)
                                                   (:table-name persisted-info)))))
 
-(mu/defn persisted-info-native-query
+(mu/defn persisted-info-native-query :- string?
   "Returns a native query that selects from the persisted cached table from `persisted-info`. Does not check if
   persistence is appropriate. Use [[can-substitute?]] for that check."
   [database-id                              :- ::lib.schema.id/database
    {:keys [table-name] :as _persisted-info} :- ::lib.schema.metadata/persisted-info]
-  (let [driver (or driver/*driver* (driver.u/database->driver database-id))]
+  (let [driver (or driver/*driver* (driver.u/database->driver database-id))
+        ;; We should not be using specific driver implementations
+        quote-name (requiring-resolve 'metabase.driver.sql.util/quote-name)]
     ;; select * because we don't actually know the name of the fields when in the actual query. See #28902
     (format "select * from %s.%s"
-            (sql.u/quote-name
+            (quote-name
              driver
              :table
              (ddl.i/schema-name {:id database-id} (system/site-uuid)))
-            (sql.u/quote-name
+            (quote-name
              driver
              :table
              table-name))))

@@ -32,15 +32,12 @@
                     entry))
                 (logger/messages))
           "In memory ring buffer did not receive log message")))
-
   (testing "set isAdditive = false if parent logger is root to prevent logging to console (#26468)"
     (testing "make sure it's true to starts with"
       (is (.isAdditive (logger 'metabase))))
-
     (testing "set to false if parent logger is root"
       (mt/with-log-level :warn
         (is (not (.isAdditive (logger 'metabase))))))
-
     (testing "still true if the parent logger is not root"
       (mt/with-log-level [metabase.logger.core :warn]
         (is (.isAdditive (logger 'metabase.logger.core)))))))
@@ -66,7 +63,7 @@
       (let [f (io/file filename)]
         (with-open [_ (logger/for-ns f 'metabase.logger.core-test {:additive false})]
           (log/info "just a test"))
-        (is (=? [#".*just a test$"]
+        (is (=? [#".*just a test.+"]
                 (line-seq (io/reader f))))))))
 
 (deftest fork-logs-test-2
@@ -76,7 +73,7 @@
         (log/info "just a test"))
       (log/info "this line is not going into our stream")
       (testing "We catched the line we needed and did not catch the other one"
-        (is (=? [#".*just a test$"]
+        (is (=? [#".*just a test.+"]
                 (line-seq (io/reader (.toByteArray baos)))))))))
 
 (deftest fork-logs-test-3
@@ -90,12 +87,11 @@
           (log/log 'metabase.unknown :info nil "separate test")
           (testing "Check that `for-ns` will skip non-specified namespaces"
             (log/log 'metabase.unknown2 :info nil "this one going into standard log")))
-        (is (=? [#".*just a test$"
-                 #".*separate test$"]
+        (is (=? [#".*just a test.+"
+                 #".*separate test.+"]
                 (line-seq (io/reader f))))))))
 
 (deftest level-enabled?-test
-  #_{:clj-kondo/ignore [:equals-true]}
   (are [set-level check-level expected-value] (= expected-value
                                                  (mt/with-log-level [metabase.logger.core-test set-level]
                                                    (logger/level-enabled? 'metabase.logger.core-test check-level)))

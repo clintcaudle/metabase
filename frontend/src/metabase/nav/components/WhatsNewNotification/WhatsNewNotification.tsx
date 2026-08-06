@@ -1,22 +1,22 @@
 import { useCallback, useMemo } from "react";
 import { t } from "ttag";
 
-import { updateSetting } from "metabase/admin/settings/settings";
-import { useGetVersionInfoQuery } from "metabase/api";
-import { useSetting } from "metabase/common/hooks";
-import { color } from "metabase/lib/colors";
-import { useDispatch, useSelector } from "metabase/lib/redux";
-import { getIsEmbeddingIframe } from "metabase/selectors/embed";
+import { NavbarPromoCard } from "metabase/nav/components/NavbarPromoCard";
+import { useSelector } from "metabase/redux";
 import { getIsWhiteLabeling } from "metabase/selectors/whitelabel";
-import { Anchor, Flex, Icon, Paper, Stack, Text } from "metabase/ui";
+import {
+  useGetVersionInfoQuery,
+  useSetting,
+  useUpdateSettingMutation,
+} from "metabase/settings";
+import { isWithinIframe } from "metabase/utils/iframe";
 
-import { DismissIconButtonWrapper } from "./WhatsNewNotification.styled";
 import Sparkles from "./sparkles.svg?component";
 import { getLatestEligibleReleaseNotes } from "./utils";
 
 export function WhatsNewNotification() {
-  const dispatch = useDispatch();
-  const isEmbeddingIframe = useSelector(getIsEmbeddingIframe);
+  const [updateSetting] = useUpdateSettingMutation();
+  const isEmbeddingIframe = isWithinIframe();
   const { data: versionInfo } = useGetVersionInfoQuery();
   const currentVersion = useSetting("version");
   const lastAcknowledgedVersion = useSetting("last-acknowledged-version");
@@ -40,42 +40,26 @@ export function WhatsNewNotification() {
     isWhiteLabeling,
   ]);
 
-  const dimiss = useCallback(() => {
-    dispatch(
-      updateSetting({
-        key: "last-acknowledged-version",
-        value: currentVersion.tag,
-      }),
-    );
-  }, [currentVersion.tag, dispatch]);
+  const dismiss = useCallback(() => {
+    updateSetting({
+      key: "last-acknowledged-version",
+      value: currentVersion.tag,
+    });
+  }, [currentVersion.tag, updateSetting]);
 
   if (!url) {
     return null;
   }
+
   return (
-    <Paper my="lg" mx="auto" p="md" shadow="md" withBorder w={244}>
-      <Stack gap="sm">
-        <Flex justify="space-between">
-          <Sparkles color={color("brand")} />
-          <DismissIconButtonWrapper onClick={dimiss}>
-            <Icon name="close" />
-          </DismissIconButtonWrapper>
-        </Flex>
-
-        {/* eslint-disable-next-line no-literal-metabase-strings -- This only shows for admins */}
-        <Text fw="bold" size="sm">{t`Metabase has been updated`}</Text>
-
-        <Anchor
-          size="sm"
-          fw="bold"
-          component="a"
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {t`See what's new`}
-        </Anchor>
-      </Stack>
-    </Paper>
+    <NavbarPromoCard
+      icon={<Sparkles />}
+      // eslint-disable-next-line metabase/no-literal-metabase-strings -- This only shows for admins
+      title={t`Metabase has been updated`}
+      linkText={t`See what's new`}
+      linkHref={url}
+      external
+      onDismiss={dismiss}
+    />
   );
 }

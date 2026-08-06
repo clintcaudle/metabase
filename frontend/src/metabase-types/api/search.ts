@@ -1,10 +1,17 @@
 import type { UserId } from "metabase-types/api/user";
 
 import type { CardId } from "./card";
-import type { Collection, CollectionId, LastEditInfo } from "./collection";
+import type {
+  Collection,
+  CollectionId,
+  CollectionNamespace,
+  LastEditInfo,
+} from "./collection";
 import type { Dashboard, DashboardId } from "./dashboard";
 import type { DatabaseId, InitialSyncStatus } from "./database";
+import type { ExplorationId } from "./exploration";
 import type { Field } from "./field";
+import type { MeasureId } from "./measure";
 import type { ModerationReviewStatus } from "./moderation";
 import type { PaginationRequest, PaginationResponse } from "./pagination";
 import type { FieldReference } from "./query";
@@ -17,10 +24,14 @@ const ENABLED_SEARCH_MODELS = [
   "card",
   "dataset",
   "metric",
+  "measure",
   "database",
   "table",
   "action",
   "indexed-entity",
+  "document",
+  "exploration",
+  "transform",
 ] as const;
 
 export const SEARCH_MODELS = [...ENABLED_SEARCH_MODELS, "segment"] as const;
@@ -47,11 +58,12 @@ export type SearchResponse<
   models: Model[] | null;
   available_models: SearchModel[];
   table_db_id: DatabaseId | null;
+  engine: string;
 } & PaginationResponse;
 
 export type CollectionEssentials = Pick<
   Collection,
-  "id" | "name" | "authority_level" | "type"
+  "id" | "name" | "authority_level" | "type" | "archived"
 > &
   Partial<Pick<Collection, "effective_ancestors">>;
 
@@ -60,7 +72,9 @@ export type SearchResultId =
   | CardId
   | DatabaseId
   | TableId
-  | DashboardId;
+  | DashboardId
+  | MeasureId
+  | ExplorationId;
 
 export interface SearchResult<
   Id extends SearchResultId = SearchResultId,
@@ -73,6 +87,7 @@ export interface SearchResult<
   archived: boolean | null;
   collection_position: number | null;
   collection: CollectionEssentials;
+  collection_type?: Collection["type"];
   table_id: TableId;
   bookmark: boolean | null;
   dashboard:
@@ -87,12 +102,13 @@ export interface SearchResult<
   table_schema: string | null;
   collection_authority_level: "official" | null;
   updated_at: string;
-  moderated_status: string | null;
+  moderated_status: ModerationReviewStatus | null;
   model_id: CardId | null;
   model_name: string | null;
   model_index_id: number | null;
   table_description: string | null;
   table_name: string | null;
+  table_display_name: string | null;
   initial_sync_status: InitialSyncStatus | null;
   dashboard_count: number | null;
   context: any; // this might be a dead property
@@ -106,13 +122,30 @@ export interface SearchResult<
   based_on_upload?: TableId | null;
   "last-edit-info"?: LastEditInfo;
   result_metadata?: Field[];
+  collection_id?: CollectionId;
 }
 
+/**
+ * Model retrieved through the search endpoint
+ */
+export type ModelResult = SearchResult<number, "dataset">;
+
+// The frontend surface that issued a search request; the backend uses it to pick ranking weights and
+// filter defaults. Keep in sync with `metabase.search.config/ui-contexts`.
 export type SearchContext =
-  | "search-bar"
-  | "search-app"
+  | "basic-actions"
+  | "browse"
   | "command-palette"
-  | "entity-picker";
+  | "data-picker"
+  | "dependencies"
+  | "document"
+  | "embedding-setup"
+  | "entity-picker"
+  | "library"
+  | "model-migration"
+  | "search-app"
+  | "search-bar"
+  | "type-filter";
 
 export type SearchRequest = {
   q?: string;
@@ -120,8 +153,13 @@ export type SearchRequest = {
   table_db_id?: DatabaseId;
   models?: SearchModel[];
   ids?: SearchResultId[];
-  filter_items_in_personal_collection?: "only" | "exclude";
-  context?: SearchContext;
+  filter_items_in_personal_collection?:
+    | "all"
+    | "only"
+    | "only-mine"
+    | "exclude"
+    | "exclude-others";
+  context: SearchContext;
   created_at?: string | null;
   created_by?: UserId[] | null;
   last_edited_at?: string | null;
@@ -131,9 +169,11 @@ export type SearchRequest = {
   model_ancestors?: boolean | null;
   include_dashboard_questions?: boolean | null;
   include_metadata?: boolean | null;
+  search_engine?: "appdb" | "in-place" | "semantic" | null;
+  display_type?: string[] | null;
 
   // this should be in ListCollectionItemsRequest but legacy code expects them here
   collection?: CollectionId;
-  namespace?: "snippets";
+  namespace?: CollectionNamespace;
   calculate_available_models?: true;
 } & PaginationRequest;

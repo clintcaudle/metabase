@@ -13,6 +13,7 @@ import {
   type ClipboardEvent,
   type MouseEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -54,6 +55,7 @@ export function useMultiAutocomplete({
   data,
   dropdownOpened,
   defaultDropdownOpened,
+  selectFirstOptionOnChange,
   parseValue,
   onChange,
   onSearchChange,
@@ -145,8 +147,12 @@ export function useMultiAutocomplete({
   };
 
   const handleFieldKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
     if (
       event.key === "Enter" &&
+      !event.nativeEvent.isComposing &&
       combobox.selectedOptionIndex < 0 &&
       fieldSelection.length > 0
     ) {
@@ -227,20 +233,30 @@ export function useMultiAutocomplete({
       newFieldValues,
       fieldSelection,
     );
+    const newFieldSelection = {
+      index: fieldSelection.index + newFieldValues.length,
+      length: 0,
+    };
+    const newFilteredOptions = getOptionsWithoutDuplicates(
+      newValues,
+      options,
+      newFieldSelection,
+    );
+
+    setFieldSelection(newFieldSelection);
+    if (newFilteredOptions.length === 0) {
+      setFieldValue("");
+      combobox.closeDropdown();
+      combobox.resetSelectedOption();
+    }
     onChange(newValues);
-    setFieldState({
-      fieldValue: "",
-      fieldSelection: {
-        index: fieldSelection.index + newFieldValues.length,
-        length: 0,
-      },
-    });
     onOptionSubmit?.(value);
-    combobox.closeDropdown();
-    combobox.resetSelectedOption();
   };
 
   const handleWindowKeydownCapture = (event: KeyboardEvent) => {
+    if (event.isComposing) {
+      return;
+    }
     if (event.key === "Escape" && combobox.dropdownOpened) {
       event.stopImmediatePropagation();
       combobox.closeDropdown();
@@ -248,6 +264,16 @@ export function useMultiAutocomplete({
   };
 
   useWindowEvent("keydown", handleWindowKeydownCapture, { capture: true });
+
+  useEffect(() => {
+    if (selectFirstOptionOnChange && combobox.dropdownOpened) {
+      combobox.selectFirstOption();
+    }
+    // We only want to re-highlight the first option when the option list
+    // changes (searchValue/values), not on every combobox state change, so
+    // `combobox` is intentionally left out of the dependency array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchValue, values, selectFirstOptionOnChange]);
 
   return {
     combobox,
@@ -386,7 +412,7 @@ function getFieldStateAfterChange(
 // When pasting, we want to combine the values from the clipboard with the
 // existing input value, taking the current selection into account. For example,
 // if the input value is "ab<caret>c" and the user pastes "d,e,f", the
-// new values should be "abd,e,fc".
+// new values should be "abd,e,fc". | codespell:ignore
 function getParsedValuesCombinedWithFieldValue(
   fieldValue: string,
   parsedValues: string[],

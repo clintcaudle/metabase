@@ -12,11 +12,10 @@ type AggregationFunction = Exclude<
   undefined
 >;
 
-export interface ChartSettingMaxCategoriesProps
-  extends ChartSettingWidgetProps<number> {
+export type ChartSettingMaxCategoriesProps = ChartSettingWidgetProps<number> & {
   isEnabled?: boolean;
   aggregationFunction: AggregationFunction;
-}
+};
 
 export const ChartSettingMaxCategories = ({
   isEnabled,
@@ -36,6 +35,7 @@ export const ChartSettingMaxCategories = ({
     (value: string | null) => {
       if (value) {
         onChangeSettings({
+          // Unjustified type cast. FIXME
           "graph.other_category_aggregation_fn": value as AggregationFunction,
         });
       }
@@ -59,7 +59,7 @@ export const ChartSettingMaxCategories = ({
         <Text
           component="label"
           htmlFor="aggregationFunction"
-          color="var(--mb-color-text-dark)"
+          color="text-primary"
           fz="sm"
           mb="sm"
         >{t`Aggregation method for Other group`}</Text>

@@ -10,7 +10,7 @@
 (deftest upgrade-threshold-test
   (testing "it is stable but changes across releases"
     (letfn [(threshold [version]
-              (with-redefs [config/current-major-version (constantly version)]
+              (mt/with-dynamic-fn-redefs [config/current-major-version (constantly version)]
                 (version.settings/upgrade-threshold)))]
       ;; asserting that across 10 versions we have at leaset 5 distinct values
       (let [thresholds (into [] (map threshold) (range 50 60))]
@@ -28,7 +28,6 @@
     (is (not (prevent? 45 {:version 45} 75)) "version not a version string")
     ;; misshape
     (is (not (prevent? 45 {:latest {:version "0.46" :rollout 80}} 75)) "Wrong shape"))
-
   (testing "Knows when to upgrade"
     (let [threshold 25
           above     50
@@ -70,14 +69,3 @@
       (testing "rollout is a decimal"
         (let [modified (update version-info :latest assoc :rollout 0.2)]
           (is (= modified (info modified {:current-major 51 :upgrade-threshold-value 25}))))))))
-
-(deftest update-channel-test
-  (testing "we can set the update channel"
-    (mt/discard-setting-changes [update-channel]
-      (version.settings/update-channel! "nightly")
-      (is (= "nightly" (version.settings/update-channel)))))
-  (testing "we can't set the update channel to an invalid value"
-    (mt/discard-setting-changes [update-channel]
-      (is (thrown?
-           IllegalArgumentException
-           (version.settings/update-channel! "millennially"))))))

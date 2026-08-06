@@ -1,17 +1,26 @@
 const fs = require("fs");
 const path = require("path");
 
+const chalk = require("chalk");
 const webpack = require("webpack");
 
-const mainConfig = require("../../webpack.config");
+const {
+  RESOLVE_ALIASES,
+} = require("../../frontend/build/shared/rspack/resolve-aliases");
+const {
+  SVGO_CONFIG,
+} = require("../../frontend/build/shared/rspack/svgo-config");
 
 const SDK_PACKAGE_NAME = "@metabase/embedding-sdk-react";
 
-const { isEmbeddingSdkPackageInstalled, embeddingSdkPath } =
-  resolveEmbeddingSdkPackage();
+const {
+  isEmbeddingSdkPackageInstalled,
+  embeddingSdkPath,
+  embeddingSdkDistPath,
+} = resolveEmbeddingSdkPackage();
 
 console.log(
-  `Embedding SDK is ${isEmbeddingSdkPackageInstalled ? "installed" : 'NOT installed, using locally built version from "resources/embedding-sdk"'}`,
+  `Embedding SDK is ${isEmbeddingSdkPackageInstalled ? chalk.green("installed") : `${chalk.red("NOT installed")}, ${chalk.bold("using locally built version")} from "resources/embedding-sdk"'}`}`,
 );
 
 console.log(`Embedding SDK path alias is resolved to ${embeddingSdkPath}`);
@@ -22,14 +31,31 @@ module.exports = {
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".jsx", ".css", ".svg"],
     alias: {
-      ...mainConfig.resolve.alias,
+      ...RESOLVE_ALIASES,
+      ...(embeddingSdkDistPath
+        ? {
+            [`${SDK_PACKAGE_NAME}/data-app-dev`]: path.join(
+              embeddingSdkDistPath,
+              "data-app-dev.js",
+            ),
+          }
+        : null),
       ...(embeddingSdkPath ? { [SDK_PACKAGE_NAME]: embeddingSdkPath } : null),
     },
-    fallback: { path: false, fs: false }, // FIXME: this might break file download tests, we might need to implement this properly
+    fallback: {
+      path: false,
+      fs: false,
+      querystring: require.resolve("querystring-es3"),
+    }, // FIXME: this might break file download tests, we might need to implement this properly
   },
   entry: [path.join(__dirname, "src", "index.js")],
   output: {
     path: path.resolve(__dirname, "dist"),
+  },
+  devServer: {
+    // Makes "Invalid Host/Origin header" errors go away.
+    // Cypress component tests seem to run on `127.0.0.1`
+    allowedHosts: ["localhost", "127.0.0.1"],
   },
   module: {
     rules: [
@@ -51,6 +77,7 @@ module.exports = {
             loader: "@svgr/webpack",
             options: {
               ref: true,
+              svgoConfig: SVGO_CONFIG,
             },
           },
         ],
@@ -96,6 +123,7 @@ function resolveEmbeddingSdkPackage() {
       return {
         isEmbeddingSdkPackageInstalled: true,
         embeddingSdkPath: sdkInNodeModulesPath,
+        embeddingSdkDistPath: path.join(sdkInNodeModulesPath, "dist"),
       };
     }
 
@@ -106,10 +134,11 @@ function resolveEmbeddingSdkPackage() {
       return {
         isEmbeddingSdkPackageInstalled: true,
         embeddingSdkPath: requirePackagePath,
+        embeddingSdkDistPath: path.dirname(requirePackagePath),
       };
     }
   } catch (err) {
-    console.log(`Cannot resolve ${SDK_PACKAGE_NAME} via require.resolve:`, err);
+    console.log(`Cannot resolve ${SDK_PACKAGE_NAME} via require.resolve`);
   }
 
   const sdkLocalPackagePath = path.resolve(
@@ -121,6 +150,7 @@ function resolveEmbeddingSdkPackage() {
     return {
       isEmbeddingSdkPackageInstalled: false,
       embeddingSdkPath: sdkLocalPackagePath,
+      embeddingSdkDistPath: path.dirname(sdkLocalPackagePath),
     };
   }
 
@@ -131,5 +161,6 @@ function resolveEmbeddingSdkPackage() {
   return {
     isEmbeddingSdkPackageInstalled: false,
     embeddingSdkPath: null,
+    embeddingSdkDistPath: null,
   };
 }

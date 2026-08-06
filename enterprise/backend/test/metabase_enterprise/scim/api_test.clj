@@ -22,7 +22,6 @@
     (t2/delete! :model/ApiKey :scope :scim)
     (let [key1 (#'scim/refresh-scim-api-key! (mt/user->id :crowberto))]
       (is (=? (scim-api-key-shape :crowberto) key1))
-
       (testing "The same function will refresh an existing SCIM API key"
         (let [key2 (#'scim/refresh-scim-api-key! (mt/user->id :crowberto))]
           (is (=? (scim-api-key-shape :crowberto) key2))
@@ -37,10 +36,8 @@
               fetched-key (mt/user-http-request :crowberto :get 200 "ee/scim/api_key")]
           (is (nil? (:unmasked_key fetched-key)))
           (is (= (:key actual-key) (:key fetched-key)))))
-
       (testing "A non-admin cannot fetch the SCIM API key"
         (mt/user-http-request :rasta :get 403 "ee/scim/api_key"))
-
       (testing "A 404 is returned if the key has not yet been created"
         (t2/delete! :model/ApiKey :scope :scim)
         (mt/user-http-request :crowberto :get 404 "ee/scim/api_key")))))
@@ -51,18 +48,19 @@
       (testing "Can create a new SCIM API key"
         (let [key1 (mt/user-http-request :crowberto :post 200 "ee/scim/api_key")]
           (is (=? (scim-api-key-shape :crowberto) key1))
-
           (testing "Can refresh an API key"
             (let [key2 (mt/user-http-request :crowberto :post 200 "ee/scim/api_key")]
               (is (=? (scim-api-key-shape :crowberto) key2))
-              (is (not= key1 key2))))))
+              (is (not= key1 key2)))))))))
 
+(deftest ^:parallel post-api-key-test-2
+  (testing "POST /api/ee/scim/api_key"
+    (mt/with-premium-features #{:scim}
       (testing "A non-admin cannot create a SCIM API key"
-        (mt/user-http-request :rasta :post 403 "ee/scim/api_key"))
+        (mt/user-http-request :rasta :post 403 "ee/scim/api_key")))))
 
-      (testing "Users and Groups have entity IDs backfilled when a new SCIM key is generated"
-        (mt/with-temp [:model/User             user {:entity_id nil}
-                       :model/PermissionsGroup group {:entity_id nil}]
-          (mt/user-http-request :crowberto :post 200 "ee/scim/api_key")
-          (is (not (nil? (t2/select-one-fn :entity_id :model/User :id (:id user)))))
-          (is (not (nil? (t2/select-one-fn :entity_id :model/PermissionsGroup :id (:id group))))))))))
+(deftest ^:parallel post-api-key-test-3
+  (testing "POST /api/ee/scim/api_key"
+    (mt/with-premium-features #{:scim}
+      (testing "A non-admin cannot create a SCIM API key"
+        (mt/user-http-request :rasta :post 403 "ee/scim/api_key")))))

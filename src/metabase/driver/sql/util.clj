@@ -2,8 +2,8 @@
   "Utility functions for writing SQL drivers."
   (:require
    [clojure.string :as str]
+   [metabase.driver-api.core :as driver-api]
    [metabase.driver.sql.query-processor :as sql.qp]
-   [metabase.query-processor.error-type :as qp.error-type]
    [metabase.util :as u]
    [metabase.util.honey-sql-2 :as h2x]
    [metabase.util.i18n :refer [tru]]
@@ -78,7 +78,7 @@
 
       :else
       (do
-        (log/errorf "Don't know how to alias %s, expected an h2x/identifier" (pr-str col))
+        (log/errorf "Don't know how to alias %s, expected an h2x/identifier" (class col))
         [col col]))))
 
 (defn select-clause-deduplicate-aliases
@@ -104,6 +104,7 @@
         :else
         (recur (conj already-seen alias) (conj acc [col alias]) more)))))
 
+;;; TODO (Cam 2026-04-27) -- rename this to `escape-single-quotes` to make it clearer what we're escaping
 (defn escape-sql
   "Escape single quotes in a SQL string. `escape-style` is either `:ansi` (escape a single quote with two single quotes)
   or `:backslashes` (escape a single quote with a backslash).
@@ -128,6 +129,18 @@
                        (str/replace "\\" "\\\\")
                        (str/replace "'" "\\'")))))
 
+(defn quote-literal
+  "Wrap `s` in single quotes as a SQL string literal, escaping embedded quotes per `escape-style`.
+
+    (quote-literal \"Tito's Tacos\" :ansi)        ; -> \"'Tito''s Tacos'\"
+    (quote-literal \"Tito's Tacos\" :backslashes) ; -> \"'Tito\\'s Tacos'\"
+
+  For trusted strings only -- pass user input as a query parameter where the driver supports it."
+  ^String [^String s escape-style]
+  (when s
+    (case escape-style
+      (:ansi :backslashes) (str \' (escape-sql s escape-style) \'))))
+
 (defn validate-convert-timezone-args
   "Validate the arguments of convert-timezone.
   - if input column has timezone only target-timezone is required, throw exception if source-timezone is provided.
@@ -135,12 +148,12 @@
   [has-timezone? target-timezone source-timezone]
   (when (and has-timezone? source-timezone)
     (throw (ex-info (tru "input column already has a set timezone. Please remove the source parameter in convertTimezone.")
-                    {:type            qp.error-type/invalid-query
+                    {:type            driver-api/qp.error-type.invalid-query
                      :target-timezone target-timezone
                      :source-timezone source-timezone})))
   (when (and (not has-timezone?) (not source-timezone))
     (throw (ex-info (tru "input column doesn''t have a set timezone. Please set the source parameter in convertTimezone to convert it.")
-                    {:type            qp.error-type/invalid-query
+                    {:type            driver-api/qp.error-type.invalid-query
                      :target-timezone target-timezone
                      :source-timezone source-timezone}))))
 
@@ -167,7 +180,7 @@
    :tsql        Dialect/TSql})
 
 (def ^:private ^java.util.List additional-operators
-  ["#>>" "!=" "||"])
+  ["#>>" "!=" "||" "|>"])
 
 (defn- add-operators
   ^SqlFormatter$Formatter [^SqlFormatter$Formatter formatter]

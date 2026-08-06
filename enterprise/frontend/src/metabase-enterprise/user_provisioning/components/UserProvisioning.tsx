@@ -2,23 +2,34 @@ import { useDisclosure } from "@mantine/hooks";
 import { P, isMatching } from "ts-pattern";
 import { t } from "ttag";
 
-import { BasicAdminSettingInput } from "metabase/admin/settings/components/widgets/AdminSettingInput";
+import {
+  SettingsPageWrapper,
+  SettingsSection,
+} from "metabase/admin/components/SettingsSection";
+import {
+  AdminSettingInput,
+  BasicAdminSettingInput,
+} from "metabase/admin/settings/components/widgets/AdminSettingInput";
+import { NotFound } from "metabase/common/components/ErrorPages";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
+import { SetByEnvVar } from "metabase/common/components/SetByEnvVar";
+import { useHasTokenFeature } from "metabase/common/hooks";
 import {
   useGetAdminSettingsDetailsQuery,
   useGetSettingsQuery,
+  useSetting,
   useUpdateSettingMutation,
-} from "metabase/api";
-import { useHasTokenFeature, useSetting } from "metabase/common/hooks";
-import { NotFound } from "metabase/components/ErrorPages";
-import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
+} from "metabase/settings";
 import {
+  Alert,
+  Box,
   Button,
   Divider,
   Flex,
+  Icon,
   Stack,
   Text,
   TextInput,
-  Title,
 } from "metabase/ui";
 import {
   useGetScimTokenQuery,
@@ -65,19 +76,28 @@ export const UserProvisioning = () => {
 
   const isScimEnabled = !!settingValues?.["scim-enabled"];
   const isScimInitialized = !!maskedTokenRequest.data;
+  const scimEnabledSetting = fields?.["scim-enabled"];
+  const isScimSetByEnv =
+    !!scimEnabledSetting?.is_env_setting && !!scimEnabledSetting?.env_name;
 
-  // since the request to enable scim and create the first token are seperate requests, it's possible
-  // that the token request failed or wasn't issued due to some interuption (network issue, instance down, etc.)
-  // we can detect this case by seing the scim is enabled without any token after all requests for token have settled
-  // this is later used to show an error message based on this token not being found + encourage the user to go through
-  // the regenerate flow to get a new unmasked token
-  const isScimIncorrectlyIniailized = Boolean(
+  // SCIM can be enabled without a token existing — e.g. via config file or env var, or if the
+  // token-generation request failed during a previous UI-based enablement. In any of those cases
+  // we expose the SCIM configuration section so the user can generate a token themselves.
+  const isScimEnabledWithoutToken = Boolean(
     !isScimInitialized &&
-      isScimEnabled &&
-      !(isLoadingToken || maskedTokenRequest.isFetching),
+    isScimEnabled &&
+    !(isLoadingToken || maskedTokenRequest.isFetching),
+  );
+
+  // A token-generation attempt was made and failed (vs. "no attempt yet"). Used to surface the
+  // failure on the token input — both when no token existed yet (Generate failed) and when a token
+  // exists but regeneration failed.
+  const hasTokenGenerationError = Boolean(
+    regenerateTokenReq.error && !regenerateTokenReq.isLoading,
   );
 
   const samlUserProvisioningEnabled = useSetting(
+    // Unjustified type cast. FIXME
     "saml-user-provisioning-enabled?" as any,
   );
   const showSamlWarning = samlUserProvisioningEnabled && !isScimInitialized;
@@ -89,7 +109,16 @@ export const UserProvisioning = () => {
     });
 
     if (!result.error && enabled && !isScimInitialized) {
-      await regenerateToken();
+      const regenerateResult = await regenerateToken();
+      if (!regenerateResult.error) {
+        openFirstEnabledModal();
+      }
+    }
+  };
+
+  const handleGenerateToken = async () => {
+    const result = await regenerateToken();
+    if (!result.error) {
       openFirstEnabledModal();
     }
   };
@@ -121,109 +150,128 @@ export const UserProvisioning = () => {
   }
 
   return (
-    <>
-      <LoadingAndErrorWrapper
-        loading={maskedTokenRequest.isLoading}
-        error={scimTokenError}
-      >
-        <Stack pl="md" gap="lg" maw="35rem">
-          <Stack gap="lg" mb="lg" data-testid="scim-enabled-setting">
-            <Text fz="1.25rem" fw="bold">{t`User provisioning via SCIM`}</Text>
-            <Text lh="1.5rem">{t`When enabled, you can use the settings below to set up user access on your identity management system.`}</Text>
-            {showSamlWarning && (
-              <ScimTextWarning>
-                {t`When enabled, SAML user provisioning will be turned off in favor of SCIM.`}
-              </ScimTextWarning>
-            )}
-            <BasicAdminSettingInput
-              inputType="boolean"
-              name="scim-enabled"
-              value={!!settingValues?.["scim-enabled"]}
-              onChange={(newValue) => handleScimEnabledChange(!!newValue)}
-            />
-          </Stack>
-
-          {(isScimInitialized || isScimIncorrectlyIniailized) && (
-            <Stack
-              gap="2rem"
-              opacity={isScimEnabled ? 1 : 0.5}
-              style={{ pointerEvents: isScimEnabled ? "auto" : "none" }}
-            >
-              <CopyScimInput
-                label={t`SCIM endpoint URL`}
-                value={fields?.["scim-base-url"]?.value?.toString() || ""}
-              />
-
-              <Flex gap="sm" align="end">
-                <TextInput
-                  label={t`SCIM token`}
-                  value={scimTokenInputText}
-                  readOnly
-                  disabled
-                  w="100%"
-                  error={
-                    isScimIncorrectlyIniailized &&
-                    t`Token failed to generate, please regenerate one.`
-                  }
-                  styles={getTextInputStyles({
-                    masked: true,
-                    disabled: true,
-                  })}
-                />
-                <Button
-                  disabled={isLoadingToken || !isScimEnabled}
-                  variant="filled"
-                  onClick={openRegenerateModal}
-                  style={{ flexShrink: 0 }}
-                >
-                  {regenerateTokenReq.isLoading
-                    ? t`Regenerating...`
-                    : t`Regenerate`}
-                </Button>
-              </Flex>
-            </Stack>
-          )}
-
-          {isAdminNotificationInputVisisble && (
-            <>
-              <Divider my="lg" />
-
-              <Stack gap="md">
-                <Title order={2}>
-                  {t`Notify admins of new users provisioned from SSO`}
-                </Title>
-                <Text>
-                  {t`Send an email to admins whenever someone signs into SSO for the first time.`}
-                </Text>
+    <SettingsPageWrapper title={t`User provisioning`}>
+      <SettingsSection>
+        <LoadingAndErrorWrapper
+          loading={maskedTokenRequest.isLoading}
+          error={scimTokenError}
+        >
+          <Stack pl="md" gap="lg" maw="35rem">
+            <Stack gap="lg" mb="lg" data-testid="scim-enabled-setting">
+              <Text
+                fz="1.25rem"
+                fw="bold"
+              >{t`User provisioning via SCIM`}</Text>
+              <Text lh="1.5rem">{t`When enabled, you can use the settings below to set up user access on your identity management system.`}</Text>
+              {showSamlWarning && (
+                <ScimTextWarning>
+                  {t`When enabled, SAML user provisioning will be turned off in favor of SCIM.`}
+                </ScimTextWarning>
+              )}
+              {isScimSetByEnv ? (
+                <SetByEnvVar varName={scimEnabledSetting.env_name!} />
+              ) : (
                 <BasicAdminSettingInput
                   inputType="boolean"
-                  name="send-new-sso-user-admin-email?"
-                  value={!!settingValues?.["send-new-sso-user-admin-email?"]}
-                  onChange={(value) =>
-                    updateSetting({
-                      key: "send-new-sso-user-admin-email?",
-                      value,
-                    })
-                  }
+                  name="scim-enabled"
+                  value={!!settingValues?.["scim-enabled"]}
+                  onChange={(newValue) => handleScimEnabledChange(!!newValue)}
                 />
+              )}
+              {isScimEnabledWithoutToken && !hasTokenGenerationError && (
+                <Alert
+                  size="compact"
+                  color="warning"
+                  icon={<Icon name="warning" />}
+                >{t`Generate a SCIM token below to complete the setup.`}</Alert>
+              )}
+            </Stack>
+
+            {(isScimInitialized || isScimEnabledWithoutToken) && (
+              <Stack
+                gap="2rem"
+                opacity={isScimEnabled ? 1 : 0.5}
+                style={{ pointerEvents: isScimEnabled ? "auto" : "none" }}
+              >
+                <CopyScimInput
+                  label={t`SCIM endpoint URL`}
+                  value={fields?.["scim-base-url"]?.value?.toString() || ""}
+                />
+
+                <Flex gap="sm" align="end">
+                  <TextInput
+                    label={t`SCIM token`}
+                    value={scimTokenInputText}
+                    readOnly
+                    disabled
+                    w="100%"
+                    error={
+                      hasTokenGenerationError &&
+                      (isScimInitialized
+                        ? t`Failed to regenerate token. Please try again.`
+                        : t`Token failed to generate, Please try again.`)
+                    }
+                    styles={getTextInputStyles({
+                      masked: true,
+                      disabled: true,
+                    })}
+                    inputContainer={(children) => (
+                      <Flex gap="sm">
+                        <Box style={{ flexGrow: 1 }}>{children}</Box>
+                        <Button
+                          disabled={isLoadingToken || !isScimEnabled}
+                          variant="filled"
+                          onClick={
+                            isScimInitialized
+                              ? openRegenerateModal
+                              : handleGenerateToken
+                          }
+                          style={{ flexShrink: 0 }}
+                        >
+                          {regenerateTokenReq.isLoading
+                            ? t`Generating...`
+                            : isScimInitialized
+                              ? t`Regenerate`
+                              : hasTokenGenerationError
+                                ? t`Retry`
+                                : t`Generate`}
+                        </Button>
+                      </Flex>
+                    )}
+                  />
+                </Flex>
               </Stack>
-            </>
-          )}
-        </Stack>
-      </LoadingAndErrorWrapper>
+            )}
 
-      <UserProvisioningFirstEnabledModal
-        opened={showFirstEnabledModal}
-        onClose={closeFirstEnabledModal}
-        unmaskedScimToken={regenerateTokenReq.data?.unmasked_key ?? ""}
-        scimBaseUrl={fields?.["scim-base-url"]?.value?.toString() || ""}
-        scimError={regenerateTokenReq.error}
-      />
+            {isAdminNotificationInputVisisble && (
+              <>
+                <Divider my="lg" />
+                <AdminSettingInput
+                  name="send-new-sso-user-admin-email?"
+                  title={t`Notify admins of new users provisioned from SSO`}
+                  description={t`Send an email to admins whenever someone signs into SSO for the first time.`}
+                  inputType="boolean"
+                />
+              </>
+            )}
+          </Stack>
+        </LoadingAndErrorWrapper>
 
-      <UserProvisioningRegenerateTokenModal
-        opened={showRegenerateModal}
-        onClose={closeRegenerateModal}
-      />
-    </>
+        <UserProvisioningFirstEnabledModal
+          opened={showFirstEnabledModal}
+          onClose={closeFirstEnabledModal}
+          unmaskedScimToken={regenerateTokenReq.data?.unmasked_key ?? ""}
+          scimBaseUrl={fields?.["scim-base-url"]?.value?.toString() || ""}
+          scimError={regenerateTokenReq.error}
+        />
+
+        <UserProvisioningRegenerateTokenModal
+          opened={showRegenerateModal}
+          onClose={closeRegenerateModal}
+          regenerateToken={regenerateToken}
+          regenerateTokenReq={regenerateTokenReq}
+        />
+      </SettingsSection>
+    </SettingsPageWrapper>
   );
 };

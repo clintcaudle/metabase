@@ -1,12 +1,13 @@
 import userEvent from "@testing-library/user-event";
 
 import {
+  findRequests,
   setupPropertiesEndpoints,
   setupSettingsEndpoints,
   setupUpdateSettingEndpoint,
 } from "__support__/server-mocks";
 import { fireEvent, renderWithProviders, screen } from "__support__/ui";
-import { findRequests } from "__support__/utils";
+import { createMockSettingsState } from "metabase/redux/store/mocks";
 import type { EnterpriseSettings } from "metabase-types/api";
 import { createMockSettings } from "metabase-types/api/mocks";
 
@@ -19,16 +20,18 @@ const setup = async (
     settings?: Partial<EnterpriseSettings>;
   } = { settings: {} },
 ) => {
-  const settings = createMockSettings({
-    "help-link": "metabase",
+  const settingValues = {
+    "help-link": "metabase" as const,
     "help-link-custom-destination": undefined,
     ...settingOverrides,
-  });
-  setupPropertiesEndpoints(settings);
+  };
+  setupPropertiesEndpoints(createMockSettings(settingValues));
   setupSettingsEndpoints([]);
   setupUpdateSettingEndpoint();
 
-  renderWithProviders(<HelpLinkSettings />);
+  renderWithProviders(<HelpLinkSettings />, {
+    storeInitialState: { settings: createMockSettingsState(settingValues) },
+  });
 
   await screen.findByText("Help link");
 };
@@ -96,14 +99,14 @@ describe("HelpLinkSettings", () => {
 
     // empty input
     await userEvent.clear(input);
-    await fireEvent.blur(input);
+    fireEvent.blur(input);
     expect(
       await screen.findByText("This field can't be left empty."),
     ).toBeInTheDocument();
 
     // invalid url
     await userEvent.type(input, "invalid-url");
-    await fireEvent.blur(input);
+    fireEvent.blur(input);
     expect(
       await screen.findByText(
         'This needs to be an "http://", "https://" or "mailto:" URL.',
@@ -127,7 +130,7 @@ describe("HelpLinkSettings", () => {
 
     await userEvent.clear(input);
     await userEvent.type(input, "https://help.com/help");
-    await fireEvent.blur(input);
+    fireEvent.blur(input);
     await screen.findByDisplayValue("https://help.com/help");
 
     const [{ url, body }] = await findRequests("PUT");

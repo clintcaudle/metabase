@@ -1,14 +1,18 @@
-import { FIELD_SEMANTIC_TYPES } from "metabase/lib/core";
+import { FIELD_SEMANTIC_TYPES } from "metabase/common/utils/fields";
 import { LEVEL_ONE_TYPES, TYPE } from "metabase-lib/v1/types/constants";
 import { isTypeFK, isTypePK, isa } from "metabase-lib/v1/types/utils/isa";
 import type { Field } from "metabase-types/api";
 
 export function getCompatibleSemanticTypes(
-  field: Field,
+  field: {
+    base_type?: Field["base_type"];
+    effective_type?: Field["effective_type"];
+  },
   currentValue: string | null,
 ) {
   const fieldType = field.effective_type ?? field.base_type;
   const isFieldText = isa(fieldType, TYPE.Text);
+  const isFieldBoolean = isa(fieldType, TYPE.Boolean);
   const fieldLevelOneTypes = LEVEL_ONE_TYPES.filter((levelOneType) => {
     return isa(fieldType, levelOneType);
   });
@@ -32,10 +36,10 @@ export function getCompatibleSemanticTypes(
       return false;
     }
 
-    // "Category" semantic type of any field
-    // This should be removed when when Category derivation in types.cljc is handled properly.
+    // "Category" semantic type of any field but not Boolean
+    // This should be removed when Category derivation in types.cljc is handled properly.
     if (option.id === TYPE.Category) {
-      return true;
+      return !isFieldBoolean;
     }
 
     if (option.id === TYPE.Name) {

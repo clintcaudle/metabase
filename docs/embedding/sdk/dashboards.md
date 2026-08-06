@@ -1,24 +1,26 @@
 ---
-title: "Embedded analytics SDK - dashboards"
+title: "Modular embedding SDK - dashboards"
+summary: Embed static or interactive Metabase dashboards using the Modular embedding SDK. Customize dashboard layout, drill-through, and add custom actions.
 ---
 
-# Embedded analytics SDK - dashboards
+# Modular embedding SDK - dashboards
 
-{% include plans-blockquote.html feature="Embedded analytics SDK" sdk=true %}
+{% include plans-blockquote.html feature="Modular embedding SDK" sdk=true %}
 
 You can embed an interactive, editable, or static dashboard.
 
-**Please keep in mind - embedding multiple instances of dashboards on the same page is not yet supported.**
+**Keep in mind that embedding multiple instances of dashboards on the same page is not yet supported.**
 
 ## Embedding a dashboard
 
-You can embed a dashboard using the one of the dashboard components:
+You can embed a dashboard using one of the dashboard components:
 
 ### `StaticDashboard`
 
 A lightweight dashboard component. Use this component when you want to display results without letting people interact with the data.
 
 #### API Reference
+
 - [Component](./api/StaticDashboard.html)
 - [Props](./api/StaticDashboardProps.html)
 
@@ -31,6 +33,7 @@ A lightweight dashboard component. Use this component when you want to display r
 A dashboard component with drill downs, click behaviors, and the ability to view and click into questions. Use this component when you want to allow people to explore their data.
 
 #### API Reference
+
 - [Component](./api/InteractiveDashboard.html)
 - [Props](./api/InteractiveDashboardProps.html)
 
@@ -43,6 +46,7 @@ A dashboard component with drill downs, click behaviors, and the ability to view
 A dashboard component with the features available in the `InteractiveDashboard` component, as well as the ability to add and update questions, layout, and content within your dashboard. Use this component when you want to give people the ability to modify your dashboards, for example in an admin panel in your app.
 
 #### API Reference
+
 - [Component](./api/EditableDashboard.html)
 - [Props](./api/EditableDashboardProps.html)
 
@@ -56,6 +60,10 @@ A dashboard component with the features available in the `InteractiveDashboard` 
 {% include_file "{{ dirname }}/snippets/dashboards/interactive-dashboard.tsx" %}
 ```
 
+## Pass parameter values to a dashboard
+
+See [Modular embedding parameters](../parameters.md#pass-parameter-values-to-a-dashboard).
+
 ## Customizing dashboard height
 
 By default, dashboard components take full page height (100vh). You can override this with custom styles passed via `style` or `className` props.
@@ -66,7 +74,7 @@ By default, dashboard components take full page height (100vh). You can override
 
 ## Customizing drill-through question layout
 
-When drilling through or clicking on a question card in the dashboard, you will be taken to the question view. By default, the question is shown in the [default layout](./questions.md#customizing-interactive-questions) for interactive questions.
+Drilling through or clicking on a question card in the dashboard will take you to the question view with the [default layout](../question-reference.md#customize-the-layout-of-an-interactive-chart) for interactive questions.
 
 To customize the question layout, pass a `renderDrillThroughQuestion` prop to the `InteractiveDashboard` component, with the custom view as the child component.
 
@@ -76,7 +84,7 @@ To customize the question layout, pass a `renderDrillThroughQuestion` prop to th
 {% include_file "{{ dirname }}/snippets/dashboards/custom-drill-through-question-layout.tsx" snippet="example-2" %}
 ```
 
-The questionView prop accepts a React component that will be rendered in the question view, which you can build with namespaced components within the `InteractiveQuestion` component. See [customizing interactive questions](./questions.md#customizing-interactive-questions) for an example layout.
+The `questionView` prop accepts a React component that will be rendered in the question view, which you can build with namespaced components within the `InteractiveQuestion` component. See [customize the layout](../question-reference.md#customize-the-layout-of-an-interactive-chart).
 
 ## Dashboard plugins
 
@@ -126,6 +134,10 @@ If you want to replace the existing menu with your own component, you can do so 
 {% include_file "{{ dirname }}/snippets/dashboards/plugins.tsx" snippet="example-custom-actions-menu" %}
 ```
 
+### `mapQuestionClickActions`
+
+You can customize what happens when people click on a data point on a dashboard with the `mapQuestionClickActions` plugin. See [mapQuestionClickActions](../chart.md#customize-what-happens-when-someone-clicks-on-a-chart).
+
 ## Creating dashboards
 
 Creating a dashboard could be done with `useCreateDashboardApi` hook or `CreateDashboardModal` component.
@@ -134,11 +146,15 @@ Creating a dashboard could be done with `useCreateDashboardApi` hook or `CreateD
 
 Use this hook if you'd like to have total control over the UI and settings.
 
+Until the SDK is fully loaded and initialized, the hook returns `null`.
+
 #### API Reference
+
 - [Hook](./api/useCreateDashboardApi.html)
 - [Options](./api/CreateDashboardValues.html)
 
 #### Example
+
 ```typescript
 {% include_file "{{ dirname }}/snippets/dashboards/create-dashboard.tsx" snippet="example-hook" %}
 ```
@@ -149,11 +165,13 @@ Use this hook if you'd like to have total control over the UI and settings.
 
 ### `CreateDashboardModal`
 
-#### API Refernce
+#### API Reference
+
 - [Component](./api/CreateDashboardModal.html)
 - [Props](./api/CreateDashboardModalProps.html)
 
 #### Example
+
 ```typescript
 {% include_file "{{ dirname }}/snippets/dashboards/create-dashboard.tsx" snippet="example-component" %}
 ```
@@ -161,4 +179,3 @@ Use this hook if you'd like to have total control over the UI and settings.
 #### Props
 
 {% include_file "{{ dirname }}/api/snippets/CreateDashboardModalProps.md" snippet="properties" %}
-

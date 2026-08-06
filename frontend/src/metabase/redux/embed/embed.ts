@@ -5,17 +5,23 @@ import {
 } from "@reduxjs/toolkit";
 import { compose, pick } from "underscore";
 
-import { DEFAULT_EMBEDDING_ENTITY_TYPES } from "metabase/embedding-sdk/store";
-import { parseSearchOptions } from "metabase/lib/browser";
-import type { InteractiveEmbeddingOptions } from "metabase-types/store";
-
-import { setEntityTypes } from "../embedding-data-picker";
+import {
+  DEFAULT_EMBEDDING_ENTITY_TYPES,
+  setDataPicker,
+  setEntityTypes,
+} from "metabase/redux/embedding-data-picker";
+import type {
+  InteractiveEmbeddingOptions,
+  InteractiveEmbeddingOptionsState,
+} from "metabase/redux/store";
+import type { EmbeddingDataPicker } from "metabase/redux/store/embedding-data-picker";
+import { parseSearchOptions } from "metabase/utils/browser";
 
 export const createSlice = buildCreateSlice({
   creators: { asyncThunk: asyncThunkCreator },
 });
 
-export const DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS: InteractiveEmbeddingOptions =
+export const DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS: InteractiveEmbeddingOptionsState =
   {
     font: undefined,
     top_nav: true,
@@ -29,24 +35,14 @@ export const DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS: InteractiveEmbeddingOptions 
     action_buttons: true,
   };
 
-const ALLOWED_INTERACTIVE_EMBEDDING_OPTIONS = Object.keys(
-  DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS,
+// Unjustified type cast. FIXME
+const ALLOWED_INTERACTIVE_EMBEDDING_OPTIONS = (
+  Object.keys(
+    DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS,
+  ) as (keyof InteractiveEmbeddingOptions)[]
 )
-  // `entity_types` used to be in the embed slice, but it's moved to the embedding data picker slice already.
-  .concat("entity_types");
-
-export const urlParameterToBoolean = (
-  urlParameter: string | string[] | boolean | undefined,
-) => {
-  if (urlParameter === undefined) {
-    return undefined;
-  }
-  if (Array.isArray(urlParameter)) {
-    return Boolean(urlParameter.at(-1));
-  } else {
-    return Boolean(urlParameter);
-  }
-};
+  // These 2 properties belongs in embedding-data-picker reducer
+  .concat("entity_types", "data_picker");
 
 interface Location {
   search: string;
@@ -54,20 +50,18 @@ interface Location {
 const interactiveEmbedSlice = createSlice({
   name: "interactiveEmbed",
   initialState: {
-    options: {} as InteractiveEmbeddingOptions,
+    // Unjustified type cast. FIXME
+    options: {} as InteractiveEmbeddingOptionsState,
     isEmbeddingSdk: false,
   },
   reducers: (create) => ({
     setInitialUrlOptions: create.asyncThunk(
       ({ search }: Location, { dispatch }) => {
-        const { entity_types, ...searchOptions } = compose(
-          normalizeEntityTypes,
-          excludeNonInteractiveEmbeddingOptions,
-          parseSearchOptions,
-          normalizeEntityTypesCommaSeparatedSearchParameter,
-        )(search);
+        const { entity_types, data_picker, ...searchOptions } =
+          processSearch(search);
 
         dispatch(setEntityTypes(entity_types));
+        dispatch(setDataPicker(data_picker));
 
         return searchOptions;
       },
@@ -91,6 +85,15 @@ const interactiveEmbedSlice = createSlice({
     ),
   }),
 });
+
+const normalizeProperties = compose(normalizeEntityTypes, normalizeDataPicker);
+
+const processSearch = compose(
+  normalizeProperties,
+  excludeNonInteractiveEmbeddingOptions,
+  parseSearchOptions,
+  normalizeEntityTypesCommaSeparatedSearchParameter,
+);
 
 /**
  * this functions turns a string like `entity_types=value1,value2` into `entity_types=value1&entity_types=value2` that matches the URLSearchParams format
@@ -148,6 +151,28 @@ function normalizeEntityTypes(
   }
 
   return { ...searchOptions, entity_types: DEFAULT_EMBEDDING_ENTITY_TYPES };
+}
+
+/**
+ *
+ * This function normalize the `data_picker` option in the search options to ignore invalid values.
+ * @see {@link EmbeddingDataPicker}
+ */
+function normalizeDataPicker(
+  searchOptions: Partial<InteractiveEmbeddingOptions>,
+): Partial<InteractiveEmbeddingOptions> {
+  const ALLOWED_VALUES: EmbeddingDataPicker[] = ["staged", "flat"];
+
+  const { data_picker: dataPicker, ...restSearchOptions } = searchOptions;
+
+  if (dataPicker && ALLOWED_VALUES.includes(dataPicker)) {
+    return {
+      ...restSearchOptions,
+      data_picker: dataPicker,
+    };
+  }
+
+  return restSearchOptions;
 }
 
 export const { setInitialUrlOptions, setOptions } =

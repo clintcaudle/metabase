@@ -1,7 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   type ItemCallback,
-  Layout,
   Responsive as ReactGridLayout,
 } from "react-grid-layout";
 
@@ -87,14 +86,18 @@ export function GridLayout<T extends { id: number | null }>(
   const theme = useMantineTheme();
 
   const [currentBreakpoint, setCurrentBreakpoint] = useState(
+    // Unjustified type cast. FIXME
     (ReactGridLayout as any).utils.getBreakpointFromWidth(
       breakpoints,
       gridWidth,
     ),
   );
 
+  const [localLayout, setLocalLayout] = useState<ReactGridLayout.Layout[]>();
+
   const onLayoutChangeWrapped = useCallback(
     (currentLayout: ReactGridLayout.Layout[]) => {
+      setLocalLayout(currentLayout);
       onLayoutChange({
         layout: currentLayout,
         // Calculating the breakpoint right here,
@@ -160,13 +163,18 @@ export function GridLayout<T extends { id: number | null }>(
   );
 
   const height = useMemo(() => {
-    let lowestLayoutCellPoint = Math.max(...layout.map((l) => l.y + l.h));
+    // Once `localLayout` is set, use it instead of the prop layout.
+    // The prop layout includes all cards (visible and hidden), causing
+    // incorrect y/height calculations. `localLayout` only includes visible cards.
+    let lowestLayoutCellPoint = Math.max(
+      ...(localLayout ?? layout).map((l) => l.y + l.h),
+    );
     if (isEditing) {
       lowestLayoutCellPoint += Math.ceil(window.innerHeight / cellSize.height);
     }
-    const verticalMargin = margin[1];
+    const [_horizontalMargin, verticalMargin] = margin;
     return (cellSize.height + verticalMargin) * lowestLayoutCellPoint;
-  }, [cellSize.height, layout, margin, isEditing]);
+  }, [localLayout, layout, isEditing, margin, cellSize.height]);
 
   const background = useMemo(
     () =>
@@ -180,7 +188,7 @@ export function GridLayout<T extends { id: number | null }>(
         // lives a separate style tree from the rest of the app.
         cellStrokeColor:
           theme.other?.dashboard?.gridBorderColor ??
-          theme.fn.themeColor("border"),
+          theme.fn.themeColor("border-neutral"),
       }),
     [cellSize, gridWidth, margin, cols, theme],
   );
@@ -199,18 +207,18 @@ export function GridLayout<T extends { id: number | null }>(
   // https://github.com/react-grid-layout/react-grid-layout#performance
   const children = useMemo(() => items.map(renderItem), [items, renderItem]);
 
-  // // prevent user selection when dragging metabase#53842
-  const originalUserSelect = useRef(document.body.style.userSelect);
+  // Hide text selection during drag without affecting auto-scroll metabase#53842
   const disableTextSelection = useCallback<ItemCallback>(
     (...params) => {
-      document.body.style.userSelect = "none";
+      document.body.classList.add("react-grid-layout-dragging");
       otherProps.onDragStart?.(...params);
     },
     [otherProps],
   );
+
   const enableTextSelection = useCallback<ItemCallback>(
     (...params) => {
-      document.body.style.userSelect = originalUserSelect.current;
+      document.body.classList.remove("react-grid-layout-dragging");
       otherProps.onDragStop?.(...params);
     },
     [otherProps],
@@ -235,6 +243,7 @@ export function GridLayout<T extends { id: number | null }>(
       onDragStop={enableTextSelection}
       onResizeStart={disableTextSelection}
       onResizeStop={enableTextSelection}
+      draggableCancel="[data-dontdrag]"
     >
       {children}
     </ReactGridLayout>

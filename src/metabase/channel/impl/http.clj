@@ -1,11 +1,14 @@
 (ns metabase.channel.impl.http
   (:require
    [clj-http.client :as http]
+   [clojure.string :as str]
    [java-time.api :as t]
    [metabase.channel.core :as channel]
    [metabase.channel.render.core :as channel.render]
+   [metabase.channel.settings :as channel.settings]
    [metabase.channel.shared :as channel.shared]
    [metabase.channel.urls :as urls]
+   [metabase.util :as u]
    [metabase.util.i18n :refer [tru]]
    [metabase.util.json :as json]
    [metabase.util.malli :as mu]
@@ -34,9 +37,24 @@
    [:type    [:= :channel/http]]
    [:details HTTPDetails]])
 
+(defn- check-url!
+  [url]
+  (when (str/blank? url)
+    (throw (ex-info (tru "No URL is configured for this webhook.") {:status-code 400})))
+  (when-not (try
+              (u/valid-host? (channel.settings/http-channel-host-strategy) url)
+              (catch Exception e
+                (throw (ex-info (tru "Invalid webhook URL: {0}" (ex-message e))
+                                {:status-code 400
+                                 :url         url}
+                                e))))
+    (throw (ex-info (tru "URLs referring to hosts that supply internal hosting metadata are prohibited.")
+                    {:status-code 400}))))
+
 (mu/defmethod channel/send! :channel/http
   [{{:keys [url method auth-method auth-info]} :details} :- HTTPChannel
    request]
+  (check-url! url)
   (let [req (merge
              {:accept       :json
               :content-type :json
@@ -69,7 +87,7 @@
     true
     (catch Exception e
       (let [data (ex-data e)]
-        ;; throw an appriopriate error if it's a connection error
+        ;; throw an appropriate error if it's a connection error
         (if (= ::http/unexceptional-status (:type data))
           (throw (ex-info (tru "Failed to connect to channel") {:request-status (:status data)
                                                                 :request-body   (maybe-parse-json (:body data))}))
@@ -86,7 +104,7 @@
      :rows (:rows data)}))
 
 (mu/defmethod channel/render-notification [:channel/http :notification/card]
-  [_channel-type {:keys [payload creator]} _template _recipients]
+  [_channel-type {:keys [payload creator]} _handler]
   (let [{:keys [card notification_card card_part]} payload
         card_part                        (channel.shared/maybe-realize-data-rows card_part)
         request-body {:type               "alert"

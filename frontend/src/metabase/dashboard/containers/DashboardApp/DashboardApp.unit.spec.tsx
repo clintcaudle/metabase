@@ -1,6 +1,5 @@
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
-import { Route } from "react-router";
 
 import { callMockEvent } from "__support__/events";
 import {
@@ -16,6 +15,7 @@ import {
   setupTableEndpoints,
 } from "__support__/server-mocks";
 import { setupNotificationChannelsEndpoints } from "__support__/server-mocks/pulse";
+import { mockSettings } from "__support__/settings";
 import { createMockEntitiesState } from "__support__/store";
 import {
   act,
@@ -23,9 +23,11 @@ import {
   screen,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
-import { DashboardAppConnected } from "metabase/dashboard/containers/DashboardApp/DashboardApp";
-import { BEFORE_UNLOAD_UNSAVED_MESSAGE } from "metabase/hooks/use-before-unload";
-import { checkNotNull } from "metabase/lib/types";
+import { BEFORE_UNLOAD_UNSAVED_MESSAGE } from "metabase/common/hooks/use-before-unload";
+import { DashboardApp } from "metabase/dashboard/containers/DashboardApp/DashboardApp";
+import { createMockDashboardState } from "metabase/redux/store/mocks";
+import { Route } from "metabase/router";
+import { checkNotNull } from "metabase/utils/types";
 import type { Dashboard } from "metabase-types/api";
 import {
   createMockCard,
@@ -36,7 +38,6 @@ import {
   createMockDatabase,
   createMockTable,
 } from "metabase-types/api/mocks";
-import { createMockDashboardState } from "metabase-types/store/mocks";
 
 const TEST_COLLECTION = createMockCollection();
 
@@ -91,15 +92,15 @@ async function setup({ dashboard }: Options = {}) {
     return (
       <main>
         <link rel="icon" />
-        <DashboardAppConnected {...props} />
+        <DashboardApp {...props} />
       </main>
     );
   };
 
-  const { history } = renderWithProviders(
+  const { router } = renderWithProviders(
     <>
-      <Route path="/" component={TestHome} />
-      <Route path="/dashboard/:slug" component={DashboardAppContainer} />
+      <Route path="/" element={<TestHome />} />
+      <Route path="/dashboard/:slug" element={<DashboardAppContainer />} />
     </>,
     {
       initialRoute: `/dashboard/${dashboardId}`,
@@ -109,6 +110,7 @@ async function setup({ dashboard }: Options = {}) {
         entities: createMockEntitiesState({
           databases: [TEST_DATABASE_WITH_ACTIONS],
         }),
+        settings: mockSettings({ "site-url": "http://localhost:3000" }),
       },
     },
   );
@@ -117,7 +119,7 @@ async function setup({ dashboard }: Options = {}) {
 
   return {
     dashboardId,
-    history: checkNotNull(history),
+    router: checkNotNull(router),
     mockEventListener,
   };
 }
@@ -158,16 +160,20 @@ describe("DashboardApp", () => {
     });
 
     it("does not show custom warning modal when leaving with no changes via SPA navigation", async () => {
-      const { dashboardId, history } = await setup();
+      const { dashboardId, router } = await setup();
 
-      history.push("/");
-      history.push(`/dashboard/${dashboardId}`);
+      act(() => {
+        router.navigate("/");
+        router.navigate(`/dashboard/${dashboardId}`);
+      });
 
       await waitForLoaderToBeRemoved();
 
       await userEvent.click(await screen.findByLabelText("Edit dashboard"));
 
-      history.goBack();
+      act(() => {
+        router.back();
+      });
 
       expect(
         screen.queryByTestId("leave-confirmation"),
@@ -175,11 +181,11 @@ describe("DashboardApp", () => {
     });
 
     it("shows custom warning modal when leaving with unsaved changes via SPA navigation", async () => {
-      const { dashboardId, history } = await setup();
+      const { dashboardId, router } = await setup();
 
       act(() => {
-        history.push("/");
-        history.push(`/dashboard/${dashboardId}`);
+        router.navigate("/");
+        router.navigate(`/dashboard/${dashboardId}`);
       });
 
       await waitForLoaderToBeRemoved();
@@ -190,7 +196,7 @@ describe("DashboardApp", () => {
       await userEvent.tab(); // need to click away from the input to trigger the isDirty flag
 
       act(() => {
-        history.goBack();
+        router.back();
       });
 
       expect(
@@ -248,12 +254,12 @@ describe("DashboardApp", () => {
   it("should pass dashboard_load_id to dashboard and query_metadata endpoints", async () => {
     const { dashboardId } = await setup();
 
-    const dashboardURL = fetchMock.lastUrl(
+    const dashboardURL = fetchMock.callHistory.lastCall(
       `path:/api/dashboard/${dashboardId}`,
-    );
-    const queryMetadataURL = fetchMock.lastUrl(
+    )?.url;
+    const queryMetadataURL = fetchMock.callHistory.lastCall(
       `path:/api/dashboard/${dashboardId}/query_metadata`,
-    );
+    )?.url;
 
     const dashboardSearchParams = new URLSearchParams(
       dashboardURL?.split("?")[1],
@@ -268,5 +274,15 @@ describe("DashboardApp", () => {
     expect(queryMetadataSearchParams.get("dashboard_load_id")).toEqual(
       dashboardSearchParams.get("dashboard_load_id"),
     );
+  });
+
+  it("should not allow to enter a dashboard name longer than 254 characters", async () => {
+    await setup();
+
+    const input = await screen.findByPlaceholderText("Add title");
+    await userEvent.clear(input);
+    await userEvent.paste("A".repeat(256));
+
+    expect(input).toHaveValue("A".repeat(254));
   });
 });

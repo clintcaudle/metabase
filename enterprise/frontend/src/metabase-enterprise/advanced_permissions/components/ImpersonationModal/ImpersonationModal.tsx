@@ -1,18 +1,13 @@
 import { useCallback } from "react";
-import { withRouter } from "react-router";
-import { push } from "react-router-redux";
-import { useAsyncFn, useMount } from "react-use";
+import { useMount } from "react-use";
 
 import { updateDataPermission } from "metabase/admin/permissions/permissions";
-import {
-  DataPermission,
-  DataPermissionType,
-  DataPermissionValue,
-} from "metabase/admin/permissions/types";
+import { DataPermissionType } from "metabase/admin/permissions/types";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
+import type { ModalComponentProps } from "metabase/common/components/ModalRoute";
 import { useDatabaseQuery } from "metabase/common/hooks";
-import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
-import { getParentPath } from "metabase/hoc/ModalRoute";
-import { useDispatch } from "metabase/lib/redux";
+import { useDispatch } from "metabase/redux";
+import { parseIntParam } from "metabase/urls";
 import { updateImpersonation } from "metabase-enterprise/advanced_permissions/reducer";
 import { getImpersonation } from "metabase-enterprise/advanced_permissions/selectors";
 import type {
@@ -20,23 +15,22 @@ import type {
   ImpersonationParams,
 } from "metabase-enterprise/advanced_permissions/types";
 import { getImpersonatedDatabaseId } from "metabase-enterprise/advanced_permissions/utils";
+import { useGetImpersonationQuery } from "metabase-enterprise/api";
 import { useEnterpriseSelector } from "metabase-enterprise/redux";
-import { ImpersonationApi } from "metabase-enterprise/services";
 import { fetchUserAttributes } from "metabase-enterprise/shared/reducer";
 import { getUserAttributes } from "metabase-enterprise/shared/selectors";
-import type { Impersonation, UserAttribute } from "metabase-types/api";
+import {
+  DataPermission,
+  DataPermissionValue,
+  type UserAttributeKey,
+} from "metabase-types/api";
 
 import { ImpersonationModalView } from "./ImpersonationModalView";
 
-interface ImpersonationModalProps {
-  params: ImpersonationModalParams;
-  route: {
-    path: string;
-  };
-}
-
 const parseParams = (params: ImpersonationModalParams): ImpersonationParams => {
-  const groupId = parseInt(params.groupId);
+  // NaN preserves the pre-conversion parseInt behavior for the
+  // route-guaranteed param
+  const groupId = parseIntParam(params.groupId) ?? NaN;
   const databaseId = getImpersonatedDatabaseId(params);
 
   return {
@@ -45,26 +39,10 @@ const parseParams = (params: ImpersonationModalParams): ImpersonationParams => {
   };
 };
 
-const _ImpersonationModal = ({ route, params }: ImpersonationModalProps) => {
-  const [
-    {
-      loading: isImpersonationLoading,
-      value: impersonation,
-      error: impersonationError,
-    },
-    fetchImpersonation,
-  ] = useAsyncFn(
-    async (
-      groupId: number,
-      databaseId: number,
-    ): Promise<Impersonation | undefined> =>
-      ImpersonationApi.get({
-        db_id: databaseId,
-        group_id: groupId,
-      }),
-    [],
-  );
-
+export const ImpersonationModal = ({
+  params,
+  onClose,
+}: ModalComponentProps) => {
   const { groupId, databaseId } = parseParams(params);
 
   const {
@@ -80,17 +58,22 @@ const _ImpersonationModal = ({ route, params }: ImpersonationModalProps) => {
     getImpersonation(databaseId, groupId),
   );
 
+  const {
+    data: impersonation,
+    isLoading: isImpersonationLoading,
+    error: impersonationError,
+  } = useGetImpersonationQuery(
+    { db_id: databaseId, group_id: groupId },
+    { skip: Boolean(draftImpersonation) },
+  );
+
   const selectedAttribute =
     draftImpersonation?.attribute ?? impersonation?.attribute;
 
   const dispatch = useDispatch();
 
-  const close = useCallback(() => {
-    dispatch(push(getParentPath(route, location)));
-  }, [dispatch, route]);
-
   const handleSave = useCallback(
-    (attribute: UserAttribute) => {
+    (attribute: UserAttributeKey) => {
       dispatch(
         updateDataPermission({
           groupId,
@@ -100,6 +83,7 @@ const _ImpersonationModal = ({ route, params }: ImpersonationModalProps) => {
           },
           value: DataPermissionValue.IMPERSONATED,
           entityId: { databaseId },
+          view: "group",
         }),
       );
 
@@ -113,21 +97,13 @@ const _ImpersonationModal = ({ route, params }: ImpersonationModalProps) => {
         );
       }
 
-      close();
+      onClose();
     },
-    [close, databaseId, dispatch, groupId, selectedAttribute],
+    [onClose, databaseId, dispatch, groupId, selectedAttribute],
   );
-
-  const handleCancel = useCallback(() => {
-    dispatch(push(getParentPath(route, location)));
-  }, [dispatch, route]);
 
   useMount(() => {
     dispatch(fetchUserAttributes());
-
-    if (!draftImpersonation) {
-      fetchImpersonation(groupId, databaseId);
-    }
   });
 
   const isLoading =
@@ -148,9 +124,7 @@ const _ImpersonationModal = ({ route, params }: ImpersonationModalProps) => {
       attributes={attributes}
       database={database}
       onSave={handleSave}
-      onCancel={handleCancel}
+      onCancel={onClose}
     />
   );
 };
-
-export const ImpersonationModal = withRouter(_ImpersonationModal);

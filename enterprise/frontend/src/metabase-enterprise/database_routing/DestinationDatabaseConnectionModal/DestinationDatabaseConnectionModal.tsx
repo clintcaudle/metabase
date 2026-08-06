@@ -1,36 +1,34 @@
 import { useMemo } from "react";
-import type { Route } from "react-router";
-import { push, replace } from "react-router-redux";
 import { t } from "ttag";
 
 import { DatabaseEditConnectionForm } from "metabase/admin/databases/components/DatabaseEditConnectionForm";
-import S from "metabase/admin/databases/containers/DatabaseConnectionModal.module.css";
 import { useGetDatabaseQuery, useUpdateDatabaseMutation } from "metabase/api";
+import { ExternalLink } from "metabase/common/components/ExternalLink";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { useDocsUrl } from "metabase/common/hooks";
-import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
-import ExternalLink from "metabase/core/components/ExternalLink";
-import title from "metabase/hoc/Title";
-import { useDispatch } from "metabase/lib/redux";
-import * as Urls from "metabase/lib/urls";
+import { usePageTitle } from "metabase/hooks/use-page-title";
+import { useDispatch } from "metabase/redux";
 import { addUndo } from "metabase/redux/undo";
+import { useNavigate, useParams } from "metabase/router";
 import { Flex, Icon, Modal, Text } from "metabase/ui";
+import * as Urls from "metabase/urls";
 import { useCreateDestinationDatabaseMutation } from "metabase-enterprise/api";
 import type { Database, DatabaseData } from "metabase-types/api";
 
 import { paramIdToGetQuery } from "../utils";
 
+import S from "./DestinationDatabaseConnectionModal.module.css";
 import { pickPrefillFieldsFromPrimaryDb } from "./utils";
 
-export const DestinationDatabaseConnectionModalInner = ({
-  params: { databaseId, destinationDatabaseId },
-  route,
-}: {
-  params: { databaseId: string; destinationDatabaseId?: string };
-  route: Route;
-}) => {
+export const DestinationDatabaseConnectionModal = () => {
+  const { databaseId = "", destinationDatabaseId } = useParams<{
+    databaseId: string;
+    destinationDatabaseId: string;
+  }>();
   const dispatch = useDispatch();
+  const navigate = useNavigate();
 
-  // eslint-disable-next-line no-unconditional-metabase-links-render -- Admin settings
+  // eslint-disable-next-line metabase/no-unconditional-metabase-links-render -- Admin settings
   const { url: docsUrl } = useDocsUrl("permissions/database-routing");
 
   const primaryDbReq = useGetDatabaseQuery(paramIdToGetQuery(databaseId));
@@ -59,9 +57,9 @@ export const DestinationDatabaseConnectionModalInner = ({
   const handleCloseModal = (method = "push") => {
     const dbId = parseInt(databaseId, 10);
     if (method === "push") {
-      dispatch(push(Urls.viewDatabase(dbId)));
+      navigate(Urls.viewDatabase(dbId));
     } else {
-      dispatch(replace(Urls.viewDatabase(dbId)));
+      navigate(Urls.viewDatabase(dbId), { replace: true });
     }
   };
 
@@ -95,6 +93,8 @@ export const DestinationDatabaseConnectionModalInner = ({
     handleCloseModal("replace");
   };
 
+  usePageTitle(destinationDatabase?.name || "");
+
   return (
     <Modal
       title={
@@ -111,45 +111,44 @@ export const DestinationDatabaseConnectionModalInner = ({
         body: S.modalBody,
       }}
     >
-      <LoadingAndErrorWrapper loading={isLoading} error={error}>
-        <Flex
-          py="sm"
-          px="md"
-          mb="md"
-          bg="accent-gray-light"
-          align="center"
-          justify="space-between"
-          bd="1px solid border"
-          style={{ borderRadius: ".5rem" }}
-        >
-          <Text>{t`You can also add databases programmatically via the API.`}</Text>
-          <ExternalLink
-            key="link"
-            href={docsUrl}
-            style={{ display: "flex", alignItems: "center", gap: 4 }}
+      <LoadingAndErrorWrapper loading={isLoading} error={error} noWrapper>
+        <>
+          <Flex
+            py="sm"
+            px="md"
+            mx="xl"
+            my="md"
+            bg="background_page-secondary"
+            align="center"
+            justify="space-between"
+            bd="1px solid border-neutral"
+            style={{ borderRadius: ".5rem" }}
           >
-            {t`Learn more`} <Icon name="share" aria-hidden />
-          </ExternalLink>
-        </Flex>
+            <Text>{t`You can also add databases programmatically via the API.`}</Text>
+            <ExternalLink
+              key="link"
+              href={docsUrl}
+              style={{ display: "flex", alignItems: "center", gap: 4 }}
+            >
+              {t`Learn more`} <Icon name="share" aria-hidden />
+            </ExternalLink>
+          </Flex>
 
-        <DatabaseEditConnectionForm
-          database={destinationDatabase}
-          isAttachedDWH={destinationDatabase?.is_attached_dwh ?? false}
-          handleSaveDb={handleSaveDatabase}
-          onSubmitted={handleOnSubmit}
-          onCancel={handleCloseModal}
-          route={route}
-          config={{
-            name: { isSlug: true },
-            engine: { fieldState: "hidden" },
-          }}
-          autofocusFieldName="name"
-        />
+          <DatabaseEditConnectionForm
+            database={destinationDatabase}
+            isAttachedDWH={destinationDatabase?.is_attached_dwh ?? false}
+            handleSaveDb={handleSaveDatabase}
+            onSubmitted={handleOnSubmit}
+            onCancel={handleCloseModal}
+            config={{
+              name: { isSlug: true },
+              engine: { fieldState: "hidden" },
+            }}
+            autofocusFieldName="name"
+            formLocation="admin"
+          />
+        </>
       </LoadingAndErrorWrapper>
     </Modal>
   );
 };
-
-export const DestinationDatabaseConnectionModal = title(
-  ({ database }: { database: DatabaseData }) => database && database.name,
-)(DestinationDatabaseConnectionModalInner);

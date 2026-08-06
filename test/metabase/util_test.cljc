@@ -26,7 +26,6 @@
          (u/add-period "   "))))
 
 (deftest ^:parallel url?-test
-  #_{:clj-kondo/ignore [:equals-true]}
   (are [s expected] (= expected
                        (u/url? s))
     "http://google.com"                                                                      true
@@ -72,7 +71,6 @@
        "email@metabase.com"   false)))
 
 (deftest ^:parallel state?-test
-  #_{:clj-kondo/ignore [:equals-true]}
   (are [x expected] (= expected
                        (u/state? x))
     "louisiana"            true
@@ -133,7 +131,9 @@
       (doseq [[s expected] s->expected]
         (testing (list 'u/slugify s)
           (is (= expected
-                 (u/slugify s))))))))
+                 (u/slugify s)))))))
+  (testing "non-ASCII characters are not truncated in the middle"
+    (is (= "%E5%8B%87" (u/slugify "勇士" {:max-length 10})))))
 
 (deftest ^:parallel slugify-unicode-test
   (doseq [[group s->expected]
@@ -171,7 +171,6 @@
     {}                                         [:c]              {}))
 
 (deftest ^:parallel base64-string?-test
-  #_{:clj-kondo/ignore [:equals-true]}
   (are [s expected]    (= expected
                           (u/base64-string? s))
     "ABc="         true
@@ -234,6 +233,69 @@
   (is (= {:num_cans 2, :lisp_case? {:nested_maps? true}}
          (u/deep-snake-keys {:num-cans 2, :lisp-case? {:nested-maps? true}}))))
 
+(deftest ^:parallel kebab->snake-test
+  (testing "kebab->snake converts kebab-case to snake_case"
+    (are [input expected] (= expected (u/kebab->snake input))
+      ;; Keywords
+      :kebab-case          :kebab_case
+      :multi-word-example  :multi_word_example
+      :already_snake       :already_snake
+
+      ;; Namespaced keywords
+      :namespace/kebab-key :namespace/kebab_key
+
+      ;; Strings
+      "kebab-case"         "kebab_case"
+      "multi-word-example" "multi_word_example"
+
+      ;; Preserves camelCase and mixed case
+      :camelCase           :camelCase
+      :PascalCase          :PascalCase
+      :mixedCase-with-kebab :mixedCase_with_kebab
+
+      ;; Edge cases
+      :simple              :simple
+      ""                   ""
+      nil                  nil
+      123                  123)))
+
+(deftest ^:parallel kebab->snake-keys-test
+  (testing "kebab->snake-keys converts top-level keys only"
+    (is (= {:user_id 1
+            :profile_id "abc"
+            :nested {:still-kebab-case true}}
+           (u/kebab->snake-keys {:user-id 1
+                                 :profile-id "abc"
+                                 :nested {:still-kebab-case true}})))
+    (testing "preserves camelCase keys"
+      (is (= {:userId 1
+              :profileId "abc"
+              :conversation_id "def"}
+             (u/kebab->snake-keys {:userId 1
+                                   :profileId "abc"
+                                   :conversation-id "def"}))))))
+
+(deftest ^:parallel deep-kebab->snake-keys-test
+  (testing "deep-kebab->snake-keys recursively converts all keys"
+    (is (= {:user_id 1
+            :profile_id "abc"
+            :nested {:inner_key {:deeply_nested true}}}
+           (u/deep-kebab->snake-keys {:user-id 1
+                                      :profile-id "abc"
+                                      :nested {:inner-key {:deeply-nested true}}}))))
+  (testing "preserves camelCase throughout the structure"
+    (is (= {:userId 1
+            :nested {:innerKey {:deeplyNested true
+                                :kebab_converted "yes"}}}
+           (u/deep-kebab->snake-keys {:userId 1
+                                      :nested {:innerKey {:deeplyNested true
+                                                          :kebab-converted "yes"}}}))))
+  (testing "works with vectors and other collections"
+    (is (= [{:user_id 1} {:user_id 2}]
+           (u/deep-kebab->snake-keys [{:user-id 1} {:user-id 2}])))
+    (is (= {:items [{:item_id 1 :item_name "test"}]}
+           (u/deep-kebab->snake-keys {:items [{:item-id 1 :item-name "test"}]})))))
+
 (deftest ^:parallel one-or-many-test
   (are [input expected] (= expected
                            (u/one-or-many input))
@@ -262,7 +324,7 @@
 #?(:clj
    (deftest lower-case-en-turkish-test
      ;; TODO Can we achieve something like with-locale in CLJS?
-     (mt/with-locale "tr"
+     (mt/with-locale! "tr"
        (is (= "id"
               (u/lower-case-en "ID"))))))
 
@@ -272,7 +334,7 @@
 
 #?(:clj
    (deftest upper-case-en-turkish-test
-     (mt/with-locale "tr"
+     (mt/with-locale! "tr"
        (is (= "ID"
               (u/upper-case-en "id"))))))
 
@@ -292,9 +354,20 @@
     "string" 3  "str"
     "string" 0  ""))
 
+(deftest ^:parallel strip-bom-test
+  (are [s expected] (= expected
+                       (u/strip-bom s))
+    nil                          nil
+    ""                           ""
+    "ID,Name"                    "ID,Name"
+    (str u/utf8-bom "ID,Name")   "ID,Name"
+    (str u/utf8-bom)             ""
+    ;; only a *leading* BOM is stripped
+    (str "ID" u/utf8-bom "Name") (str "ID" u/utf8-bom "Name")))
+
 #?(:clj
    (deftest capitalize-en-turkish-test
-     (mt/with-locale "tr"
+     (mt/with-locale! "tr"
        (is (= "Ibis"
               (u/capitalize-en "ibis")
               (u/capitalize-en "IBIS")
@@ -309,7 +382,6 @@
     "metabase.com"   "cam.saul+1@metabase.com"))
 
 (deftest ^:parallel email-in-domain-test
-  #_{:clj-kondo/ignore [:equals-true]}
   (are [in-domain? email domain] (= in-domain?
                                     (u/email-in-domain? email domain))
     true  "cam@metabase.com"          "metabase.com"
@@ -334,21 +406,19 @@
   (testing "nil and empty maps return empty maps"
     (is (= {} (u/normalize-map nil)))
     (is (= {} (u/normalize-map {}))))
-
   (let [exp {:kebab-key 1
              :snake-key 2
              :camel-key 3}]
     (testing "Clojure maps have their keys normalized"
       (is (= exp (u/normalize-map {:kebab-key  1 :snake_key  2 :camelKey  3})))
       (is (= exp (u/normalize-map {"kebab-key" 1 "snake_key" 2 "camelKey" 3}))))
-
     #?(:cljs
        (testing "JS objects get turned into Clojure maps"
          (is (= exp (u/normalize-map #js {"kebab-key" 1 "snake_key" 2 "camelKey" 3})))))))
 
 #?(:clj
    (deftest normalize-map-turkish-test
-     (mt/with-locale "tr"
+     (mt/with-locale! "tr"
        (is (= {:bird "Toucan"}
               (u/normalize-map {:BIRD "Toucan"}))))))
 
@@ -454,7 +524,6 @@
                         :to-compare #(dissoc % :id :god_id)})))))
 
 (deftest ^:parallel empty-or-distinct?-test
-  #_{:clj-kondo/ignore [:equals-true]}
   (are [xs expected] (= expected
                         (u/empty-or-distinct? xs))
     nil     true
@@ -468,6 +537,22 @@
     #{1}    true
     [1 2]   true
     [1 2 1] false))
+
+(deftest ^:parallel traverse-test
+  (testing "u/traverse tracks deps correctly"
+    (let [graph {:a [:b :d]
+                 :b [:c :d]
+                 :c nil
+                 :d [:e]
+                 :e nil}
+          neighbors-fn #(zipmap (get graph %) (repeat #{%}))]
+      (is (= {:a nil
+              :b #{:a}
+              :c #{:b}
+              :d #{:a :b}
+              :e #{:d}}
+             (u/traverse [:a] neighbors-fn)))
+      (is (= {} (u/traverse [] neighbors-fn))))))
 
 (deftest ^:parallel round-to-decimals-test
   (are [decimal-place expected] (= expected
@@ -570,6 +655,21 @@
         (is (= expected
                (truncate-string-to-byte-count s max-length)))))))
 
+(deftest ^:parallel index-by-test
+  (is (= {:a :a, :b :b, :c :c}
+         (into {}
+               (u/index-by identity)
+               [:a :b :c])
+         (u/index-by identity [:a :b :c])))
+  (is (= {1 {:id 1, :name "A"}
+          2 {:id 2, :name "B"}}
+         (into {}
+               (u/index-by :id)
+               [{:id 1, :name "A"}, {:id 2, :name "B"}])
+         (u/index-by :id [{:id 1, :name "A"}, {:id 2, :name "B"}])))
+  (is (= {1 4, 2 5}
+         (u/index-by first second [[1 3] [1 4] [2 5]]))))
+
 (deftest ^:parallel rconcat-test
   (is (= [2 4 6 18 16 14 12 10 8 6 4 2 0 50]
          (transduce
@@ -613,3 +713,14 @@
       (is (nil? (u/find-first-map test-maps [:a :b] 5)))
       (is (= {:a {:b 2}}
              (u/find-first-map test-maps [:a :b] 2))))))
+
+(deftest ^:parallel last-test
+  (testing "u/last works"
+    (are [res src] (= res (u/last src))
+      9      (range 10)
+      3      '(1 2 3)
+      nil    '()
+      3      [1 2 3]
+      nil    []
+      \c     "abc"
+      [:b 2] {:a 1 :b 2})))

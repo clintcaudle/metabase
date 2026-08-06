@@ -17,7 +17,7 @@ describe("admin > permissions > sandboxing > misconfiguration", () => {
     H.restore("postgres-writable");
 
     cy.signInAsAdmin();
-    H.setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
 
     H.blockUserGroupPermissions(USER_GROUPS.ALL_USERS_GROUP, WRITABLE_DB_ID);
     H.blockUserGroupPermissions(USER_GROUPS.COLLECTION_GROUP, WRITABLE_DB_ID);
@@ -41,6 +41,7 @@ describe("admin > permissions > sandboxing > misconfiguration", () => {
 
   beforeEach(() => {
     cy.signInAsAdmin();
+    // Unjustified type cast. FIXME
     H.restore("sandboxing-misconfiguration-snapshot" as any);
   });
 

@@ -1,8 +1,8 @@
 import _ from "underscore";
 
 // NOTE: this needs to be imported first due to some cyclical dependency nonsense
-import { singularize } from "metabase/lib/formatting";
-import type { NormalizedTable } from "metabase-types/api";
+import { singularize } from "metabase/utils/formatting";
+import type { Measure, NormalizedTable, Segment } from "metabase-types/api";
 
 import Question from "../Question";
 
@@ -11,18 +11,18 @@ import type Field from "./Field";
 import type ForeignKey from "./ForeignKey";
 import type Metadata from "./Metadata";
 import type Schema from "./Schema";
-import type Segment from "./Segment";
+import { getSchemaDisplayName } from "./utils/schema";
 
-interface Table
-  extends Omit<
-    NormalizedTable,
-    "db" | "schema" | "fields" | "fks" | "segments" | "metrics"
-  > {
+interface Table extends Omit<
+  NormalizedTable,
+  "db" | "schema" | "fields" | "fks" | "segments" | "measures" | "metrics"
+> {
   db?: Database;
   schema?: Schema;
   fields?: Field[];
   fks?: ForeignKey[];
   segments?: Segment[];
+  measures?: Measure[];
   metrics?: Question[];
   metadata?: Metadata;
 }
@@ -47,12 +47,6 @@ class Table {
     return this.fields ?? [];
   }
 
-  hasSchema() {
-    return (
-      (this.schema_name && this.db && this.db.getSchemas().length > 1) || false
-    );
-  }
-
   // Could be replaced with hydrated database property in selectors/metadata.js (instead / in addition to `table.db`)
   get database() {
     return this.db;
@@ -64,16 +58,17 @@ class Table {
 
   question() {
     return Question.create({
-      databaseId: this.db && this.db.id,
-      tableId: this.id,
+      DEPRECATED_RAW_MBQL_databaseId: this.db && this.db.id,
+      DEPRECATED_RAW_MBQL_tableId: this.id,
       metadata: this.metadata,
     });
   }
 
   displayName({ includeSchema }: { includeSchema?: boolean } = {}) {
     return (
-      (includeSchema && this.schema ? this.schema.displayName() + "." : "") +
-      this.display_name
+      (includeSchema && this.schema
+        ? getSchemaDisplayName(this.schema.name) + "."
+        : "") + this.display_name
     );
   }
 
@@ -108,20 +103,7 @@ class Table {
 
   connectedTables(): Table[] {
     const fks = this.fks || [];
-    return fks
-      .map((fk) => fk.origin?.table)
-      .filter((table) => table != null) as Table[];
-  }
-
-  foreignTables(): Table[] {
-    const fields = this.getFields();
-    if (!fields) {
-      return [];
-    }
-    return fields
-      .filter((field) => field.isFK() && field.fk_target_field_id)
-      .map((field) => this.metadata?.field(field.fk_target_field_id)?.table)
-      .filter(Boolean) as Table[];
+    return fks.map((fk) => fk.origin?.table).filter((table) => table != null);
   }
 
   clone() {

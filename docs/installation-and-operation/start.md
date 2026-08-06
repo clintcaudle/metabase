@@ -26,9 +26,17 @@ How to back up your Metabase data: questions, dashboards, and other application 
 
 How to safely upgrade your Metabase.
 
+## [Development instances](./development-instance.md)
+
+Try out your changes before deploying to production.
+
 ## [Serialization](./serialization.md)
 
 Export your questions, dashboards, and more as YAML files that you can check into version control.
+
+## [Metabase CLI](./metabase-cli.md)
+
+A command-line client that drives a Metabase instance over its API, on its own or through an AI agent.
 
 ## [Monitoring your Metabase](./monitoring-metabase.md)
 
@@ -50,9 +58,9 @@ We collect anonymous Metabase usage data to improve the product. We don't collec
 
 Notes on Metabase's accessibility.
 
-## [Command line commands](./commands.md)
+## [Metabase JAR commands](./commands.md)
 
-Metabase's CLI.
+Administrative commands built into the Metabase JAR.
 
 ---
 

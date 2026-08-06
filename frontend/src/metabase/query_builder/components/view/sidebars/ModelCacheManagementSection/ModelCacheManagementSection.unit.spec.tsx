@@ -1,5 +1,5 @@
+import dayjs from "dayjs";
 import fetchMock from "fetch-mock";
-import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
 
 import { createMockMetadata } from "__support__/metadata";
 import { setupModelPersistenceEndpoints } from "__support__/server-mocks/persist";
@@ -9,7 +9,7 @@ import {
   screen,
   waitFor,
 } from "__support__/ui";
-import { checkNotNull } from "metabase/lib/types";
+import { checkNotNull } from "metabase/utils/types";
 import type { ModelCacheRefreshStatus } from "metabase-types/api";
 import { getMockModelCacheInfo } from "metabase-types/api/mocks";
 import {
@@ -47,6 +47,7 @@ async function setup({
   const modelCacheInfo = getMockModelCacheInfo({
     ...cacheInfo,
     card_id: model.id(),
+    // Unjustified type cast. FIXME
     card_name: model.displayName() as string,
   });
 
@@ -96,7 +97,7 @@ describe("ModelCacheManagementSection", () => {
 
   it("displays 'persisted' state correctly", async () => {
     const { modelCacheInfo } = await setup({ state: "persisted" });
-    const expectedTimestamp = moment(modelCacheInfo.refresh_end).fromNow();
+    const expectedTimestamp = dayjs(modelCacheInfo.refresh_end).fromNow();
     expect(
       await screen.findByText(`Model last cached ${expectedTimestamp}`),
     ).toBeInTheDocument();
@@ -110,12 +111,12 @@ describe("ModelCacheManagementSection", () => {
     fireEvent.click(await screen.findByLabelText("refresh icon"));
 
     // get, post, get
-    await waitFor(() => expect(fetchMock.calls().length).toBe(3));
+    await waitFor(() => expect(fetchMock.callHistory.calls().length).toBe(3));
   });
 
   it("displays 'error' state correctly", async () => {
     const { modelCacheInfo } = await setup({ state: "error" });
-    const expectedTimestamp = moment(modelCacheInfo.refresh_end).fromNow();
+    const expectedTimestamp = dayjs(modelCacheInfo.refresh_end).fromNow();
 
     expect(
       await screen.findByText("Failed to update model cache"),
@@ -131,7 +132,7 @@ describe("ModelCacheManagementSection", () => {
     fireEvent.click(await screen.findByLabelText("refresh icon"));
 
     // get, post, get
-    await waitFor(() => expect(fetchMock.calls().length).toBe(3));
+    await waitFor(() => expect(fetchMock.callHistory.calls().length).toBe(3));
   });
 
   it("disables refresh when DB management is not available to the user", async () => {

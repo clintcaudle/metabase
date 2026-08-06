@@ -1,14 +1,11 @@
 // eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import EntityMenu from "metabase/components/EntityMenu";
-import { color } from "metabase/lib/colors";
+import { color } from "metabase/ui/utils/colors";
 
 export const CardRoot = styled.div`
   flex: 1;
   max-width: 52rem;
-  border-bottom: 1px solid var(--mb-color-border);
-  padding-bottom: 2rem;
 `;
 
 export const CardHeader = styled.div`
@@ -19,13 +16,13 @@ export const CardHeader = styled.div`
 `;
 
 export const CardTitle = styled.div`
-  color: var(--mb-color-text-dark);
+  color: var(--mb-color-text-primary);
   font-size: 1.5rem;
   font-weight: bold;
 `;
 
 export const CardDescription = styled.div`
-  color: var(--mb-color-text-dark);
+  color: var(--mb-color-text-primary);
   font-size: 0.875rem;
   line-height: 1.5rem;
   margin-bottom: 1rem;
@@ -37,16 +34,13 @@ interface CardBadgeProps {
 }
 
 export const CardBadge = styled.div<CardBadgeProps>`
-  color: ${(props) => (props.isEnabled ? color("brand") : color("danger"))};
+  color: ${(props) =>
+    props.isEnabled ? color("core-brand") : color("feedback-negative")};
   background-color: ${(props) =>
     props.isEnabled
-      ? "var(--mb-color-brand-lighter)"
-      : "var(--mb-color-bg-light)"};
+      ? "var(--mb-color-background_surface-brand-subtle)"
+      : "var(--mb-color-background_page-secondary)"};
   padding: 0.25rem 0.375rem;
   border-radius: 0.25rem;
   font-weight: bold;
-`;
-
-export const CardMenu = styled(EntityMenu)`
-  margin-left: auto;
 `;

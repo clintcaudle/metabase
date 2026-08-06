@@ -1,6 +1,5 @@
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
-import { Route } from "react-router";
 
 import { callMockEvent } from "__support__/events";
 import {
@@ -15,19 +14,23 @@ import {
 } from "__support__/ui";
 import { delay } from "__support__/utils";
 import DataPermissionsPage from "metabase/admin/permissions/pages/DataPermissionsPage/DataPermissionsPage";
-import GroupsPermissionsPage from "metabase/admin/permissions/pages/GroupDataPermissionsPage/GroupsPermissionsPage";
-import { BEFORE_UNLOAD_UNSAVED_MESSAGE } from "metabase/hooks/use-before-unload";
+import { GroupsPermissionsPage } from "metabase/admin/permissions/pages/GroupDataPermissionsPage/GroupsPermissionsPage";
+import { BEFORE_UNLOAD_UNSAVED_MESSAGE } from "metabase/common/hooks/use-before-unload";
 import { PLUGIN_ADMIN_PERMISSIONS_TABLE_ROUTES } from "metabase/plugins";
+import { Route } from "metabase/router";
 import { createMockGroup } from "metabase-types/api/mocks/group";
 import { createSampleDatabase } from "metabase-types/api/mocks/presets";
-
 const NATIVE_QUERIES_PERMISSION_INDEX = 0;
 
 const TEST_DATABASE = createSampleDatabase();
 
 const TEST_GROUPS = [
-  createMockGroup({ id: 2, name: "Administrators" }),
-  createMockGroup({ name: "All Users" }),
+  createMockGroup({ id: 2, name: "Administrators", magic_group_type: "admin" }),
+  createMockGroup({
+    id: 1,
+    name: "All internal users",
+    magic_group_type: "all-internal-users",
+  }),
 ];
 
 const setup = async ({
@@ -45,13 +48,22 @@ const setup = async ({
   const mockEventListener = jest.spyOn(window, "addEventListener");
 
   renderWithProviders(
-    <Route path="/admin/permissions/data" component={DataPermissionsPage}>
-      <Route
-        path="group(/:groupId)(/database/:databaseId)(/schema/:schemaName)"
-        component={GroupsPermissionsPage}
-      >
-        {PLUGIN_ADMIN_PERMISSIONS_TABLE_ROUTES}
-      </Route>
+    <Route path="/admin/permissions/data" element={<DataPermissionsPage />}>
+      {/*
+       * v7 cannot parse v3 optional groups, so the app spells each depth out as
+       * its own route (see GROUPS_PERMISSIONS_PATHS in permissions/routes.tsx).
+       * Mirror that here.
+       */}
+      {[
+        "group",
+        "group/:groupId",
+        "group/:groupId/database/:databaseId",
+        "group/:groupId/database/:databaseId/schema/:schemaName",
+      ].map((path) => (
+        <Route key={path} path={path} element={<GroupsPermissionsPage />}>
+          {PLUGIN_ADMIN_PERMISSIONS_TABLE_ROUTES}
+        </Route>
+      ))}
     </Route>,
     {
       withRouter: true,
@@ -82,6 +94,14 @@ describe("GroupsPermissionsPage", () => {
   });
 
   describe("rendering", () => {
+    it("should prompt to pick a group when none is selected", async () => {
+      await setup({ initialRoute: "/admin/permissions/data/group" });
+
+      expect(
+        await screen.findByText("Select a group to see its data permissions"),
+      ).toBeVisible();
+    });
+
     it("should show 'Cancel' and 'Save Changes' when user makes changes to permissions", async () => {
       await setup();
 

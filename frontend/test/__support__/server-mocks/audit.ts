@@ -1,7 +1,4 @@
-import fetchMock, {
-  type MockResponse,
-  type MockResponseFunction,
-} from "fetch-mock";
+import fetchMock, { type UserRouteConfig } from "fetch-mock";
 
 import type {
   CardId,
@@ -25,14 +22,14 @@ export const defaultAuditInfo: AuditInfo = {
 export const setupAuditInfoEndpoint = ({
   auditInfo = defaultAuditInfo,
 }: {
-  auditInfo?: AuditInfo;
+  auditInfo?: Partial<AuditInfo>;
 } = {}) => {
   fetchMock.get("path:/api/ee/audit-app/user/audit-info", auditInfo);
 };
 
 export const setupAuditUnsubscribeEndpoint = (
   userId: User["id"],
-  response?: MockResponse | MockResponseFunction,
+  response?: UserRouteConfig,
 ) => {
   fetchMock.delete(
     `path:/api/ee/audit-app/user/${userId}/subscriptions`,

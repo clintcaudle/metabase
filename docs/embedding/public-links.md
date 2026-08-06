@@ -9,13 +9,13 @@ redirect_from:
 
 > Only admins can create public links and iframes.
 
-Admins can create and share public links (URLs) for questions and dashboards. People can view them as standalone destinations (URLs) or as embedded iframes in another page or app. In both cases, the public item will display static (view-only) results of your question or dashboard, so visitors won't be able to drill-down into the underlying data on their own.
+Admins can create and share public links (URLs) for questions, dashboards, and documents. People can view them as standalone destinations (URLs) or as embedded iframes in another page or app. Public items display view-only results of your question, dashboard, or document, so visitors won't be able to drill down into the underlying data on their own.
 
 ## Create a public link for a question
 
 ![Create a public link for a question](./images/create-a-public-link.png)
 
-To create a public link for a question, admins can click on the **Sharing** icon at the top right of a question and select **Create a public link**. Copy the link and test it out by viewing the link in a private/incognito browser session.
+To create a public link for a question, admins can click on the **Share** icon at the top right of a question and select **Create a public link**. Copy the link and test it out by viewing the link in a private/incognito browser session.
 
 ## Public link to export question results in CSV, XLSX, JSON
 
@@ -23,7 +23,7 @@ This export option is only available for questions, not dashboards.
 
 To create a public link that people can use to download the results of a question:
 
-1. Click on the **Sharing** icon for the question.
+1. Click on the **Share** icon for the question.
 2. Select **Create a public link**.
 3. Click on the file format you want (below the **Public link** URL): CSV, XLSX, or JSON.
 
@@ -33,11 +33,17 @@ Open the public link in a new tab to test the download.
 
 ## Create a public link for a dashboard
 
-To share a dashboard via a public link, admins can click on the **Sharing** button in the top right menu.
+To share a dashboard via a public link, admins can click on the **Share** button in the top right menu.
 
 ![Sharing a dashboard](./images/dashboard-sharing.png)
 
-To embed a dashboard, see [static embedding](./static-embedding.md).
+To embed a dashboard, see [guest embedding](./guest-embedding.md).
+
+## Create a public link for a document
+
+To share a document via a public link, admins can click on the **Share** button in the top right menu and select **Create a public link**.
+
+Public documents are read-only: viewers cannot edit the content or add comments. For charts embedded in the document, viewers can download the results in CSV, XLSX, or JSON format using the **Download results** option in the chart menu.
 
 ## Exporting raw, unformatted question results
 
@@ -53,7 +59,7 @@ See docs for the [export format endpoint](https://www.metabase.com/docs/latest/a
 
 ## Simulating drill-through with public links
 
-Metabase's automatic [drill-through](https://www.metabase.com/learn/metabase-basics/querying-and-dashboards/questions/drill-through) won't work on public dashboards because public links don't give people access to your raw data.
+Metabase's automatic [drill-through](../questions/visualizations/drill-through.md) won't work on public dashboards because public links don't give people access to your raw data.
 
 You can simulate drill-through on a public dashboard by setting up a [custom click behavior](../dashboards/interactive.md) that sends people from one public link to another public link.
 
@@ -65,9 +71,9 @@ You can simulate drill-through on a public dashboard by setting up a [custom cli
 6. Optional: pass a filter value from the primary dashboard to the destination dashboard by adding a query parameter to the end of the destination URL:
 
 ```
-{%raw%}
+{% raw %}
 /public/dashboard/?child_filter_name={{parent_column_name}}
-{%endraw%}
+{% endraw %}
 ```
 
 For example, if you have a primary public dashboard that displays **Invoices** data, you can pass the **Plan** name (on click) to a destination public dashboard that displays **Accounts** data:
@@ -80,7 +86,7 @@ For example, if you have a primary public dashboard that displays **Invoices** d
 
 If you want to embed your question or dashboard as an iframe in a simple web page or app:
 
-1. Click on the **Sharing** icon for your question or dashboard.
+1. Click on the **Share** icon for your question or dashboard.
 2. Click **Embed**.
 3. In the bottom of the embedding popup, click on **Get embedding code**.
 4. Copy the iframe snippet Metabase generates for you.
@@ -94,7 +100,7 @@ To apply appearance or filter settings to your public embed, you can add paramet
 
 Note that it's possible to find the public link URL behind a public embed. If someone gets access to the public link URL, they can remove the parameters from the URL to view the original question or dashboard (that is, without any appearance or filter settings).
 
-If you'd like to create a secure embed that prevents people from changing filter names or values, check out [static embedding](./static-embedding.md).
+If you'd like to create a secure embed that prevents people from changing filter names or values, check out [guest embedding](./guest-embedding.md).
 
 ## Appearance parameters
 
@@ -150,12 +156,12 @@ Public sharing is enabled by default.
 
 To disable public sharing:
 
-1. Click on the **Gear** icon in the upper right.
-2. Select **Admin settings**.
+1. Click the **grid** icon in the upper right.
+2. Select **Admin**.
 3. In the **Settings** tab, select **Public sharing**.
 4. Toggle off **Public sharing**.
 
-Once toggled on, the **Public sharing** section will display Metabase questions, dashboards, and actions with active public links.
+Once toggled on, the **Public sharing** section will display Metabase questions, dashboards, documents, and actions with active public links.
 
 If you disable public sharing, then re-enable public sharing, all your previously generated public links will still work (as long as you didn't deactivate them).
 
@@ -164,7 +170,7 @@ If you disable public sharing, then re-enable public sharing, all your previousl
 ### Individual question or dashboard links and embeds
 
 1. Visit the question or dashboard.
-2. Click on **Sharing** icon.
+2. Click on the **Share** icon.
 3. Select **Public link** or **Embed**.
 4. Click **Remove public link**.
 
@@ -172,15 +178,15 @@ If you disable public sharing, then re-enable public sharing, all your previousl
 
 Admins can view and deactivate all public links for a Metabase.
 
-1. Click on the **gear** icon in the upper right.
-2. Select **Admin settings**.
+1. Click the **grid** icon in the upper right.
+2. Select **Admin**.
 3. Go to the **Settings** tab.
 4. Go to the **Public sharing** tab in the left sidebar.
 5. For each item you want to deactivate, click on the **X** to revoke its public link.
 
 ## See all publicly shared content
 
-Admins can see all publicly shared questions, dashboards, and actions in **Admin Settings > Public Sharing**.
+Admins can see all publicly shared questions, dashboards, documents, and actions in **Admin > Public Sharing**.
 
 ![See shared content](./images/see-shared-content.png)
 

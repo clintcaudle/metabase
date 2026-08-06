@@ -19,14 +19,14 @@ describe("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
 
       H.restore();
       cy.signInAsAdmin();
-      H.setTokenFeatures("all");
+      H.activateToken("pro-self-hosted");
     });
 
     it("should not show the sidebar preview when working with instance analyics (metabase#49904)", () => {
       cy.signInAsAdmin();
       H.visitQuestion(ORDERS_QUESTION_ID);
       cy.findByRole("button", { name: /Editor/ }).click();
-      cy.findByRole("button", { name: /View SQL/ }).click();
+      cy.findByLabelText("View SQL").click();
       cy.findByTestId("native-query-preview-sidebar").should("be.visible");
 
       H.openNavigationSidebar();
@@ -35,7 +35,7 @@ describe("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
       cy.findByRole("link", { name: /Question views last week/i }).click();
 
       cy.findByRole("button", { name: /Editor/ }).click();
-      cy.findByRole("button", { name: /View SQL/ }).should("not.exist");
+      cy.findByLabelText("View SQL").should("not.exist");
       cy.findByTestId("native-query-preview-sidebar").should("not.exist");
     });
 
@@ -88,8 +88,6 @@ describe("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
           expect(response.statusCode).to.eq(200);
         });
 
-        cy.button("Not now").click();
-
         cy.log("saving copied question");
 
         getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then((id) => {
@@ -112,7 +110,6 @@ describe("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
         H.modal()
           .button(/Duplicate/i)
           .should("not.exist");
-        H.modal().button("Not now").click();
 
         cy.log("saving copied dashboard");
 
@@ -232,8 +229,7 @@ describe("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
       });
 
       // it's important that we do this manually, as this will only reproduce if theres no page load
-      cy.findByTestId("app-bar").icon("gear").click();
-      H.popover().findByText("Admin settings").click();
+      H.goToAdmin();
       cy.findByLabelText("Navigation bar").findByText("Permissions").click();
       H.sidebar().findByText("Administrators").click();
       cy.findByTestId("permission-table")
@@ -257,7 +253,7 @@ describe("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
 
       H.restore();
       cy.signInAsAdmin();
-      H.setTokenFeatures("all");
+      H.activateToken("pro-self-hosted");
     });
 
     it("should not allow editing analytics content (metabase#36228)", () => {
@@ -305,7 +301,7 @@ describe("question and dashboard links", () => {
     beforeEach(() => {
       H.restore();
       cy.signInAsAdmin();
-      H.setTokenFeatures("all");
+      H.activateToken("pro-self-hosted");
     });
 
     it("should show an analytics link for questions", () => {

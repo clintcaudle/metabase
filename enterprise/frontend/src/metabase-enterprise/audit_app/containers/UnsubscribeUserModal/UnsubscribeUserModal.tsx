@@ -1,29 +1,32 @@
 import { useState } from "react";
 import { t } from "ttag";
 
-import { useGetUserQuery } from "metabase/api";
-import { ConfirmModal } from "metabase/components/ConfirmModal";
-import { LoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper";
-import { getResponseErrorMessage } from "metabase/lib/errors";
-import { useDispatch } from "metabase/lib/redux";
-import { addUndo } from "metabase/redux/undo";
+import { skipToken, useGetUserQuery } from "metabase/api";
+import { getErrorMessage } from "metabase/api/utils";
+import { ConfirmModal } from "metabase/common/components/ConfirmModal";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
+import { useToast } from "metabase/common/hooks/use-toast";
 import { Stack, Text } from "metabase/ui";
-import { AuditApi } from "metabase-enterprise/services";
+import { parseIntParam } from "metabase/urls";
+import { useUnsubscribeUserFromSubscriptionsMutation } from "metabase-enterprise/api";
 import type { User } from "metabase-types/api";
 
-interface UnsubscribeUserModal {
-  params: { userId: string };
+interface UnsubscribeUserModalProps {
+  params: { userId?: string };
   onClose: () => void;
 }
 
 export const UnsubscribeUserModal = ({
   params,
   onClose,
-}: UnsubscribeUserModal) => {
-  const userId = parseInt(params.userId, 10);
-  const { data: user, isLoading, error } = useGetUserQuery(userId);
+}: UnsubscribeUserModalProps) => {
+  const userId = parseIntParam(params.userId);
+  const { data: user, isLoading, error } = useGetUserQuery(userId ?? skipToken);
 
-  const dispatch = useDispatch();
+  const [unsubscribeUserFromSubscriptions] =
+    useUnsubscribeUserFromSubscriptionsMutation();
+
+  const [sendToast] = useToast();
 
   const [errorMessage, setErrorMessage] = useState<string>();
   const baseModalProps = {
@@ -36,12 +39,12 @@ export const UnsubscribeUserModal = ({
 
   const handleConfirmClick = async (user: User) => {
     try {
-      await AuditApi.unsubscribe_user({ id: user.id });
-      dispatch(addUndo({ message: t`Unsubscribe successful` }));
+      await unsubscribeUserFromSubscriptions(user.id).unwrap();
+      sendToast({ message: t`Unsubscribe successful` });
       onClose();
     } catch (error) {
-      const msg = getResponseErrorMessage(error);
-      setErrorMessage(msg ?? t`Unknown error encountered`);
+      const message = getErrorMessage(error, t`Unknown error encountered`);
+      setErrorMessage(message);
     }
   };
 
@@ -66,7 +69,7 @@ export const UnsubscribeUserModal = ({
             {t`This will delete any dashboard subscriptions or alerts ${user.common_name} has created, and remove them as a recipient from any other subscriptions or alerts.`}
           </Text>
           <Text>
-            {/* eslint-disable-next-line no-literal-metabase-strings -- Metabase settings */}
+            {/* eslint-disable-next-line metabase/no-literal-metabase-strings -- Metabase settings */}
             {t`This does not affect email distribution lists that are managed outside of Metabase.`}
           </Text>
         </Stack>

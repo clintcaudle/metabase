@@ -1,3 +1,5 @@
+import type { CardCreationType } from "metabase-types/api";
+
 type QuestionEventSchema = {
   event: string;
   question_id: number;
@@ -17,7 +19,7 @@ export type NewQuestionSavedEvent = ValidateEvent<{
   event: "new_question_saved";
   question_id: number;
   database_id: number | null;
-  type: "simple_question" | "custom_question" | "native_question";
+  type?: CardCreationType | null;
   method: "from_scratch" | "existing_question";
   visualization_type: string;
 }>;
@@ -65,20 +67,6 @@ export type ColumnCompareViaShortcutEvent = ValidateEvent<{
   custom_expressions_used: string[];
 }>;
 
-export type ColumnCompareViaColumnHeaderEvent = ValidateEvent<{
-  event: "column_compare_via_column_header";
-  question_id: number;
-  database_id: number | null;
-  custom_expressions_used: string[];
-}>;
-
-export type ColumnCompareViaPlusModalEvent = ValidateEvent<{
-  event: "column_compare_via_plus_modal";
-  question_id: number;
-  database_id: number | null;
-  custom_expressions_used: string[];
-}>;
-
 export type ColumnExtractViaShortcutEvent = ValidateEvent<{
   event: "column_extract_via_shortcut";
   question_id: number;
@@ -109,8 +97,6 @@ export type QuestionEvent =
   | ColumnCombineViaColumnHeaderEvent
   | ColumnCombineViaPlusModalEvent
   | ColumnCompareViaShortcutEvent
-  | ColumnCompareViaColumnHeaderEvent
-  | ColumnCompareViaPlusModalEvent
   | ColumnExtractViaShortcutEvent
   | ColumnExtractViaColumnHeaderEvent
   | ColumnExtractViaPlusModalEvent;

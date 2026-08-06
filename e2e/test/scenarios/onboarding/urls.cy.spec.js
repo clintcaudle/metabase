@@ -18,15 +18,11 @@ describe("URLs", () => {
   });
 
   describe("browse databases", () => {
-    it('should slugify database name when opening it from /browse/databases"', () => {
-      cy.visit("/browse/databases");
-      cy.findByTextEnsureVisible("Sample Database").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Sample Database");
-      cy.location("pathname").should(
-        "eq",
-        `/browse/databases/${SAMPLE_DB_ID}-sample-database`,
-      );
+    it("should still open a database from a legacy id-slug url", () => {
+      const url = `/browse/databases/${SAMPLE_DB_ID}-sample-database`;
+      cy.visit(url);
+      cy.findByTestId("browse-schemas").should("exist");
+      cy.location("pathname").should("eq", url);
     });
 
     [
@@ -44,7 +40,7 @@ describe("URLs", () => {
   describe("dashboards", () => {
     it("should slugify dashboard URLs", () => {
       cy.visit("/collection/root");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+      // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Orders in a dashboard").click();
       cy.location("pathname").should(
         "eq",
@@ -56,7 +52,7 @@ describe("URLs", () => {
   describe("questions", () => {
     it("should slugify question URLs", () => {
       cy.visit("/collection/root");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+      // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Orders").click();
       cy.location("pathname").should(
         "eq",
@@ -79,7 +75,7 @@ describe("URLs", () => {
 
     it("should slugify current user's personal collection name correctly", () => {
       cy.visit("/collection/root");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+      // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Your personal collection").click();
       cy.location("pathname").should(
         "eq",

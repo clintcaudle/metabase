@@ -1,17 +1,22 @@
 import cx from "classnames";
-import { useMemo, useState } from "react";
+import type { MouseEventHandler } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { t } from "ttag";
 
-import TippyPopover from "metabase/components/Popover/TippyPopover";
-import Button from "metabase/core/components/Button";
-import { Ellipsified } from "metabase/core/components/Ellipsified";
-import DeprecatedTooltip from "metabase/core/components/Tooltip";
-import ParameterTargetList from "metabase/parameters/components/ParameterTargetList";
+import { ParameterTargetList } from "metabase/parameters/components/ParameterTargetList";
 import type { ParameterMappingOption } from "metabase/parameters/utils/mapping-options";
-import { Box, Flex, Icon } from "metabase/ui";
+import {
+  ActionIcon,
+  Box,
+  Ellipsified,
+  Flex,
+  Icon,
+  Popover,
+  Tooltip,
+} from "metabase/ui";
 import * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
-import type { Card, ParameterTarget } from "metabase-types/api";
+import type { Card, ParameterTarget, VirtualCard } from "metabase-types/api";
 
 import S from "./DashCardParameterMapper.module.css";
 
@@ -20,11 +25,12 @@ interface DashCardCardParameterMapperButtonProps {
   isVirtual: boolean;
   isQuestion: boolean;
   question: Question | undefined;
-  card: Card;
+  card: Card | VirtualCard;
   handleChangeTarget: (target: ParameterTarget | null) => void;
   selectedMappingOption: ParameterMappingOption | undefined;
   target: ParameterTarget | null | undefined;
   mappingOptions: ParameterMappingOption[];
+  compact?: boolean;
 }
 
 export const DashCardCardParameterMapperButton = ({
@@ -37,8 +43,18 @@ export const DashCardCardParameterMapperButton = ({
   selectedMappingOption,
   target,
   mappingOptions,
+  compact,
 }: DashCardCardParameterMapperButtonProps) => {
   const [isDropdownVisible, setIsDropdownVisible] = useState(false);
+
+  const handleDisconnect: MouseEventHandler<HTMLButtonElement> = useCallback(
+    (event) => {
+      // we have a click listener on the parent
+      event.stopPropagation();
+      handleChangeTarget(null);
+    },
+    [handleChangeTarget],
+  );
 
   const hasPermissionsToMap = useMemo(() => {
     if (isVirtual) {
@@ -73,16 +89,7 @@ export const DashCardCardParameterMapperButton = ({
           buttonVariant: "invalid",
           buttonText: t`Unknown Field`,
           buttonIcon: (
-            <Button
-              icon="close"
-              iconSize={12}
-              className={S.CloseIconButton}
-              aria-label={t`Disconnect`}
-              onClick={(e) => {
-                handleChangeTarget(null);
-                e.stopPropagation();
-              }}
-            />
+            <DisconnectButton iconSize={12} onClick={handleDisconnect} />
           ),
         };
       }
@@ -101,18 +108,7 @@ export const DashCardCardParameterMapperButton = ({
           buttonVariant: "mapped",
           buttonTooltip: null,
           buttonText: formatSelected(selectedMappingOption),
-          buttonIcon: (
-            <Button
-              icon="close"
-              className={S.CloseIconButton}
-              role="button"
-              aria-label={t`Disconnect`}
-              onClick={(e) => {
-                handleChangeTarget(null);
-                e.stopPropagation();
-              }}
-            />
-          ),
+          buttonIcon: <DisconnectButton onClick={handleDisconnect} />,
         };
       }
 
@@ -128,71 +124,89 @@ export const DashCardCardParameterMapperButton = ({
       isVirtual,
       selectedMappingOption,
       target,
-      handleChangeTarget,
+      handleDisconnect,
     ]);
 
   return (
-    <DeprecatedTooltip tooltip={buttonTooltip}>
-      <TippyPopover
-        visible={isDropdownVisible && !isDisabled && hasPermissionsToMap}
-        onClickOutside={() => setIsDropdownVisible(false)}
-        placement="bottom-start"
-        content={
-          <ParameterTargetList
-            onChange={(target: ParameterTarget) => {
-              handleChangeTarget(target);
-              setIsDropdownVisible(false);
-            }}
-            target={target}
-            mappingOptions={mappingOptions}
-            selectedMappingOption={selectedMappingOption}
-          />
-        }
-      >
-        <Flex
-          className={cx(S.TargetButton, {
-            [S.disabled]: buttonVariant === "disabled",
-            [S.mapped]: buttonVariant === "mapped",
-            [S.unauthed]: buttonVariant === "unauthed",
-            [S.invalid]: buttonVariant === "invalid",
-          })}
-          align="center"
-          maw="100%"
-          justify="space-between"
-          mx="xs"
-          px="sm"
-          py="xs"
-          aria-label={buttonTooltip ?? undefined}
-          aria-haspopup="listbox"
-          aria-expanded={isDropdownVisible}
-          aria-disabled={isDisabled || !hasPermissionsToMap}
-          tabIndex={0}
-          role="button"
-          onClick={() => {
-            setIsDropdownVisible(true);
+    <Popover
+      position="bottom-start"
+      closeOnClickOutside
+      trapFocus
+      disabled={isDisabled || !hasPermissionsToMap}
+      opened={isDropdownVisible}
+      onChange={setIsDropdownVisible}
+    >
+      <Popover.Target>
+        <Tooltip label={buttonTooltip} disabled={!buttonTooltip} inline>
+          <Flex
+            component="button"
+            role="button"
+            onClick={() => setIsDropdownVisible(!isDropdownVisible)}
+            disabled={buttonVariant === "disabled"}
+            className={cx(S.TargetButton, {
+              [S.disabled]: buttonVariant === "disabled",
+              [S.mapped]: buttonVariant === "mapped",
+              [S.unauthed]: buttonVariant === "unauthed",
+              [S.invalid]: buttonVariant === "invalid",
+            })}
+            align="center"
+            maw="100%"
+            justify="space-between"
+            mx="xs"
+            px="sm"
+            py={compact ? undefined : "xs"}
+            aria-label={buttonTooltip ?? undefined}
+            aria-haspopup="listbox"
+            aria-expanded={isDropdownVisible}
+            aria-disabled={isDisabled || !hasPermissionsToMap}
+          >
+            {buttonText && (
+              <Box
+                className={S.TargetButtonText}
+                mr="sm"
+                ta="center"
+                component="span"
+              >
+                <Ellipsified>{buttonText}</Ellipsified>
+              </Box>
+            )}
+            {buttonIcon}
+          </Flex>
+        </Tooltip>
+      </Popover.Target>
+      <Popover.Dropdown style={{ boxSizing: "content-box" }}>
+        <ParameterTargetList
+          onChange={(target: ParameterTarget) => {
+            handleChangeTarget(target);
+            setIsDropdownVisible(false);
           }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              setIsDropdownVisible(true);
-            }
-          }}
-        >
-          {buttonText && (
-            <Box
-              className={S.TargetButtonText}
-              mr="sm"
-              ta="center"
-              component="span"
-            >
-              <Ellipsified>{buttonText}</Ellipsified>
-            </Box>
-          )}
-          {buttonIcon}
-        </Flex>
-      </TippyPopover>
-    </DeprecatedTooltip>
+          mappingOptions={mappingOptions}
+          selectedMappingOption={selectedMappingOption}
+        />
+      </Popover.Dropdown>
+    </Popover>
   );
 };
+
+function DisconnectButton({
+  iconSize,
+  onClick,
+}: {
+  iconSize?: number;
+  onClick: MouseEventHandler<HTMLButtonElement>;
+}) {
+  return (
+    <ActionIcon
+      variant="subtle"
+      size="sm"
+      className={S.CloseIconButton}
+      aria-label={t`Disconnect`}
+      onClick={onClick}
+    >
+      <Icon name="close" size={iconSize} />
+    </ActionIcon>
+  );
+}
 
 function formatSelected({
   name,

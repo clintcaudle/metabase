@@ -1,69 +1,26 @@
+import dayjs from "dayjs";
 import type { EChartsCoreOption } from "echarts/core";
-import { t } from "ttag";
 
-import { isNotNull } from "metabase/lib/types";
+import { isNotNull } from "metabase/utils/types";
+import { X_AXIS_DATA_KEY } from "metabase/visualizations/echarts/cartesian/constants/dataset";
+import { getDatasetKey } from "metabase/visualizations/echarts/cartesian/model/dataset";
 import type {
   BaseCartesianChartModel,
+  ChartDataset,
   DataKey,
   SeriesModel,
 } from "metabase/visualizations/echarts/cartesian/model/types";
+import { getDashboardAdjustedSettings } from "metabase/visualizations/shared/settings-adjustments";
 import type {
-  ComputedVisualizationSettings,
+  HighlightedObject,
   HoveredObject,
-  VisualizationGridSize,
 } from "metabase/visualizations/types";
+import type { RawSeries } from "metabase-types/api";
 
-const getFidelity = (gridSize?: VisualizationGridSize) => {
-  const fidelity = { x: 0, y: 0 };
-  const size = gridSize || { width: Infinity, height: Infinity };
-  if (size.width >= 5) {
-    fidelity.x = 2;
-  } else if (size.width >= 4) {
-    fidelity.x = 1;
-  }
-  if (size.height >= 5) {
-    fidelity.y = 2;
-  } else if (size.height >= 4) {
-    fidelity.y = 1;
-  }
+import { normalizeDimensionValue } from "./events";
+import type { CartesianHoveredObject } from "./types";
 
-  return fidelity;
-};
-
-export const getGridSizeAdjustedSettings = (
-  settings: ComputedVisualizationSettings,
-  gridSize?: VisualizationGridSize,
-) => {
-  const fidelity = getFidelity(gridSize);
-  const newSettings = { ...settings };
-
-  // smooth interpolation at smallest x/y fidelity
-  if (fidelity.x === 0 && fidelity.y === 0) {
-    newSettings["line.interpolate"] = "cardinal";
-  }
-
-  // no axis in < 1 fidelity
-  if (fidelity.x < 1 || fidelity.y < 1) {
-    newSettings["graph.y_axis.axis_enabled"] = false;
-  }
-
-  // no labels in < 2 fidelity
-  if (fidelity.x < 2 || fidelity.y < 2) {
-    newSettings["graph.y_axis.labels_enabled"] = false;
-  }
-
-  return newSettings;
-};
-
-export const MAX_SERIES = 100;
-
-export const validateChartModel = (chartModel: BaseCartesianChartModel) => {
-  if (chartModel.seriesModels.length > MAX_SERIES) {
-    throw new Error(
-      t`This chart type doesn't support more than ${MAX_SERIES} series of data.`,
-    );
-  }
-};
+export { getDashboardAdjustedSettings };
 
 export const getHoveredSeriesDataKey = (
   seriesModels: SeriesModel[],
@@ -95,4 +52,128 @@ export const getHoveredEChartsSeriesDataKeyAndIndex = (
   );
 
   return { hoveredSeriesDataKey, hoveredEChartsSeriesIndex };
+};
+
+export const getHoveredFromHighlighted = (
+  highlighted: HighlightedObject,
+  rawSeries: RawSeries,
+  chartModel: BaseCartesianChartModel,
+): CartesianHoveredObject | null => {
+  if (!highlighted.dimensions || rawSeries.length === 0) {
+    return null;
+  }
+
+  const cardId = highlighted.cardId ?? rawSeries[0].card.id;
+  const rawSeriesIndex = rawSeries.findIndex((s) => s.card.id === cardId);
+  const cardColumns = chartModel.cardsColumns[rawSeriesIndex];
+
+  if (!cardColumns) {
+    return null;
+  }
+
+  const metricColumn =
+    "metric" in cardColumns
+      ? cardColumns.metric.column
+      : cardColumns.metrics.length === 1
+        ? cardColumns.metrics[0].column
+        : cardColumns.metrics.find(
+            (m) => m.column.name === highlighted.columnName,
+          )?.column;
+
+  if (!metricColumn) {
+    return null;
+  }
+
+  const breakoutColumn =
+    "breakout" in cardColumns ? cardColumns.breakout.column : null;
+  const highlightedBreakoutDimension = highlighted.dimensions?.find(
+    (d) => d.columnName === breakoutColumn?.name,
+  );
+
+  if (breakoutColumn && !highlightedBreakoutDimension) {
+    return null;
+  }
+
+  const breakoutValue = highlightedBreakoutDimension?.value;
+
+  const seriesDataKey = getDatasetKey(metricColumn, cardId, breakoutValue);
+  const seriesIndex = chartModel.seriesModels.findIndex(
+    (s) => s.dataKey === seriesDataKey,
+  );
+
+  if (seriesIndex === -1) {
+    return null;
+  }
+
+  const highlightedXAxisDimension = highlighted.dimensions.find(
+    (d) => d.columnName === cardColumns.dimension.column.name,
+  );
+
+  if (!highlightedXAxisDimension) {
+    return null;
+  }
+
+  const datumIndex = chartModel.dataset.findIndex((d) => {
+    return (
+      normalizeDimensionValue(
+        cardColumns.dimension.column,
+        d[X_AXIS_DATA_KEY],
+      ) === highlightedXAxisDimension.value
+    );
+  });
+
+  if (datumIndex === -1) {
+    return null;
+  }
+
+  return {
+    index: seriesIndex,
+    datumIndex,
+    shouldShowTooltip: highlighted.shouldShowTooltip,
+  };
+};
+
+export const getDataSeriesEChartsIndices = (
+  seriesModels: SeriesModel[],
+  option: EChartsCoreOption,
+): number[] => {
+  const seriesOptions = Array.isArray(option?.series)
+    ? option.series
+    : [option?.series].filter(isNotNull);
+
+  const visibleDataKeys = new Set(
+    seriesModels.filter((series) => series.visible).map((s) => s.dataKey),
+  );
+
+  return seriesOptions.flatMap((series, index) =>
+    visibleDataKeys.has(series.id) ? [index] : [],
+  );
+};
+
+export const getClosestDatumIndex = (
+  dataset: ChartDataset,
+  date: string,
+): number => {
+  const target = dayjs.utc(date).valueOf();
+  if (Number.isNaN(target)) {
+    return -1;
+  }
+
+  return dataset.reduce(
+    (best, datum, index) => {
+      const value = datum[X_AXIS_DATA_KEY];
+      const canParse =
+        typeof value === "string" ||
+        typeof value === "number" ||
+        value instanceof Date;
+      const timestamp = canParse ? dayjs.utc(value).valueOf() : NaN;
+
+      if (Number.isNaN(timestamp)) {
+        return best;
+      }
+      const diff = Math.abs(timestamp - target);
+      return diff < best.diff ? { index, diff } : best;
+    },
+    { index: -1, diff: Infinity },
+  ).index;
 };

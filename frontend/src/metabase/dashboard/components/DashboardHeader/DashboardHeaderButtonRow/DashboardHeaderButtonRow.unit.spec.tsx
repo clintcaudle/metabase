@@ -1,25 +1,28 @@
 import userEvent from "@testing-library/user-event";
-import { Route } from "react-router";
 
 import { setupBookmarksEndpoints } from "__support__/server-mocks";
+import { setupNotificationChannelsEndpoints } from "__support__/server-mocks/pulse";
 import { createMockEntitiesState } from "__support__/store";
 import { renderWithProviders, screen, within } from "__support__/ui";
 import type { DashboardActionKey } from "metabase/dashboard/components/DashboardHeader/DashboardHeaderButtonRow/types";
-import type { IconName } from "metabase/ui";
+import { DASHBOARD_APP_ACTIONS } from "metabase/dashboard/containers/DashboardApp/DashboardApp";
+import { MockDashboardContext } from "metabase/dashboard/context/mock-context";
+import {
+  createMockDashboardState,
+  createMockStoreDashboard,
+} from "metabase/redux/store/mocks";
+import { Route } from "metabase/router";
+import type { IconName } from "metabase-types/api";
 import {
   createMockDashboard,
   createMockDashboardCard,
   createMockDatabase,
   createMockUser,
 } from "metabase-types/api/mocks";
-import {
-  createMockDashboardState,
-  createMockStoreDashboard,
-} from "metabase-types/store/mocks";
 
 import { DashboardHeaderButtonRow } from "./DashboardHeaderButtonRow";
-import { DASHBOARD_ACTION } from "./action-buttons";
 import { DASHBOARD_EDITING_ACTIONS, DASHBOARD_VIEW_ACTIONS } from "./constants";
+import { DASHBOARD_ACTION } from "./dashboard-action-keys";
 
 const DASHBOARD_EXPECTED_DATA_MAP: Record<
   DashboardActionKey,
@@ -67,15 +70,15 @@ const DASHBOARD_EXPECTED_DATA_MAP: Record<
   },
   [DASHBOARD_ACTION.DASHBOARD_SHARING]: {
     icon: "share",
-    tooltip: "Sharing",
+    tooltip: "Share",
+  },
+  [DASHBOARD_ACTION.DASHBOARD_SUBSCRIPTIONS_BUTTON]: {
+    icon: "subscription",
+    tooltip: "Subscriptions",
   },
   [DASHBOARD_ACTION.REFRESH_WIDGET]: {
     icon: "clock",
     tooltip: "Auto-refresh",
-  },
-  [DASHBOARD_ACTION.NIGHT_MODE_TOGGLE]: {
-    icon: "sun",
-    tooltip: "Daytime mode",
   },
   [DASHBOARD_ACTION.FULLSCREEN_TOGGLE]: {
     icon: "expand",
@@ -90,6 +93,10 @@ const DASHBOARD_EXPECTED_DATA_MAP: Record<
     icon: "info",
     tooltip: "More info",
   },
+  [DASHBOARD_ACTION.AUTO_REFRESH_INDICATOR]: {
+    icon: "clock",
+    tooltip: "Auto-refresh",
+  },
   [DASHBOARD_ACTION.DASHBOARD_ACTION_MENU]: {
     icon: "ellipsis",
     tooltip: "Move, trash, and more…",
@@ -98,10 +105,12 @@ const DASHBOARD_EXPECTED_DATA_MAP: Record<
     icon: "expand",
     tooltip: null,
   },
-  [DASHBOARD_ACTION.ANALYZE_DASHBOARD]: {
-    icon: "metabot",
-    tooltip: "Explain this dashboard",
+  DOWNLOAD_PDF: {
+    icon: "download",
+    tooltip: "Download as PDF",
   },
+  DASHBOARD_SUBSCRIPTIONS: {},
+  REFRESH_INDICATOR: {},
 };
 
 const setup = ({
@@ -110,20 +119,26 @@ const setup = ({
   isFullscreen = false,
   isPublic,
   isAnalyticsDashboard,
-  hasNightModeToggle = true,
-  isNightMode = false,
   isAdmin = false,
+  hasEmailSetup = true,
+  hasSlackSetup = true,
+  refreshPeriod = null,
 }: Partial<{
   isEditing: boolean;
   hasModelActionsEnabled: boolean;
   isFullscreen: boolean;
   isPublic: boolean;
   isAnalyticsDashboard: boolean;
-  hasNightModeToggle: boolean;
-  isNightMode: boolean;
   isAdmin: boolean;
+  hasEmailSetup: boolean;
+  hasSlackSetup: boolean;
+  refreshPeriod: number | null;
 }>) => {
   setupBookmarksEndpoints([]);
+  setupNotificationChannelsEndpoints({
+    email: { configured: hasEmailSetup },
+    slack: { configured: hasSlackSetup },
+  });
 
   const MOCK_DATABASE = createMockDatabase({
     settings: {
@@ -156,22 +171,24 @@ const setup = ({
   return renderWithProviders(
     <Route
       path="*"
-      component={() => (
-        <DashboardHeaderButtonRow
-          canResetFilters
-          onResetFilters={jest.fn()}
-          refreshPeriod={null}
+      element={
+        <MockDashboardContext
+          refreshPeriod={refreshPeriod}
           onRefreshPeriodChange={jest.fn()}
           setRefreshElapsedHook={jest.fn()}
           isFullscreen={isFullscreen}
           onFullscreenChange={jest.fn()}
-          hasNightModeToggle={hasNightModeToggle}
-          onNightModeChange={jest.fn()}
-          isNightMode={isNightMode}
-          isPublic={isPublic}
-          isAnalyticsDashboard={isAnalyticsDashboard}
-        />
-      )}
+          downloadsEnabled={{ pdf: false }}
+          dashboardActions={DASHBOARD_APP_ACTIONS}
+        >
+          <DashboardHeaderButtonRow
+            canResetFilters
+            onResetFilters={jest.fn()}
+            isPublic={isPublic}
+            isAnalyticsDashboard={isAnalyticsDashboard}
+          />
+        </MockDashboardContext>
+      }
     ></Route>,
     {
       storeInitialState: {
@@ -296,16 +313,14 @@ describe("DashboardHeaderButtonRow", () => {
     it("should show view-related buttons", async () => {
       setup({
         isEditing: false,
-        isNightMode: false,
         isAnalyticsDashboard: false,
-        hasNightModeToggle: true,
         isAdmin: true,
       });
       await expectButtonsToStrictMatchHeader({
         expectedButtons: [
           DASHBOARD_ACTION.EDIT_DASHBOARD,
           DASHBOARD_ACTION.DASHBOARD_SHARING,
-          DASHBOARD_ACTION.REFRESH_WIDGET,
+          DASHBOARD_ACTION.DASHBOARD_SUBSCRIPTIONS_BUTTON,
           DASHBOARD_ACTION.DASHBOARD_HEADER_ACTION_DIVIDER,
           DASHBOARD_ACTION.DASHBOARD_BOOKMARK,
           DASHBOARD_ACTION.DASHBOARD_INFO,
@@ -341,16 +356,39 @@ describe("DashboardHeaderButtonRow", () => {
       });
     });
 
-    it("should show night mode toggle when in fullscreen", async () => {
-      setup({
-        isEditing: false,
-        isFullscreen: true,
-        hasNightModeToggle: true,
-        isNightMode: true,
+    it("should not show the auto-refresh indicator when auto-refresh is off", () => {
+      setup({ isEditing: false, isAdmin: true, refreshPeriod: null });
+
+      const buttons = screen.getAllByTestId("dashboard-header-row-button");
+      const buttonKeys = buttons.map((button) =>
+        button.getAttribute("data-element-id"),
+      );
+      expect(buttonKeys).not.toContain(DASHBOARD_ACTION.AUTO_REFRESH_INDICATOR);
+    });
+
+    it("should show the auto-refresh indicator to the left of the overflow menu when auto-refresh is on", async () => {
+      setup({ isEditing: false, isAdmin: true, refreshPeriod: 60 });
+
+      await expectButtonsToStrictMatchHeader({
+        expectedButtons: [
+          DASHBOARD_ACTION.EDIT_DASHBOARD,
+          DASHBOARD_ACTION.DASHBOARD_SHARING,
+          DASHBOARD_ACTION.DASHBOARD_SUBSCRIPTIONS_BUTTON,
+          DASHBOARD_ACTION.DASHBOARD_HEADER_ACTION_DIVIDER,
+          DASHBOARD_ACTION.DASHBOARD_BOOKMARK,
+          DASHBOARD_ACTION.DASHBOARD_INFO,
+          DASHBOARD_ACTION.AUTO_REFRESH_INDICATOR,
+          DASHBOARD_ACTION.DASHBOARD_ACTION_MENU,
+        ],
+        checkLength: true,
       });
+    });
+
+    it("should show the auto-refresh indicator in fullscreen when auto-refresh is on", async () => {
+      setup({ isEditing: false, isFullscreen: true, refreshPeriod: 60 });
 
       await expectButtonsToExistInHeader({
-        expectedButtons: [DASHBOARD_ACTION.NIGHT_MODE_TOGGLE],
+        expectedButtons: [DASHBOARD_ACTION.AUTO_REFRESH_INDICATOR],
       });
     });
   });

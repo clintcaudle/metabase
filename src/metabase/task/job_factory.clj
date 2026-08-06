@@ -1,6 +1,6 @@
 (ns metabase.task.job-factory
   "Provides a job factory for our quartz scheduler. The primary purpose of the custom factory is to prevent us from mark jobs as 'ERROR' when a metabase instance
-  picks up a job by cannot find a class to instatiate it. This will occur during rolling upgrades when a newer metabase instance adds a job that an older instance
+  picks up a job by cannot find a class to instantiate it. This will occur during rolling upgrades when a newer metabase instance adds a job that an older instance
   does not have a class for."
   (:require
    [metabase.util.log :as log])
@@ -19,7 +19,7 @@
 (defn- no-op-job
   "Logs the exception and returns a no-op job."
   ^Job [e]
-  (log/error e "Failed to load a job class. Usually this means an old version of metabase tried to run a job from a newer version")
+  (log/errorf "Failed to load a job class. Usually this means an old version of metabase tried to run a job from a newer version: %s" (ex-message e))
   (->NoOpJob))
 
 (defn create
