@@ -17,6 +17,7 @@
         # Node.js and package managers
         nodejs_22  # Matches package.json requirement ">=22"
         yarn
+        bun        # Upstream switched to bun (bun.lock); pre-commit hook runs "bun run precommit"
 
         # Java and Clojure
         jdk11
