@@ -1,0 +1,53 @@
+﻿Outage & Load management real time
+Accurate measurement for report SAIDI, etc
+Electrical Layout
+        Delivery stations – transmission
+        Substations – distribution
+        Reclosers
+        Sectionalizers
+        Fuses
+        Gang operated switches – normally open and closed
+        Blade switches
+        Substation tie switches
+        Normally fed feeders – by groups but groups change based on open and close – dynamic
+        Grouping down to the fuse level – 
+                For power outage
+                For real time load
+                By phase on a feeder circuit
+        Integration into Scada
+
+
+Connectivity dynamic
+Poles
+        Size
+        Class
+        Framing with material list form engr
+        Anchors and guys
+Note: When a pole is knocked down – need to know what is needed from stores – also material on the pole – should know what is needed – what is on each truck in inventory – no delays 
+Transformers
+        Size
+        Capacity
+        Customers on transformer – group or a polygon to show all services
+        Reports to show overloading or underloading during peak periods – real time
+        How many customers on transformers
+Wire
+        Size
+        Current carrying capability – vs temp
+        By phase a,b,c
+        Balanced – using metering data and then using connected load to balance
+        
+Protection Devices
+        Breaker – transmission and distribution
+        Recloser 
+        Sectionalize
+        Fuse
+Line regulators
+        Size
+        Steps
+        Current step
+        Voltage before and after regulator 
+Street lights
+        On poles
+        Size
+        On/off 
+        Someone write a ticket and it shows up on map
